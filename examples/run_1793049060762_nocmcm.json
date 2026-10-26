@@ -1,0 +1,1307 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793049060762_nocmcm",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "clean",
+  "status": "completed",
+  "startedAt": "2026-10-26T21:11:00.786Z",
+  "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+  "experiments": [
+    {
+      "index": 1,
+      "experiment": {
+        "hypothesis": "A zero-quantity cancel_ack is recorded as a definitive cancellation: it sets cancelledAt and occupies the single confirmedCancels entry, so a later execution after that timestamp and a later genuine cancel_ack are both rejected even though nothing was cancelled or released.",
+        "expectedInvariant": "lifecycle_consistency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m1"
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m2"
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m3"
+          },
+          {
+            "op": "send",
+            "id": "m4",
+            "to": "reports",
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-zero-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 0,
+              "occurredAt": 5
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m4"
+          },
+          {
+            "op": "send",
+            "id": "m5",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r-exec1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 4,
+              "price": 100,
+              "occurredAt": 6
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m5"
+          },
+          {
+            "op": "send",
+            "id": "m6",
+            "to": "reports",
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-real-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 7
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m6"
+          }
+        ]
+      },
+      "result": {
+        "schemaVersion": 1,
+        "experiment": {
+          "hypothesis": "A zero-quantity cancel_ack is recorded as a definitive cancellation: it sets cancelledAt and occupies the single confirmedCancels entry, so a later execution after that timestamp and a later genuine cancel_ack are both rejected even though nothing was cancelled or released.",
+          "expectedInvariant": "lifecycle_consistency",
+          "steps": [
+            {
+              "op": "send",
+              "id": "m1",
+              "to": "market",
+              "payload": {
+                "type": "quote",
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m1"
+            },
+            {
+              "op": "send",
+              "id": "m2",
+              "to": "credit",
+              "payload": {
+                "type": "credit_limit",
+                "id": "c1",
+                "version": 1,
+                "limit": 100000
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m2"
+            },
+            {
+              "op": "send",
+              "id": "m3",
+              "to": "client",
+              "payload": {
+                "type": "new_order",
+                "id": "ord1",
+                "orderId": "o1",
+                "quantity": 10,
+                "quoteId": "q1"
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m3"
+            },
+            {
+              "op": "send",
+              "id": "m4",
+              "to": "reports",
+              "payload": {
+                "type": "cancel_ack",
+                "id": "r-zero-cancel",
+                "orderId": "o1",
+                "cancelledQuantity": 0,
+                "occurredAt": 5
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m4"
+            },
+            {
+              "op": "send",
+              "id": "m5",
+              "to": "reports",
+              "payload": {
+                "type": "execution",
+                "id": "r-exec1",
+                "orderId": "o1",
+                "executionId": "e1",
+                "quantity": 4,
+                "price": 100,
+                "occurredAt": 6
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m5"
+            },
+            {
+              "op": "send",
+              "id": "m6",
+              "to": "reports",
+              "payload": {
+                "type": "cancel_ack",
+                "id": "r-real-cancel",
+                "orderId": "o1",
+                "cancelledQuantity": 6,
+                "occurredAt": 7
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m6"
+            }
+          ]
+        },
+        "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+        "trace": [
+          {
+            "step": 0,
+            "time": 0,
+            "action": "send",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 1,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 2,
+            "time": 0,
+            "action": "send",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 4,
+            "time": 0,
+            "action": "send",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 5,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 6,
+            "time": 0,
+            "action": "send",
+            "messageId": "m4",
+            "businessTime": 5,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-zero-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 0,
+              "occurredAt": 5
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 7,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m4",
+            "businessTime": 5,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-zero-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 0,
+              "occurredAt": 5
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN",
+                  "cancelledAt": 5
+                }
+              }
+            }
+          },
+          {
+            "step": 8,
+            "time": 0,
+            "action": "send",
+            "messageId": "m5",
+            "businessTime": 6,
+            "payload": {
+              "type": "execution",
+              "id": "r-exec1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 4,
+              "price": 100,
+              "occurredAt": 6
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN",
+                  "cancelledAt": 5
+                }
+              }
+            }
+          },
+          {
+            "step": 9,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m5",
+            "businessTime": 6,
+            "payload": {
+              "type": "execution",
+              "id": "r-exec1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 4,
+              "price": 100,
+              "occurredAt": 6
+            },
+            "outcome": "delivered:rejected (Execution occurred after order cancellation)",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN",
+                  "cancelledAt": 5
+                }
+              }
+            }
+          },
+          {
+            "step": 10,
+            "time": 0,
+            "action": "send",
+            "messageId": "m6",
+            "businessTime": 7,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-real-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 7
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN",
+                  "cancelledAt": 5
+                }
+              }
+            }
+          },
+          {
+            "step": 11,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m6",
+            "businessTime": 7,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-real-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 7
+            },
+            "outcome": "delivered:rejected (Conflicting cancel acknowledgement for order)",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN",
+                  "cancelledAt": 5
+                }
+              }
+            }
+          }
+        ],
+        "snapshot": {
+          "target": {
+            "quote": {
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "credit": {
+              "version": 1,
+              "limit": 100000
+            },
+            "reservedCredit": 1000,
+            "usedCredit": 0,
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "quoteId": "q1",
+                "price": 100,
+                "initialQuantity": 10,
+                "remainingQuantity": 10,
+                "filledQuantity": 0,
+                "cancelledQuantity": 0,
+                "cancellationRequested": false,
+                "status": "OPEN",
+                "cancelledAt": 5
+              }
+            }
+          },
+          "venue": {
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "initialQuantity": 10,
+                "remainingQuantity": 10,
+                "filledQuantity": 0,
+                "cancelledQuantity": 0,
+                "price": 100
+              }
+            },
+            "executions": [],
+            "cancels": []
+          },
+          "logicalTime": 0
+        },
+        "violations": [],
+        "rejections": [],
+        "valid": true
+      },
+      "replayVerified": false,
+      "cleanControlPassed": false
+    },
+    {
+      "index": 3,
+      "experiment": {
+        "hypothesis": "Out-of-order delivery bug: a cancel_ack for 6 at occurredAt=10 is delivered first and deducts cancelledQuantity from remainingQuantity, so a valid execution for 6 that occurred earlier at occurredAt=5 is then rejected as exceeding the post-cancellation remainingQuantity of 4, even though executions occurring before or at cancellation must remain binding.",
+        "expectedInvariant": "venue_execution_integrity",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m1"
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m2"
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m3"
+          },
+          {
+            "op": "send",
+            "id": "m4",
+            "to": "reports",
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 10
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m4"
+          },
+          {
+            "op": "send",
+            "id": "m5",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r-exec-early",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 6,
+              "price": 100,
+              "occurredAt": 5
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m5"
+          }
+        ]
+      },
+      "result": {
+        "schemaVersion": 1,
+        "experiment": {
+          "hypothesis": "Out-of-order delivery bug: a cancel_ack for 6 at occurredAt=10 is delivered first and deducts cancelledQuantity from remainingQuantity, so a valid execution for 6 that occurred earlier at occurredAt=5 is then rejected as exceeding the post-cancellation remainingQuantity of 4, even though executions occurring before or at cancellation must remain binding.",
+          "expectedInvariant": "venue_execution_integrity",
+          "steps": [
+            {
+              "op": "send",
+              "id": "m1",
+              "to": "market",
+              "payload": {
+                "type": "quote",
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m1"
+            },
+            {
+              "op": "send",
+              "id": "m2",
+              "to": "credit",
+              "payload": {
+                "type": "credit_limit",
+                "id": "c1",
+                "version": 1,
+                "limit": 100000
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m2"
+            },
+            {
+              "op": "send",
+              "id": "m3",
+              "to": "client",
+              "payload": {
+                "type": "new_order",
+                "id": "ord1",
+                "orderId": "o1",
+                "quantity": 10,
+                "quoteId": "q1"
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m3"
+            },
+            {
+              "op": "send",
+              "id": "m4",
+              "to": "reports",
+              "payload": {
+                "type": "cancel_ack",
+                "id": "r-cancel",
+                "orderId": "o1",
+                "cancelledQuantity": 6,
+                "occurredAt": 10
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m4"
+            },
+            {
+              "op": "send",
+              "id": "m5",
+              "to": "reports",
+              "payload": {
+                "type": "execution",
+                "id": "r-exec-early",
+                "orderId": "o1",
+                "executionId": "e1",
+                "quantity": 6,
+                "price": 100,
+                "occurredAt": 5
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m5"
+            }
+          ]
+        },
+        "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+        "trace": [
+          {
+            "step": 0,
+            "time": 0,
+            "action": "send",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 1,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 2,
+            "time": 0,
+            "action": "send",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 4,
+            "time": 0,
+            "action": "send",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 5,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ord1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 6,
+            "time": 0,
+            "action": "send",
+            "messageId": "m4",
+            "businessTime": 10,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 10
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 7,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m4",
+            "businessTime": 10,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r-cancel",
+              "orderId": "o1",
+              "cancelledQuantity": 6,
+              "occurredAt": 10
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 400,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 4,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 6,
+                  "cancellationRequested": false,
+                  "status": "CANCELLED",
+                  "cancelledAt": 10
+                }
+              }
+            }
+          },
+          {
+            "step": 8,
+            "time": 0,
+            "action": "send",
+            "messageId": "m5",
+            "businessTime": 5,
+            "payload": {
+              "type": "execution",
+              "id": "r-exec-early",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 6,
+              "price": 100,
+              "occurredAt": 5
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 400,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 4,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 6,
+                  "cancellationRequested": false,
+                  "status": "CANCELLED",
+                  "cancelledAt": 10
+                }
+              }
+            }
+          },
+          {
+            "step": 9,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m5",
+            "businessTime": 5,
+            "payload": {
+              "type": "execution",
+              "id": "r-exec-early",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 6,
+              "price": 100,
+              "occurredAt": 5
+            },
+            "outcome": "delivered:rejected (Execution quantity exceeds remaining quantity)",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 400,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 4,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 6,
+                  "cancellationRequested": false,
+                  "status": "CANCELLED",
+                  "cancelledAt": 10
+                }
+              }
+            }
+          }
+        ],
+        "snapshot": {
+          "target": {
+            "quote": {
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "credit": {
+              "version": 1,
+              "limit": 100000
+            },
+            "reservedCredit": 400,
+            "usedCredit": 0,
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "quoteId": "q1",
+                "price": 100,
+                "initialQuantity": 10,
+                "remainingQuantity": 4,
+                "filledQuantity": 0,
+                "cancelledQuantity": 6,
+                "cancellationRequested": false,
+                "status": "CANCELLED",
+                "cancelledAt": 10
+              }
+            }
+          },
+          "venue": {
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "initialQuantity": 10,
+                "remainingQuantity": 10,
+                "filledQuantity": 0,
+                "cancelledQuantity": 0,
+                "price": 100
+              }
+            },
+            "executions": [],
+            "cancels": []
+          },
+          "logicalTime": 0
+        },
+        "violations": [],
+        "rejections": [],
+        "valid": true
+      },
+      "replayVerified": false,
+      "cleanControlPassed": false
+    }
+  ],
+  "findings": [],
+  "usage": {
+    "inputTokens": 38403,
+    "outputTokens": 27873,
+    "estimatedCostUsd": 0.711072
+  },
+  "errors": [
+    "Proposal rejected after 3 correction attempts: Model response was truncated due to max_tokens limit"
+  ],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1",
+    "providerConfiguration": {
+      "model": "muse-wonder-1.0",
+      "reasoningEffort": "low",
+      "temperature": 0.2,
+      "maxPromptBytes": 32768,
+      "maxOutputTokens": 4096,
+      "requestTimeoutMs": 90000
+    }
+  },
+  "stopReason": "Finite experiment bound reached without findings (does not imply correctness)",
+  "finishedAt": "2026-10-26T21:15:44.311Z"
+}

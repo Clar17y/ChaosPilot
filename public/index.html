@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChaosPilot - Negative Scenario Investigation</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-layout">
+    <header class="app-header">
+      <div class="header-left">
+        <h1 class="app-title">ChaosPilot</h1>
+        <span class="app-subtitle">Negative testing for event-driven systems</span>
+      </div>
+      <div class="header-right">
+        <div id="provenance-badge" class="provenance-badge badge-mock">
+          <span class="badge-dot"></span>
+          <span id="provenance-label">PROVENANCE: MOCK</span>
+        </div>
+        <div id="status-pill" class="status-pill status-idle">
+          <span id="status-text">IDLE</span>
+        </div>
+      </div>
+    </header>
+
+    <div id="alert-banner" class="alert-banner hidden">
+      <span id="alert-message"></span>
+      <button id="alert-close" class="btn-text">&times;</button>
+    </div>
+
+    <main class="main-content">
+      <!-- Control Panel -->
+      <section class="card control-card">
+        <h2 class="card-title">Investigation Controls</h2>
+        <div class="controls-grid">
+          <div class="control-group">
+            <label for="target-select">Target Variant</label>
+            <select id="target-select" class="form-input">
+              <option value="candidate-a" selected>Candidate A</option>
+              <option value="candidate-b">Candidate B</option>
+              <option value="candidate-c">Candidate C</option>
+              <option value="clean">Clean control</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="provider-select">Provider</label>
+            <select id="provider-select" class="form-input">
+              <option value="mock" selected>Mock (Scripted offline mock)</option>
+              <option value="meta">Meta API (Live model)</option>
+            </select>
+            <span id="meta-key-hint" class="input-hint hidden">MODEL_API_KEY required</span>
+          </div>
+
+          <div class="control-group">
+            <label for="max-experiments-input">Max Experiments</label>
+            <input type="number" id="max-experiments-input" class="form-input" min="1" max="20" value="5">
+          </div>
+
+          <div class="control-actions">
+            <button id="btn-launch" class="btn btn-primary">Launch Investigation</button>
+            <button id="btn-stop" class="btn btn-danger" disabled>Stop</button>
+          </div>
+        </div>
+
+        <div class="provenance-notice">
+          <strong>Scripted mode demonstrates the workflow.</strong> Select Meta for a live AI investigation. Saved experiments replay without a model call.
+        </div>
+      </section>
+
+      <!-- Active Run Overview -->
+      <section id="active-dashboard" class="card dashboard-card">
+        <div class="dashboard-header">
+          <h2 class="card-title">Investigation</h2>
+          <div class="dashboard-meta">
+            <span id="dash-run-id" class="meta-item">No active run</span>
+            <span id="dash-target" class="meta-item"></span>
+            <span id="dash-time" class="meta-item"></span>
+            <span id="dash-model" class="meta-item"></span>
+          </div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-box">
+            <span class="metric-label">Status</span>
+            <span id="metric-status" class="metric-value">IDLE</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Experiments</span>
+            <span id="metric-experiments" class="metric-value">0 / 0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Confirmed Findings</span>
+            <span id="metric-findings" class="metric-value highlight">0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Reported Tokens / Estimated Cost</span>
+            <span id="metric-usage" class="metric-value">0 in / 0 out ($0.00)</span>
+          </div>
+        </div>
+
+        <div class="tabs-container">
+          <div class="tabs-nav">
+            <button class="tab-btn active" data-tab="tab-findings">Findings (<span id="count-findings">0</span>)</button>
+            <button class="tab-btn" data-tab="tab-experiments">Experiments (<span id="count-experiments">0</span>)</button>
+            <button class="tab-btn" data-tab="tab-proposals">Proposals (<span id="count-proposals">0</span>)</button>
+            <button class="tab-btn" data-tab="tab-trace">Action Trace &amp; Timeline</button>
+            <button class="tab-btn" data-tab="tab-state">Order &amp; Credit Exposure</button>
+          </div>
+
+          <!-- Tab: Findings -->
+          <div id="tab-findings" class="tab-pane active">
+            <div id="findings-container" class="findings-list">
+              <div class="empty-state">No findings recorded yet. Launch an investigation to observe behavior.</div>
+            </div>
+          </div>
+
+          <!-- Tab: Experiments -->
+          <div id="tab-experiments" class="tab-pane">
+            <div id="experiments-container" class="experiments-list">
+              <div class="empty-state">No experiments executed yet.</div>
+            </div>
+          </div>
+
+          <!-- Tab: Trace -->
+          <div id="tab-proposals" class="tab-pane">
+            <p id="proposal-summary">No proposals recorded yet.</p>
+            <p id="run-notes" class="run-notes"></p>
+            <div id="proposals-container"></div>
+          </div>
+
+          <div id="tab-trace" class="tab-pane">
+            <div class="trace-header">
+              <h3 id="trace-title">Execution Trace</h3>
+              <span id="trace-exp-selector-label">Select an experiment to view trace.</span>
+            </div>
+            <div id="trace-container" class="trace-timeline">
+              <div class="empty-state">Select an experiment from the Experiments tab to inspect action steps.</div>
+            </div>
+          </div>
+
+          <!-- Tab: State -->
+          <div id="tab-state" class="tab-pane">
+            <div class="state-grid">
+              <div class="state-section">
+                <h3>Credit &amp; Gateway Accounting</h3>
+                <div id="credit-state-table" class="snapshot-table">
+                  <div class="empty-state">No snapshot state available.</div>
+                </div>
+              </div>
+              <div class="state-section">
+                <h3>Orders Tracked</h3>
+                <div id="orders-state-table" class="snapshot-table">
+                  <div class="empty-state">No orders active in snapshot.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- History & Replay Section -->
+      <section class="card history-card">
+        <div class="history-header">
+          <h2 class="card-title">Run History &amp; Replay Verification</h2>
+          <button id="btn-refresh-history" class="btn btn-secondary">Refresh History</button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Run ID</th>
+                <th>Target</th>
+                <th>Provider / Mode</th>
+                <th>Status</th>
+                <th>Experiments</th>
+                <th>Findings</th>
+                <th>Started At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody">
+              <tr>
+                <td colspan="8" class="text-center">Loading run artifacts...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Replay Result Modal / Container -->
+        <div id="replay-modal" class="replay-modal hidden">
+          <div class="replay-modal-content">
+            <div class="replay-modal-header">
+              <h3>Deterministic Replay Report</h3>
+              <button id="btn-close-replay" class="btn-text">&times;</button>
+            </div>
+            <div id="replay-report-body" class="replay-report-body">
+              <!-- Rendered via textContent -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <div class="footer-left">
+        ChaosPilot &bull; Source-aware investigation &bull; Deterministic replay
+      </div>
+      <div class="footer-right">
+        Port 4310 &bull; Local 127.0.0.1
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

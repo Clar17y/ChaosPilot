@@ -1,0 +1,33 @@
+{
+  "name": "chaospilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Source-aware investigation of negative scenarios in event-driven trading systems",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "vitest run --dir tests",
+    "dev": "npm run build && npm start",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "preinvestigate": "npm run build",
+    "investigate": "node --env-file-if-exists=.env dist/cli.js investigate",
+    "predemo": "npm run build",
+    "demo": "node --env-file-if-exists=.env dist/cli.js investigate --provider mock --target candidate-a",
+    "preevaluate": "npm run build",
+    "evaluate": "node --env-file-if-exists=.env dist/cli.js evaluate",
+    "prebenchmark": "npm run build",
+    "benchmark": "node --env-file-if-exists=.env dist/cli.js benchmark",
+    "prefreeze-benchmark": "npm run build",
+    "freeze-benchmark": "node --env-file-if-exists=.env dist/cli.js benchmark-freeze",
+    "prereplay": "npm run build",
+    "replay": "node --env-file-if-exists=.env dist/cli.js replay"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

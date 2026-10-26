@@ -1,0 +1,39 @@
+{
+  "capturedAt": "2026-10-26T22:26:41.988Z",
+  "reason": "Pre-authoring freeze: prompt, conventional generator and batch protocol are fixed before independent held-out creation. Remaining harness repairs may not alter these inputs.",
+  "files": {
+    "src/evaluation.ts": "d92d70216d50d859e3be9efae039451a99c238e3ba7a6447616371191811323a",
+    "dist/evaluation.js": "45c5978652529501bfb57e88837d35676632799d58f2811637b76aa13892c1d9",
+    "src/investigation/prompt.ts": "54ccc4d651c92fca62823ed884798b9945c1201429fbf8c55925e31343356298",
+    "dist/investigation/prompt.js": "e7e02dfd3cbbd076c60d9d4ad9bb1ece740d3147f6dd1ae310091c57b9c0bb18",
+    "docs/CONTROLLED_EVALUATION.md": "9099085e592da70255c400d61abae7f8f64c028a22b9327c726417019e065232"
+  },
+  "functions": {
+    "runBaselineTrial": "c3f9bbb0fcd129b1553cba41ca16f61e7ac60a7654de1afaf050c8e24be01683",
+    "createPrng": "fc0a80846543f111a67fe2ee606c146cbc102f63fd8b841e737a6c4bfafeed5c",
+    "generateBaselineExperiment": "84555a239b97b41c98c597e87cf10d634b3a55b611cd09ee07181075df1f123b",
+    "buildInvestigationPrompt": "519feaa3d868e6d08cbf047cc692625118764c9152e7d4ce7c81801fdcb672ce",
+    "computePromptHash": "8dac2efa56f9cddc5e7216c3d2946b21e32ed0d7c61d19dbe75a53b1fdf395ef"
+  },
+  "promptVersion": "2.0",
+  "promptTemplateHash": "c8bdb41292e538d9dac1531cb8c2bfe762da04501fcdcf96d71aaf234b3d55d6",
+  "batch": {
+    "models": [
+      "muse-wonder-1.0",
+      "muse-spark-1.3"
+    ],
+    "trials": 2,
+    "seeds": [
+      1001,
+      1002
+    ],
+    "maxExperiments": 3,
+    "maxProposalAttempts": 3,
+    "reasoning": "low",
+    "outputTokens": 4096,
+    "requestBytes": 32768,
+    "timeoutMs": 90000,
+    "temperature": 0.2,
+    "humanEffort": "unmeasured"
+  }
+}

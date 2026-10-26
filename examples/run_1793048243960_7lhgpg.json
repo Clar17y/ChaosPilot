@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793048243960_7lhgpg",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "clean",
+  "status": "failed",
+  "startedAt": "2026-10-26T20:57:23.983Z",
+  "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+  "experiments": [],
+  "findings": [],
+  "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0
+  },
+  "errors": [
+    "Provider proposal failure: Request timed out after 30000ms"
+  ],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1"
+  },
+  "stopReason": "Provider failed to propose",
+  "finishedAt": "2026-10-26T20:57:54.002Z"
+}

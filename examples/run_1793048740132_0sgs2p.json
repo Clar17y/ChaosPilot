@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793048740132_0sgs2p",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "clean",
+  "status": "cancelled",
+  "startedAt": "2026-10-26T21:05:40.161Z",
+  "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+  "experiments": [],
+  "findings": [],
+  "usage": {
+    "inputTokens": 15125,
+    "outputTokens": 24576,
+    "estimatedCostUsd": 0.55202
+  },
+  "errors": [
+    "Proposal rejected after 3 correction attempts: Model response was truncated due to max_tokens limit"
+  ],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1"
+  },
+  "finishedAt": "2026-10-26T21:10:59.385Z",
+  "stopReason": "Primary stopped the probe after three truncated proposals; local CLI process cessation verified."
+}

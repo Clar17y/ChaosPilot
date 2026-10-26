@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-26T22:35:17.303Z",
+  "baseline": {
+    "file": "src/evaluation.ts",
+    "sha256": "d92d70216d50d859e3be9efae039451a99c238e3ba7a6447616371191811323a",
+    "description": "Frozen conventional generator and PRNG implementation from src/evaluation.ts",
+    "runtimeFile": "dist/evaluation.js",
+    "runtimeSha256": "45c5978652529501bfb57e88837d35676632799d58f2811637b76aa13892c1d9",
+    "functions": {
+      "runBaselineTrial": "c3f9bbb0fcd129b1553cba41ca16f61e7ac60a7654de1afaf050c8e24be01683",
+      "createPrng": "fc0a80846543f111a67fe2ee606c146cbc102f63fd8b841e737a6c4bfafeed5c",
+      "generateBaselineExperiment": "84555a239b97b41c98c597e87cf10d634b3a55b611cd09ee07181075df1f123b"
+    }
+  },
+  "prompt": {
+    "version": "2.0",
+    "templateHash": "c8bdb41292e538d9dac1531cb8c2bfe762da04501fcdcf96d71aaf234b3d55d6",
+    "moduleFile": "dist/investigation/prompt.js",
+    "moduleSha256": "e7e02dfd3cbbd076c60d9d4ad9bb1ece740d3147f6dd1ae310091c57b9c0bb18",
+    "dynamicPromptHash": "519feaa3d868e6d08cbf047cc692625118764c9152e7d4ce7c81801fdcb672ce"
+  }
+}

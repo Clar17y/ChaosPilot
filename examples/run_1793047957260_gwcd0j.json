@@ -1,0 +1,545 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793047957260_gwcd0j",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "candidate-b",
+  "status": "completed",
+  "startedAt": "2026-10-26T20:52:37.291Z",
+  "sourceHash": "d68dd726a8eba0ccbb7ff8795f95bda003ca93e1d29e6079d8418c7ecdae5b35",
+  "experiments": [
+    {
+      "index": 1,
+      "experiment": {
+        "hypothesis": "Partial cancel_ack releases full remaining notional (remainingQuantity*price) instead of only cancelledQuantity*price, leaving reserved credit at 0 while 7 units remain unreconciled at price 100",
+        "expectedInvariant": "credit_exposure_consistency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "cred1",
+              "version": 1,
+              "limit": 1000000
+            },
+            "delay": 0
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "ordmsg1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "drain"
+          },
+          {
+            "op": "send",
+            "id": "m4",
+            "to": "reports",
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r1",
+              "orderId": "o1",
+              "cancelledQuantity": 3,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m4"
+          }
+        ]
+      },
+      "result": {
+        "schemaVersion": 1,
+        "experiment": {
+          "hypothesis": "Partial cancel_ack releases full remaining notional (remainingQuantity*price) instead of only cancelledQuantity*price, leaving reserved credit at 0 while 7 units remain unreconciled at price 100",
+          "expectedInvariant": "credit_exposure_consistency",
+          "steps": [
+            {
+              "op": "send",
+              "id": "m1",
+              "to": "credit",
+              "payload": {
+                "type": "credit_limit",
+                "id": "cred1",
+                "version": 1,
+                "limit": 1000000
+              },
+              "delay": 0
+            },
+            {
+              "op": "send",
+              "id": "m2",
+              "to": "market",
+              "payload": {
+                "type": "quote",
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "delay": 0
+            },
+            {
+              "op": "send",
+              "id": "m3",
+              "to": "client",
+              "payload": {
+                "type": "new_order",
+                "id": "ordmsg1",
+                "orderId": "o1",
+                "quantity": 10,
+                "quoteId": "q1"
+              },
+              "delay": 0
+            },
+            {
+              "op": "drain"
+            },
+            {
+              "op": "send",
+              "id": "m4",
+              "to": "reports",
+              "payload": {
+                "type": "cancel_ack",
+                "id": "r1",
+                "orderId": "o1",
+                "cancelledQuantity": 3,
+                "occurredAt": 1
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m4"
+            }
+          ]
+        },
+        "sourceHash": "d68dd726a8eba0ccbb7ff8795f95bda003ca93e1d29e6079d8418c7ecdae5b35",
+        "trace": [
+          {
+            "step": 0,
+            "time": 0,
+            "action": "send",
+            "messageId": "m1",
+            "payload": {
+              "type": "credit_limit",
+              "id": "cred1",
+              "version": 1,
+              "limit": 1000000
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 1,
+            "time": 0,
+            "action": "send",
+            "messageId": "m2",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 2,
+            "time": 0,
+            "action": "send",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ordmsg1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "drain:deliver",
+            "messageId": "m1",
+            "payload": {
+              "type": "credit_limit",
+              "id": "cred1",
+              "version": 1,
+              "limit": 1000000
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": null,
+              "credit": {
+                "version": 1,
+                "limit": 1000000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "drain:deliver",
+            "messageId": "m2",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 1000000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "drain:deliver",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "ordmsg1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 1000000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 4,
+            "time": 0,
+            "action": "send",
+            "messageId": "m4",
+            "businessTime": 1,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r1",
+              "orderId": "o1",
+              "cancelledQuantity": 3,
+              "occurredAt": 1
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 1000000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 5,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m4",
+            "businessTime": 1,
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r1",
+              "orderId": "o1",
+              "cancelledQuantity": 3,
+              "occurredAt": 1
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 1000000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 7,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 3,
+                  "cancellationRequested": false,
+                  "status": "CANCELLED",
+                  "cancelledAt": 1
+                }
+              }
+            }
+          }
+        ],
+        "snapshot": {
+          "target": {
+            "quote": {
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "credit": {
+              "version": 1,
+              "limit": 1000000
+            },
+            "reservedCredit": 0,
+            "usedCredit": 0,
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "quoteId": "q1",
+                "price": 100,
+                "initialQuantity": 10,
+                "remainingQuantity": 7,
+                "filledQuantity": 0,
+                "cancelledQuantity": 3,
+                "cancellationRequested": false,
+                "status": "CANCELLED",
+                "cancelledAt": 1
+              }
+            }
+          },
+          "venue": {
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "initialQuantity": 10,
+                "remainingQuantity": 10,
+                "filledQuantity": 0,
+                "cancelledQuantity": 0,
+                "price": 100
+              }
+            },
+            "executions": [],
+            "cancels": []
+          },
+          "logicalTime": 0
+        },
+        "violations": [
+          {
+            "id": "violation-1",
+            "invariant": "credit_exposure_consistency",
+            "message": "Target reserved credit (0) does not match expected open order reservation (700)",
+            "step": 5,
+            "evidence": {
+              "targetReservedCredit": 0,
+              "expectedReservation": 700,
+              "difference": -700
+            }
+          }
+        ],
+        "rejections": [],
+        "valid": true
+      },
+      "replayVerified": true,
+      "cleanControlPassed": true
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-1-credit_exposure_consistency",
+      "title": "Violation of credit_exposure_consistency: Target reserved credit (0) does not match expected open order reservation (700)",
+      "hypothesis": "Partial cancel_ack releases full remaining notional (remainingQuantity*price) instead of only cancelledQuantity*price, leaving reserved credit at 0 while 7 units remain unreconciled at price 100",
+      "experimentIndex": 1,
+      "violation": {
+        "id": "violation-1",
+        "invariant": "credit_exposure_consistency",
+        "message": "Target reserved credit (0) does not match expected open order reservation (700)",
+        "step": 5,
+        "evidence": {
+          "targetReservedCredit": 0,
+          "expectedReservation": 700,
+          "difference": -700
+        }
+      },
+      "sourceHash": "d68dd726a8eba0ccbb7ff8795f95bda003ca93e1d29e6079d8418c7ecdae5b35",
+      "reproduced": true,
+      "cleanControlPassed": true,
+      "replay": {
+        "hypothesis": "Partial cancel_ack releases full remaining notional (remainingQuantity*price) instead of only cancelledQuantity*price, leaving reserved credit at 0 while 7 units remain unreconciled at price 100",
+        "expectedInvariant": "credit_exposure_consistency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "cred1",
+              "version": 1,
+              "limit": 1000000
+            },
+            "delay": 0
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "ordmsg1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "drain"
+          },
+          {
+            "op": "send",
+            "id": "m4",
+            "to": "reports",
+            "payload": {
+              "type": "cancel_ack",
+              "id": "r1",
+              "orderId": "o1",
+              "cancelledQuantity": 3,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m4"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "inputTokens": 5011,
+    "outputTokens": 2314,
+    "estimatedCostUsd": 0.066324
+  },
+  "errors": [],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1"
+  },
+  "stopReason": "Verified finding confirmed",
+  "finishedAt": "2026-10-26T20:52:50.540Z"
+}

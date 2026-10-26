@@ -1,0 +1,925 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793049596825_q99sgy",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "candidate-a",
+  "status": "completed",
+  "startedAt": "2026-10-26T21:19:56.853Z",
+  "sourceHash": "cc692a33733ab368dcf75c374495405ce52cb99ff5d7fb4c9ffbd646a03dafb0",
+  "experiments": [
+    {
+      "index": 1,
+      "experiment": {
+        "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+        "expectedInvariant": "execution_idempotency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m1"
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m2"
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "om1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m3"
+          },
+          {
+            "op": "send",
+            "id": "r1",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r1"
+          },
+          {
+            "op": "send",
+            "id": "r2",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r2",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r2"
+          },
+          {
+            "op": "drain"
+          }
+        ]
+      },
+      "result": {
+        "schemaVersion": 1,
+        "experiment": {
+          "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+          "expectedInvariant": "execution_idempotency",
+          "steps": [
+            {
+              "op": "send",
+              "id": "m1",
+              "to": "market",
+              "payload": {
+                "type": "quote",
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m1"
+            },
+            {
+              "op": "send",
+              "id": "m2",
+              "to": "credit",
+              "payload": {
+                "type": "credit_limit",
+                "id": "c1",
+                "version": 1,
+                "limit": 100000
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m2"
+            },
+            {
+              "op": "send",
+              "id": "m3",
+              "to": "client",
+              "payload": {
+                "type": "new_order",
+                "id": "om1",
+                "orderId": "o1",
+                "quantity": 10,
+                "quoteId": "q1"
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "m3"
+            },
+            {
+              "op": "send",
+              "id": "r1",
+              "to": "reports",
+              "payload": {
+                "type": "execution",
+                "id": "r1",
+                "orderId": "o1",
+                "executionId": "e1",
+                "quantity": 3,
+                "price": 100,
+                "occurredAt": 1
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "r1"
+            },
+            {
+              "op": "send",
+              "id": "r2",
+              "to": "reports",
+              "payload": {
+                "type": "execution",
+                "id": "r2",
+                "orderId": "o1",
+                "executionId": "e1",
+                "quantity": 3,
+                "price": 100,
+                "occurredAt": 1
+              },
+              "delay": 0
+            },
+            {
+              "op": "deliver",
+              "messageId": "r2"
+            },
+            {
+              "op": "drain"
+            }
+          ]
+        },
+        "sourceHash": "cc692a33733ab368dcf75c374495405ce52cb99ff5d7fb4c9ffbd646a03dafb0",
+        "trace": [
+          {
+            "step": 0,
+            "time": 0,
+            "action": "send",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": null,
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 1,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m1",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 2,
+            "time": 0,
+            "action": "send",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": null,
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 3,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m2",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 4,
+            "time": 0,
+            "action": "send",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "om1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 0,
+              "usedCredit": 0,
+              "orders": {}
+            }
+          },
+          {
+            "step": 5,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "m3",
+            "payload": {
+              "type": "new_order",
+              "id": "om1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 6,
+            "time": 0,
+            "action": "send",
+            "messageId": "r1",
+            "businessTime": 1,
+            "payload": {
+              "type": "execution",
+              "id": "r1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 1000,
+              "usedCredit": 0,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 10,
+                  "filledQuantity": 0,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 7,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "r1",
+            "businessTime": 1,
+            "payload": {
+              "type": "execution",
+              "id": "r1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 700,
+              "usedCredit": 300,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 7,
+                  "filledQuantity": 3,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 8,
+            "time": 0,
+            "action": "send",
+            "messageId": "r2",
+            "businessTime": 1,
+            "payload": {
+              "type": "execution",
+              "id": "r2",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "outcome": "scheduled",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 700,
+              "usedCredit": 300,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 7,
+                  "filledQuantity": 3,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 9,
+            "time": 0,
+            "action": "deliver",
+            "messageId": "r2",
+            "businessTime": 1,
+            "payload": {
+              "type": "execution",
+              "id": "r2",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "outcome": "delivered:processed",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 400,
+              "usedCredit": 600,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 4,
+                  "filledQuantity": 6,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          },
+          {
+            "step": 10,
+            "time": 0,
+            "action": "drain",
+            "outcome": "drained:empty",
+            "state": {
+              "quote": {
+                "id": "q1",
+                "version": 1,
+                "price": 100
+              },
+              "credit": {
+                "version": 1,
+                "limit": 100000
+              },
+              "reservedCredit": 400,
+              "usedCredit": 600,
+              "orders": {
+                "o1": {
+                  "orderId": "o1",
+                  "quoteId": "q1",
+                  "price": 100,
+                  "initialQuantity": 10,
+                  "remainingQuantity": 4,
+                  "filledQuantity": 6,
+                  "cancelledQuantity": 0,
+                  "cancellationRequested": false,
+                  "status": "OPEN"
+                }
+              }
+            }
+          }
+        ],
+        "snapshot": {
+          "target": {
+            "quote": {
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "credit": {
+              "version": 1,
+              "limit": 100000
+            },
+            "reservedCredit": 400,
+            "usedCredit": 600,
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "quoteId": "q1",
+                "price": 100,
+                "initialQuantity": 10,
+                "remainingQuantity": 4,
+                "filledQuantity": 6,
+                "cancelledQuantity": 0,
+                "cancellationRequested": false,
+                "status": "OPEN"
+              }
+            }
+          },
+          "venue": {
+            "orders": {
+              "o1": {
+                "orderId": "o1",
+                "initialQuantity": 10,
+                "remainingQuantity": 10,
+                "filledQuantity": 0,
+                "cancelledQuantity": 0,
+                "price": 100
+              }
+            },
+            "executions": [],
+            "cancels": []
+          },
+          "logicalTime": 0
+        },
+        "violations": [
+          {
+            "id": "violation-1",
+            "invariant": "venue_execution_integrity",
+            "message": "Target filled quantity (6) exceeds confirmed execution quantity (3) for order o1",
+            "step": 9,
+            "orderId": "o1",
+            "evidence": {
+              "orderId": "o1",
+              "targetFilled": 6,
+              "allowedFilled": 3,
+              "venueFilled": 0,
+              "confirmedDelivered": 3
+            }
+          },
+          {
+            "id": "violation-2",
+            "invariant": "execution_idempotency",
+            "message": "Duplicate execution 'e1' for order 'o1' resulted in state mutation",
+            "step": 9,
+            "orderId": "o1",
+            "evidence": {
+              "executionId": "e1",
+              "orderId": "o1",
+              "previousFilled": 3,
+              "currentFilled": 6,
+              "previousUsedCredit": 300,
+              "currentUsedCredit": 600
+            }
+          }
+        ],
+        "rejections": [],
+        "valid": true
+      },
+      "replayVerified": true,
+      "cleanControlPassed": true
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-1-venue_execution_integrity",
+      "title": "Violation of venue_execution_integrity: Target filled quantity (6) exceeds confirmed execution quantity (3) for order o1",
+      "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+      "experimentIndex": 1,
+      "violation": {
+        "id": "violation-1",
+        "invariant": "venue_execution_integrity",
+        "message": "Target filled quantity (6) exceeds confirmed execution quantity (3) for order o1",
+        "step": 9,
+        "orderId": "o1",
+        "evidence": {
+          "orderId": "o1",
+          "targetFilled": 6,
+          "allowedFilled": 3,
+          "venueFilled": 0,
+          "confirmedDelivered": 3
+        }
+      },
+      "sourceHash": "cc692a33733ab368dcf75c374495405ce52cb99ff5d7fb4c9ffbd646a03dafb0",
+      "reproduced": true,
+      "cleanControlPassed": true,
+      "replay": {
+        "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+        "expectedInvariant": "execution_idempotency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m1"
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m2"
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "om1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m3"
+          },
+          {
+            "op": "send",
+            "id": "r1",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r1"
+          },
+          {
+            "op": "send",
+            "id": "r2",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r2",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r2"
+          },
+          {
+            "op": "drain"
+          }
+        ]
+      }
+    },
+    {
+      "id": "finding-2-execution_idempotency",
+      "title": "Violation of execution_idempotency: Duplicate execution 'e1' for order 'o1' resulted in state mutation",
+      "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+      "experimentIndex": 1,
+      "violation": {
+        "id": "violation-2",
+        "invariant": "execution_idempotency",
+        "message": "Duplicate execution 'e1' for order 'o1' resulted in state mutation",
+        "step": 9,
+        "orderId": "o1",
+        "evidence": {
+          "executionId": "e1",
+          "orderId": "o1",
+          "previousFilled": 3,
+          "currentFilled": 6,
+          "previousUsedCredit": 300,
+          "currentUsedCredit": 600
+        }
+      },
+      "sourceHash": "cc692a33733ab368dcf75c374495405ce52cb99ff5d7fb4c9ffbd646a03dafb0",
+      "reproduced": true,
+      "cleanControlPassed": true,
+      "replay": {
+        "hypothesis": "Execution handler has no executionId idempotency tracking: delivering two coherent fabricated execution reports with the same (orderId, executionId), quantity, price and occurredAt but different envelope ids will double-apply the fill, double-converting reserved to used credit and inflating filledQuantity beyond the single venue fact.",
+        "expectedInvariant": "execution_idempotency",
+        "steps": [
+          {
+            "op": "send",
+            "id": "m1",
+            "to": "market",
+            "payload": {
+              "type": "quote",
+              "id": "q1",
+              "version": 1,
+              "price": 100
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m1"
+          },
+          {
+            "op": "send",
+            "id": "m2",
+            "to": "credit",
+            "payload": {
+              "type": "credit_limit",
+              "id": "c1",
+              "version": 1,
+              "limit": 100000
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m2"
+          },
+          {
+            "op": "send",
+            "id": "m3",
+            "to": "client",
+            "payload": {
+              "type": "new_order",
+              "id": "om1",
+              "orderId": "o1",
+              "quantity": 10,
+              "quoteId": "q1"
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "m3"
+          },
+          {
+            "op": "send",
+            "id": "r1",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r1",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r1"
+          },
+          {
+            "op": "send",
+            "id": "r2",
+            "to": "reports",
+            "payload": {
+              "type": "execution",
+              "id": "r2",
+              "orderId": "o1",
+              "executionId": "e1",
+              "quantity": 3,
+              "price": 100,
+              "occurredAt": 1
+            },
+            "delay": 0
+          },
+          {
+            "op": "deliver",
+            "messageId": "r2"
+          },
+          {
+            "op": "drain"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "inputTokens": 4868,
+    "outputTokens": 872,
+    "estimatedCostUsd": 0.036912
+  },
+  "errors": [],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1",
+    "providerConfiguration": {
+      "model": "muse-wonder-1.0",
+      "reasoningEffort": "low",
+      "temperature": 0.2,
+      "maxPromptBytes": 32768,
+      "maxOutputTokens": 4096,
+      "requestTimeoutMs": 90000
+    }
+  },
+  "stopReason": "Verified finding confirmed",
+  "finishedAt": "2026-10-26T21:20:02.981Z"
+}

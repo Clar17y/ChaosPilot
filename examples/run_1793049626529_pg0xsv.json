@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "run_1793049626529_pg0xsv",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
+  "mode": "live",
+  "variant": "clean",
+  "status": "cancelled",
+  "startedAt": "2026-10-26T21:20:26.530Z",
+  "sourceHash": "7080524ace4dd8cfaa6bb7bebd2aec4afe195e9c54790b51416070692b7013d0",
+  "experiments": [],
+  "findings": [],
+  "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0
+  },
+  "errors": [],
+  "contextAudit": {
+    "sourcePaths": [
+      "credit-manager.js",
+      "decoder.js",
+      "order-engine.js"
+    ],
+    "contractHash": "ec7f719b61c6eca80e87514165e9d0dd54a73274929660036525d86b3a443fa0",
+    "promptVersion": "1.1",
+    "providerConfiguration": {
+      "model": "muse-wonder-1.0",
+      "reasoningEffort": "low",
+      "temperature": 0.2,
+      "maxPromptBytes": 32768,
+      "maxOutputTokens": 4096,
+      "requestTimeoutMs": 90000
+    }
+  },
+  "stopReason": "Investigation aborted during provider proposal",
+  "finishedAt": "2026-10-26T21:20:34.876Z"
+}
