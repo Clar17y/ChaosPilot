@@ -50,11 +50,45 @@ export function groupRunsByRevision(runs: readonly RunSummary[]): RevisionGroup[
     });
 }
 
+/** Adapters this branch's server can actually execute. Its brief validation
+ * (src/domain.ts, src/systems) only accepts 'synthetic-trading' | 'unconfigured',
+ * so inventory-reservation is deliberately NOT executable here. Do not add an
+ * adapter here until the backend can save, snapshot and run it. */
+export const INVENTORY_ADAPTER_ID = 'inventory-reservation';
+export const TRADING_ADAPTER_ID = 'synthetic-trading';
+export const ADAPTER_LABELS: Record<string, string> = {
+  'synthetic-trading': 'Synthetic trading',
+  'inventory-reservation': 'Synthetic inventory reservation (not available on this server)',
+  unconfigured: 'No adapter configured',
+};
+export function isExecutableAdapter(adapterId: string | null | undefined): boolean {
+  return adapterId === TRADING_ADAPTER_ID;
+}
+export function adapterLabel(adapterId: string | null | undefined): string {
+  return ADAPTER_LABELS[adapterId ?? ''] ?? 'No adapter configured';
+}
+/**
+ * Target choices scoped to an adapter. Only synthetic-trading is executable
+ * on this branch, so only it gets choices, from the server-reported list.
+ * Every other adapter (including inventory-reservation) gets none. A global
+ * status poll therefore cannot overwrite another system's choices.
+ */
+export function targetVariantsForAdapter(adapterId: string | null | undefined, serverVariants: readonly string[] = []): string[] {
+  if (adapterId === TRADING_ADAPTER_ID) return serverVariants.filter(v => v !== 'inventory-candidate-a');
+  return [];
+}
+export function defaultTargetVariant(variants: readonly string[]): string | null {
+  if (variants.includes('candidate-a')) return 'candidate-a';
+  return variants[0] ?? null;
+}
+
 /** Executable check availability is configuration, never coverage or a result. */
 export function executableCheckCount(adapterId: string | null | undefined, contractCheckCount: number): number {
-  if (adapterId !== 'synthetic-trading') return 0;
+  if (!isExecutableAdapter(adapterId)) return 0;
   return Math.max(0, contractCheckCount);
 }
+
+export type SnapshotLoadState = 'none' | 'loading' | 'ready' | 'error' | 'incompatible';
 
 export interface LaunchGuardState {
   isLaunchRequestPending: boolean;
@@ -64,6 +98,10 @@ export interface LaunchGuardState {
   hasUnsavedSystemEdits: boolean;
   selectedAdapterId: string | null;
   hasSelectedSystem: boolean;
+  /** Optional: when supplied, launch also requires a confirmed snapshot for the selected system. */
+  snapshotState?: SnapshotLoadState;
+  selectedVariant?: string | null;
+  allowedVariants?: readonly string[];
 }
 
 /** Returns a human reason launch is blocked, or null when launch may proceed. */
@@ -74,8 +112,88 @@ export function launchBlockedReason(state: LaunchGuardState): string | null {
   if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE RUNNING';
   if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE RUNNING';
   if (!state.hasSelectedSystem) return 'SELECT A SAVED SYSTEM PROFILE';
-  if (state.selectedAdapterId !== 'synthetic-trading') return 'RUN DISABLED: UNCONFIGURED ADAPTER';
+  if (!isExecutableAdapter(state.selectedAdapterId)) {
+    return state.selectedAdapterId === INVENTORY_ADAPTER_ID
+      ? 'RUN DISABLED: INVENTORY ADAPTER NOT AVAILABLE ON THIS SERVER'
+      : 'RUN DISABLED: UNCONFIGURED ADAPTER';
+  }
+  if (state.snapshotState !== undefined && state.snapshotState !== 'ready') {
+    if (state.snapshotState === 'loading') return 'LOADING SYSTEM CONTRACT';
+    if (state.snapshotState === 'error') return 'SYSTEM CONTRACT UNAVAILABLE';
+    return 'SYSTEM CONTRACT NOT CONFIRMED';
+  }
+  if (state.allowedVariants !== undefined) {
+    if (!state.allowedVariants.length) return 'NO TARGET AVAILABLE FOR SELECTED SYSTEM';
+    if (!state.selectedVariant || !state.allowedVariants.includes(state.selectedVariant)) {
+      return 'TARGET NOT AVAILABLE FOR SELECTED SYSTEM';
+    }
+  }
   return null;
+}
+
+export interface SystemSnapshotLike {
+  brief: { id: string; adapterId: string; revision?: number };
+  contract: { invariants?: unknown; operations?: unknown; messages?: unknown } | null;
+  hash: string;
+}
+
+export type SnapshotValidation =
+  | { ok: true; snapshot: SystemSnapshotLike }
+  | { ok: false; reason: string };
+
+export interface ExpectedSystemIdentity {
+  id: string;
+  revision?: number;
+  adapterId?: string;
+}
+
+/** Normalizes the legacy string form and the full selected-profile identity. */
+export function normalizeExpectedIdentity(
+  expected: string | ExpectedSystemIdentity,
+  revision?: number,
+  adapterId?: string,
+): ExpectedSystemIdentity {
+  if (typeof expected === 'string') return { id: expected, revision, adapterId };
+  return { id: expected.id, revision: revision ?? expected.revision, adapterId: adapterId ?? expected.adapterId };
+}
+
+/** Validates a snapshot response belongs to the requested saved system and is compatible with its adapter. */
+export function validateSystemSnapshot(
+  data: unknown,
+  expected: string | ExpectedSystemIdentity,
+  expectedRevision?: number,
+  expectedAdapterId?: string,
+): SnapshotValidation {
+  const want = normalizeExpectedIdentity(expected, expectedRevision, expectedAdapterId);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, reason: 'invalid snapshot response' };
+  const s = data as Record<string, unknown>;
+  const brief = s.brief as Record<string, unknown> | undefined;
+  if (!brief || typeof brief !== 'object' || brief.id !== want.id) return { ok: false, reason: 'snapshot system mismatch' };
+  if (want.adapterId !== undefined && brief.adapterId !== want.adapterId) return { ok: false, reason: 'snapshot adapter mismatch' };
+  if (want.revision !== undefined && brief.revision !== want.revision) return { ok: false, reason: 'snapshot revision mismatch' };
+  if (typeof s.hash !== 'string' || !s.hash) return { ok: false, reason: 'snapshot hash missing' };
+  const adapterId = typeof brief.adapterId === 'string' ? brief.adapterId : '';
+  const contract = (s.contract ?? null) as SystemSnapshotLike['contract'];
+  if (!isExecutableAdapter(adapterId)) {
+    return contract === null ? { ok: true, snapshot: data as SystemSnapshotLike } : { ok: false, reason: 'unconfigured system has a contract' };
+  }
+  if (!contract || typeof contract !== 'object') return { ok: false, reason: 'executable system contract missing' };
+  if (!Array.isArray(contract.invariants) || !Array.isArray(contract.operations) || !Array.isArray(contract.messages)) {
+    return { ok: false, reason: 'snapshot contract shape invalid' };
+  }
+  return { ok: true, snapshot: data as SystemSnapshotLike };
+}
+
+/** Checks are visible only for an executable adapter with a ready snapshot for the clean saved selection. */
+export function contractChecksVisible(state: {
+  effectiveAdapterId: string | null | undefined;
+  snapshotState?: SnapshotLoadState;
+  isDraftMode: boolean;
+  hasUnsavedSystemEdits: boolean;
+}): boolean {
+  if (state.isDraftMode || state.hasUnsavedSystemEdits) return false;
+  if (!isExecutableAdapter(state.effectiveAdapterId)) return false;
+  return state.snapshotState === undefined || state.snapshotState === 'ready';
 }
 
 /** A stopped, failed or still-running run is never described as a clean pass. */
