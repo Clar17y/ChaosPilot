@@ -25,6 +25,14 @@
   npm run worktree:teardown -- <name>
   ```
 
+  ```powershell
+  .\scripts\setup-worktree.ps1 <name> [-Base <local-ref>] [-NoInstall]
+  .\scripts\teardown-worktree.ps1 <name>
+  ```
+
+  A leading `codex/` prefix on `<name>` is accepted. There is no prompt or
+  `--force` teardown option.
+
 - Setup uses `codex/<name>` and the sibling `<primary>-worktrees/<name>` path.
   Select the base appropriate to the task; the default is local `main`, with
   no fetch or pull. Uncommitted changes are not copied. Do not silently start
@@ -44,16 +52,25 @@
   cleanup; never force removal. Check for other tasks' changes before handoff.
 - Only tear down a worktree when it is no longer needed. Stop its agents and
   dev servers first, ensure no terminal is inside it, and run teardown from the
-  main checkout using the matching helper or app lifecycle tool. If removal
+  main checkout using the matching helper or app lifecycle tool. The CLI is not
+  containment against concurrent writers.
+  Clean script-managed teardown first copies ignored local data (`.env`,
+  `runs/`, `.llm-output/`, logs) byte-for-byte to a unique retained backup under
+  the sibling `<primary>-worktree-backups/` and reports its location; only root
+  `node_modules/`, `dist/` and `coverage/` are disposable. If backup or removal
   refuses, preserve the checkout and report why; do not bypass it with forced
-  removal, recursive deletion, reset, clean or prune. The ordinary helper retains
-  branches and commits.
+  removal, recursive deletion, reset, clean or prune. The ordinary helper
+  retains branches and commits.
 
 ## Local configuration and evidence
 
-- Worktrees have separate dependencies, `.env`, `runs/` and live-budget ledgers.
-  Do not automatically copy credentials, ledgers, logs or investigation evidence.
-  Give parallel dev servers distinct `CHAOSPILOT_PORT` values.
+- Setup automatically copies the primary checkout's `.env` byte-for-byte when
+  present (never printed, never overwriting an existing destination `.env`);
+  if absent it continues with a clear message. Worktrees otherwise have
+  separate dependencies, `runs/` and live-budget ledgers: setup does not copy
+  ledgers, logs or investigation evidence, and each worktree's live-model budget
+  ledger remains separate by default. Give parallel dev servers distinct
+  `CHAOSPILOT_PORT` values.
 - Use the mock provider for development unless live execution and its budget are
   explicitly authorized and coordinated across checkouts. Never expose keys or
   switch to paid billing as a fallback. Mock results are not AI discovery evidence.

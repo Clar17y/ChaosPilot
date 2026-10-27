@@ -57,7 +57,12 @@ npm run worktree:list
 npm run worktree:teardown -- <name>
 ```
 
-Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/<name>` branch, with separate dependencies, configuration and `runs/`. Use a distinct `CHAOSPILOT_PORT` per dev server, and the mock provider unless live credentials/budget are explicitly coordinated — live-budget ledgers are separate per checkout. Teardown is conservative and refuses dirty or ignored local data.
+```powershell
+.\scripts\setup-worktree.ps1 <name> [-Base <local-ref>] [-NoInstall]
+.\scripts\teardown-worktree.ps1 <name>
+```
+
+Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/<name>` branch (a leading `codex/` on the name is accepted), with separate dependencies and `runs/`. Setup copies the primary checkout's `.env` byte-for-byte when present (never printed or overwritten at the destination); otherwise it continues with a message. Use a distinct `CHAOSPILOT_PORT` per dev server, and the mock provider unless live credentials and total budget are explicitly coordinated — live-budget ledgers remain separate per checkout by default. Clean teardown first backs up ignored local data to a unique retained directory under `<repo>-worktree-backups/` and reports it; it still refuses dirty, locked, detached, external or unsafe targets, and always retains the branch.
 
 [AGENTS.md](AGENTS.md) makes this the default implementation workflow for coding agents. Keep the parent chat/session anchored in the main checkout (or its existing higher-level workspace), and create temporary worktrees with these scripts. Run task edits and commands in the worktree using explicit paths and per-command working directories; do not move the parent chat into it unless the user explicitly requests that. Run teardown from the main checkout after task processes stop.
 
