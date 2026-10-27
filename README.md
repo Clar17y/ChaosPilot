@@ -31,7 +31,7 @@ New browser and CLI investigations save an immutable brief, revision, contract a
 
 The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable prototype](docs/design/astra/prototype.html) guided this integration. The prototype's sample investigation data is illustrative; the application uses persisted records and real execution/replay APIs. Fields outside the saved brief schema remain design proposals.
 
-The integrated application and development tooling pass 416 tests in 25 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
+The integrated application and development tooling pass 418 tests in 25 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
 
 ## Live Meta configuration
 

@@ -179,18 +179,20 @@ function validateBase(base: string): void {
 async function setup(args: string[]): Promise<void> {
   const { name, base, noInstall } = parseSetupArgs(args);
   const effectiveBase = base ?? "main";
-  validateBase(effectiveBase);
   const { primary, root, entries } = await resolveContext();
   const branch = `codex/${name}`;
   const target = path.join(root, name);
 
   assertRootSafeForCreate(root);
-  // Bad input must fail before any mutation.
-  const baseCheck = await gitCode(["rev-parse", "--verify", "--quiet", `${effectiveBase}^{commit}`], primary);
-  if (baseCheck !== 0) throw new CliError(`Base ref "${effectiveBase}" does not resolve to a local commit. No fetch was attempted.`);
   const branchExists = (await gitCode(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], primary)) === 0;
   if (branchExists && base !== undefined) {
     throw new CliError(`Branch ${branch} already exists, so --base would be ignored. Omit --base to reuse it.`);
+  }
+  // Only a new branch uses the base; reject bad input before any mutation.
+  if (!branchExists) {
+    validateBase(effectiveBase);
+    const baseCheck = await gitCode(["rev-parse", "--verify", "--quiet", `${effectiveBase}^{commit}`], primary);
+    if (baseCheck !== 0) throw new CliError(`Base ref "${effectiveBase}" does not resolve to a local commit. No fetch was attempted.`);
   }
   if (lstatIfExists(target) || findEntry(entries, target)) {
     throw new CliError(`Target already exists or is registered: ${target}`);

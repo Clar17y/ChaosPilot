@@ -29,12 +29,12 @@ function git(args: string[], cwd: string): string {
   return r.stdout;
 }
 
-function makeRepo(): { tmp: string; primary: string; root: string } {
+function makeRepo(initialBranch = "main"): { tmp: string; primary: string; root: string } {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "chaospilot-wt-"));
   scratchRoots.push(tmp);
   const primary = path.join(tmp, "primary repo"); // spaces in paths, deliberately
   fs.mkdirSync(primary, { recursive: true });
-  git(["init", "-b", "main"], primary);
+  git(["init", "-b", initialBranch], primary);
   git(["config", "user.email", "fixture@example.invalid"], primary);
   git(["config", "user.name", "Fixture"], primary);
   git(["config", "commit.gpgsign", "false"], primary);
@@ -123,6 +123,36 @@ describe("worktrees CLI", () => {
     expect(bad.status).not.toBe(0);
     expect(fs.existsSync(path.join(root, "delta"))).toBe(false);
     expect(spawnSync("git", ["show-ref", "--verify", "refs/heads/codex/delta"], { cwd: primary }).status).not.toBe(0);
+  });
+
+  it("reuses a retained branch without a local main and validates bases only for new branches", () => {
+    const { primary, root } = makeRepo("release");
+    const target = path.join(root, "custom");
+    const created = runCli(["setup", "custom", "--base", "release", "--no-install"], primary);
+    expect(created.status, created.stderr).toBe(0);
+    fs.writeFileSync(path.join(target, "local.txt"), "retained work\n");
+    git(["add", "local.txt"], target);
+    git(["commit", "-m", "local work"], target);
+    const retainedCommit = git(["rev-parse", "HEAD"], target).trim();
+    expect(runCli(["teardown", "custom"], primary).status).toBe(0);
+
+    const explicitBase = runCli(["setup", "custom", "--base", "release", "--no-install"], primary);
+    expect(explicitBase.status).not.toBe(0);
+    expect(explicitBase.stderr).toContain("--base would be ignored");
+    expect(fs.existsSync(target)).toBe(false);
+
+    const missingDefault = runCli(["setup", "fresh", "--no-install"], primary);
+    expect(missingDefault.status).not.toBe(0);
+    expect(missingDefault.stderr).toContain('Base ref "main"');
+    expect(fs.existsSync(path.join(root, "fresh"))).toBe(false);
+    expect(git(["for-each-ref", "--format=%(refname)", "refs/heads/codex/fresh"], primary)).toBe("");
+
+    const reused = runCli(["setup", "custom", "--no-install"], primary);
+    expect(reused.status, reused.stderr).toBe(0);
+    expect(reused.stdout).toContain("Reused existing branch codex/custom");
+    expect(git(["rev-parse", "HEAD"], target).trim()).toBe(retainedCommit);
+    expect(fs.readFileSync(path.join(target, "local.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("retained work\n");
+    expect(git(["for-each-ref", "--format=%(refname)", "refs/heads/main"], primary)).toBe("");
   });
 
   it("resolves the same managed root when invoked from a linked checkout", () => {
@@ -369,9 +399,9 @@ describe("worktrees CLI", () => {
     expect(runCli(["teardown", "fakebad"], primary).status).toBe(0);
   });
 
-  it("refuses to reuse a branch checked out in an external worktree", () => {
-    const { tmp, primary, root } = makeRepo();
-    expect(runCli(["setup", "shared", "--no-install"], primary).status).toBe(0);
+  it.each(["main", "release"])("refuses to reuse a branch checked out in an external worktree (%s primary)", (initialBranch) => {
+    const { tmp, primary, root } = makeRepo(initialBranch);
+    expect(runCli(["setup", "shared", "--base", initialBranch, "--no-install"], primary).status).toBe(0);
     expect(runCli(["teardown", "shared"], primary).status).toBe(0);
     const external = path.join(tmp, "elsewhere-checkout");
     git(["worktree", "add", external, "codex/shared"], primary);

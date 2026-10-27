@@ -43,10 +43,11 @@ archive/restore flow for those.
 - If `codex/<name>` already exists and is not checked out elsewhere, it is
   reused **without reset**, and the output says so. Passing `--base` with an
   existing branch is an error rather than silently ignored. Local commits on
-  the branch are therefore kept across setup/teardown cycles.
-- Fails if the target already exists (including a dangling link) or is registered, the branch is checked
-  out elsewhere, the base does not resolve locally, or the managed root is
-  unsafe (for example a symlink).
+  the branch are therefore kept across setup/teardown cycles. Reuse needs no
+  base ref, so it also works when the repository has no local `main` branch.
+- Fails if the target already exists (including a dangling link) or is
+  registered, the branch is checked out elsewhere, a new branch's base does
+  not resolve locally, or the managed root is unsafe (for example a symlink).
 - Never copies or overwrites uncommitted files, `.env`, `runs/`, ledgers or
   logs from the current checkout. A fresh worktree starts from committed
   content only.
