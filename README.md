@@ -31,7 +31,7 @@ New browser and CLI investigations save an immutable brief, revision, contract a
 
 The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable prototype](docs/design/astra/prototype.html) guided this integration. The prototype's sample investigation data is illustrative; the application uses persisted records and real execution/replay APIs. Fields outside the saved brief schema remain design proposals.
 
-The integrated application passes 401 tests in 24 files, the TypeScript check and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
+The integrated application and development tooling pass 418 tests in 25 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
 
 ## Live Meta configuration
 
@@ -46,6 +46,20 @@ The default request deadline is 90 seconds, configurable with `CHAOSPILOT_REQUES
 Meta's account spending alert is **not a hard billing cap**. Check your remaining promotional credit before live batches. ChaosPilot's conservative application allowance is separate from account-wide usage, and cannot control requests from other tools or keys. Missing credentials or an exhausted application allowance must stop requests rather than switch billing or providers.
 
 Official references: [Meta models](https://dev.meta.ai/docs/models), [structured output](https://dev.meta.ai/docs/cookbook/structured-output), [spending alerts](https://dev.meta.ai/help/billing/spend-limit-alert).
+
+## Parallel worktrees
+
+For parallel local checkouts, use the Git worktree helpers (see [scripts/README.md](scripts/README.md)):
+
+```sh
+npm run worktree:setup -- <name> [--base <local-ref>] [--no-install]
+npm run worktree:list
+npm run worktree:teardown -- <name>
+```
+
+Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/<name>` branch, with separate dependencies, configuration and `runs/`. Use a distinct `CHAOSPILOT_PORT` per dev server, and the mock provider unless live credentials/budget are explicitly coordinated — live-budget ledgers are separate per checkout. Teardown is conservative and refuses dirty or ignored local data.
+
+[AGENTS.md](AGENTS.md) makes this the default implementation workflow for coding agents. `CLAUDE.md` and `GEMINI.md` import the same instructions; delegated provider tasks also receive the shared policy through the installed dispatcher. Start future sessions in a checkout containing these files.
 
 ## Commands
 
