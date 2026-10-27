@@ -2,6 +2,11 @@
 
 ## Worktree workflow
 
+- Keep the parent chat/session anchored in the stable main checkout (for example
+  `C:/dev/ChaosPilot`), or its existing higher-level workspace. A task worktree
+  is a temporary execution directory, not the parent chat's primary checkout.
+  Do not move the parent chat into it or use app create/attach/handoff actions
+  that change the chat's working folder unless the user explicitly requests it.
 - Use a task-owned worktree by default for implementation. Reuse the current
   task's existing worktree when continuing work; do not create a new checkout
   for every prompt, child agent, or small follow-up. Read-only work and small
@@ -10,11 +15,9 @@
 - Before editing, inspect `git status --short`, `git branch --show-current`
   and `npm run worktree:list`. Preserve existing changes and identify which
   checkout and files this task owns. Never reset another task's work.
-- If this task already has a suitable Codex-managed worktree attached, use it.
-  Keep its lifecycle in the app's worktree/archive tools. The scripts below
-  manage ordinary Git worktrees and refuse to remove external app-managed ones.
-- Otherwise, create an ordinary worktree using the repository helper. Read
-  [scripts/README.md](scripts/README.md) before setup or teardown:
+- For new task worktrees, use the repository helper from the main checkout,
+  keeping the parent chat there. Read [scripts/README.md](scripts/README.md)
+  before setup or teardown:
 
   ```sh
   npm run worktree:setup -- <name> [--base <local-ref>] [--no-install]
@@ -26,14 +29,25 @@
   Select the base appropriate to the task; the default is local `main`, with
   no fetch or pull. Uncommitted changes are not copied. Do not silently start
   from another revision when continuing work that exists only in a checkout.
-- Use the chosen worktree as the explicit working directory for commands and
-  delegated tasks. Assign non-overlapping file ownership to concurrent writers;
-  a worktree alone does not prevent agents in that checkout overwriting edits.
+- Run task edits, Git operations, builds and tests against the worktree using
+  explicit file paths and per-command `workdir`/`cwd` (or `git -C`). Give bounded
+  workers that worktree as their execution workspace. This does not mean moving
+  the parent chat or changing its persistent terminal directory. Keep main's
+  branch and files untouched by implementation work. Assign non-overlapping
+  file ownership to concurrent writers; a worktree alone does not prevent
+  agents in that checkout overwriting edits.
+- If continuing a chat already attached to a Codex-managed worktree, reuse it
+  and preserve its work; do not create a replacement merely to follow the new
+  default. Keep its lifecycle in the app's worktree/archive tools. The repository
+  helper refuses external app-managed worktrees. If the app protects the chat's
+  current checkout, use a supported handoff to a safe stable checkout before
+  cleanup; never force removal. Check for other tasks' changes before handoff.
 - Only tear down a worktree when it is no longer needed. Stop its agents and
-  dev servers first, change to another checkout, and use the matching helper or
-  app lifecycle tool. If removal refuses, preserve the checkout and report why;
-  do not bypass it with forced removal, recursive deletion, reset, clean or prune.
-  The ordinary helper retains branches and commits.
+  dev servers first, ensure no terminal is inside it, and run teardown from the
+  main checkout using the matching helper or app lifecycle tool. If removal
+  refuses, preserve the checkout and report why; do not bypass it with forced
+  removal, recursive deletion, reset, clean or prune. The ordinary helper retains
+  branches and commits.
 
 ## Local configuration and evidence
 
