@@ -257,14 +257,18 @@ function normalizeGitPath(p: string): string {
 }
 
 // Recursively expand collapsed ignored directories into every descendant
-// directory, so nested empty directories are retained in the backup. Fails
-// closed on links, unreadable entries and non-regular files; never follows
-// a symlink/junction.
-function expandIgnoredDirs(target: string, relDirs: string[]): string[] {
-  const found = new Set<string>();
+// directory and regular file, so nested empty directories are retained and
+// files Git omits are still backed up. In particular `git ls-files` does not
+// list contents under a nested `.git` directory, so the preserved-file list
+// cannot be Git's listing alone once an ignored tree is being inspected.
+// Fails closed on links, unreadable entries and non-regular files; never
+// follows a symlink/junction.
+function expandIgnoredDirs(target: string, relDirs: string[]): { dirs: string[]; files: string[] } {
+  const dirs = new Set<string>();
+  const files = new Set<string>();
   const visit = (relPosix: string): void => {
-    if (found.has(relPosix)) return;
-    found.add(relPosix);
+    if (dirs.has(relPosix)) return;
+    dirs.add(relPosix);
     const abs = path.join(target, toNativeRel(relPosix));
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch {
@@ -281,13 +285,59 @@ function expandIgnoredDirs(target: string, relDirs: string[]): string[] {
         throw new CliError(`Refusing: ignored path traverses a link and cannot be safely preserved: ${childRel} in ${target}. Source worktree preserved.`);
       }
       if (st.isDirectory()) visit(childRel);
-      else if (!st.isFile()) {
+      else if (st.isFile()) files.add(childRel);
+      else {
         throw new CliError(`Refusing: ignored entry is not a regular file and cannot be safely preserved: ${childRel} in ${target}. Source worktree preserved.`);
       }
     }
   };
   for (const relPosix of relDirs) visit(relPosix);
-  return [...found].sort();
+  return { dirs: [...dirs].sort(), files: [...files].sort() };
+}
+
+// Find nested `.git` files/directories anywhere Git's status and ignored
+// listings stay silent about them (for example under tracked or otherwise
+// unignored parents). The target root's own `.git` marker is not nested.
+// Ignored trees already being preserved (and their backed-up files) and the
+// disposable generated roots are skipped; links are never followed.
+function isGitMetadataName(name: string): boolean {
+  // On Windows Git may hide case variants and names with trailing dots or
+  // spaces too. Do not let those aliases bypass the data-preservation check.
+  return process.platform === "win32"
+    ? name.replace(/[. ]+$/, "").toLowerCase() === ".git"
+    : name === ".git";
+}
+
+function findNestedGitEntries(target: string, generatedRoots: Set<string>, preservedDirs: string[], preservedFiles: Set<string>): string[] {
+  const isPreserved = (relPosix: string): boolean =>
+    preservedFiles.has(relPosix) || preservedDirs.some((d) => relPosix === d || relPosix.startsWith(`${d}/`));
+  const found: string[] = [];
+  const visit = (relPosix: string): void => {
+    const abs = relPosix === "" ? target : path.join(target, toNativeRel(relPosix));
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch {
+      throw new CliError(`Refusing: cannot inspect ${relPosix === "" ? "worktree" : relPosix} in ${target} for nested .git metadata. Source worktree preserved; check its permissions and retry.`);
+    }
+    for (const entry of [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const childRel = relPosix === "" ? entry.name : `${relPosix}/${entry.name}`;
+      if (isGitMetadataName(entry.name)) {
+        const rootMarker = relPosix === "" && entry.name === ".git";
+        if (!rootMarker && !isPreserved(childRel)) found.push(childRel);
+        continue;
+      }
+      const childAbs = path.join(abs, entry.name);
+      let st: fs.Stats;
+      try { st = fs.lstatSync(childAbs); } catch {
+        throw new CliError(`Refusing: cannot inspect entry ${childRel} in ${target} for nested .git metadata. Source worktree preserved; check its permissions and retry.`);
+      }
+      if (st.isSymbolicLink() || !st.isDirectory()) continue;
+      if (relPosix === "" && generatedRoots.has(entry.name)) continue;
+      if (isPreserved(childRel)) continue;
+      visit(childRel);
+    }
+  };
+  visit("");
+  return found.sort();
 }
 
 // Copies every preserved ignored file, verifying bytes. Throws CliError on
@@ -492,10 +542,21 @@ async function teardown(args: string[]): Promise<void> {
       }
     }
   }
-  const preservedFiles = ignoredFiles.filter((f) => !generatedRoots.has(f.split("/")[0] as string));
+  const gitPreservedFiles = ignoredFiles.filter((f) => !generatedRoots.has(f.split("/")[0] as string));
   // Expand collapsed ignored directories before creating any backup, so a
   // link/unreadable/non-regular descendant fails with the source untouched.
-  const meaningfulDirs = expandIgnoredDirs(target, preservedDirs.filter((d) => !generatedRoots.has(d.split("/")[0] as string)));
+  // The filesystem inventory, not Git's listing alone, decides what is
+  // preserved: Git omits files under a nested `.git` inside an ignored tree.
+  const expanded = expandIgnoredDirs(target, preservedDirs.filter((d) => !generatedRoots.has(d.split("/")[0] as string)));
+  const meaningfulDirs = expanded.dirs;
+  const preservedFiles = [...new Set([...gitPreservedFiles, ...expanded.files])];
+  // Nested `.git` metadata outside a preserved ignored tree is invisible to
+  // both `git status` and the ignored listings, so `git worktree remove`
+  // would delete it with no backup. Refuse before any backup or removal.
+  const nestedGit = findNestedGitEntries(target, generatedRoots, meaningfulDirs, new Set(preservedFiles));
+  if (nestedGit.length > 0) {
+    throw new CliError(`Refusing: nested .git metadata at ${nestedGit.join(", ")} in ${target} is not inside a preserved ignored directory and would be deleted without a backup. Move or back up that nested repository/metadata yourself, then retry. Source worktree and its Git registration were preserved; nothing was removed.`);
+  }
 
   let backupDir: string | undefined;
   if (preservedFiles.length > 0 || meaningfulDirs.length > 0) {

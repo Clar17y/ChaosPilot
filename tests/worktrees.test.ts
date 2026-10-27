@@ -643,6 +643,187 @@ describe("worktrees CLI", () => {
     expect(runCli(["teardown", "fakebad"], primary).status).toBe(0);
   });
 
+  it("backs up nested .git contents under an ignored tree byte-for-byte (mixed and ignored-only)", () => {
+    const { primary, root } = makeRepo();
+    const target = path.join(root, "igngit");
+    expect(runCli(["setup", "igngit", "--no-install"], primary).status).toBe(0);
+    const cases: Array<[string, string]> = [
+      [path.join("runs", ".git", "secret"), "runs-git-secret\n"],
+      [path.join("runs", ".git", "hooks", "hook.txt"), "hook\n"],
+      [path.join("runs", "project", ".git", "config"), "[core]\n\tdeep = true\n"],
+      [path.join("runs", "sub", ".git"), "gitdir: ../elsewhere\n"],
+      [path.join("runs", "ordinary.txt"), "ordinary ignored\n"],
+    ];
+    for (const [rel, content] of cases) {
+      const p = path.join(target, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+    }
+    fs.mkdirSync(path.join(target, "runs", ".git", "empty", "nested"), { recursive: true });
+    const ok = runCli(["teardown", "igngit"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(ok.stdout + ok.stderr).not.toContain("runs-git-secret");
+    expect(git(["show-ref", "--verify", "refs/heads/codex/igngit"], primary)).toContain("codex/igngit");
+    const m = ok.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    expect(m, ok.stdout).not.toBeNull();
+    const backup = (m as RegExpMatchArray)[1] as string;
+    for (const [rel, content] of cases) expect(fs.readFileSync(path.join(backup, rel), "utf8"), rel).toBe(content);
+    expect(fs.existsSync(path.join(backup, "runs", ".git", "empty", "nested"))).toBe(true);
+
+    // Ignored tree containing only nested .git data (invisible to git ls-files).
+    const solo = path.join(root, "igngitonly");
+    expect(runCli(["setup", "igngitonly", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(solo, "runs", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(solo, "runs", ".git", "secret"), "only-secret\n");
+    const ok2 = runCli(["teardown", "igngitonly"], primary);
+    expect(ok2.status, ok2.stderr).toBe(0);
+    expect(fs.existsSync(solo)).toBe(false);
+    const m2 = ok2.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    expect(m2, ok2.stdout).not.toBeNull();
+    expect(fs.readFileSync(path.join((m2 as RegExpMatchArray)[1] as string, "runs", ".git", "secret"), "utf8")).toBe("only-secret\n");
+  });
+
+  it("backs up nested .git under an ignored directory nested inside a tracked parent", () => {
+    const { primary, root } = makeRepo();
+    const target = path.join(root, "trackedign");
+    expect(runCli(["setup", "trackedign", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "tracked"), { recursive: true });
+    fs.writeFileSync(path.join(target, "tracked", "keep.txt"), "keep\n");
+    git(["add", "tracked"], target);
+    git(["commit", "-m", "tracked parent"], target);
+    // `scratch*` is ignored at any depth in the fixture .gitignore.
+    fs.mkdirSync(path.join(target, "tracked", "scratch-data", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, "tracked", "scratch-data", ".git", "secret"), "nested-ignored-secret\n");
+    fs.writeFileSync(path.join(target, "tracked", "scratch-data", "data.txt"), "nested ignored data\n");
+    const ok = runCli(["teardown", "trackedign"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    const m = ok.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    expect(m, ok.stdout).not.toBeNull();
+    const backup = (m as RegExpMatchArray)[1] as string;
+    expect(fs.readFileSync(path.join(backup, "tracked", "scratch-data", ".git", "secret"), "utf8")).toBe("nested-ignored-secret\n");
+    expect(fs.readFileSync(path.join(backup, "tracked", "scratch-data", "data.txt"), "utf8")).toBe("nested ignored data\n");
+  });
+
+  it("refuses teardown on nested .git under unignored/tracked parents, preserving source and registration", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "nestedgit");
+    expect(runCli(["setup", "nestedgit", "--no-install"], primary).status).toBe(0);
+    // Tracked parent directory.
+    fs.mkdirSync(path.join(target, "tracked"), { recursive: true });
+    fs.writeFileSync(path.join(target, "tracked", "keep.txt"), "keep\n");
+    git(["add", "tracked"], target);
+    git(["commit", "-m", "tracked parent"], target);
+    const backupsRoot = path.join(tmp, "primary repo-worktree-backups");
+    const expectRefusal = (relGit: string, secretRel: string, secret: string) => {
+      const r = runCli(["teardown", "nestedgit"], primary);
+      expect(r.status, r.stdout + r.stderr).not.toBe(0);
+      expect(r.stderr).toContain("nested .git");
+      expect(r.stderr).toContain(relGit);
+      expect(r.stdout + r.stderr).not.toContain(secret.trim());
+      expect(fs.readFileSync(path.join(target, secretRel), "utf8")).toBe(secret);
+      expect(fs.existsSync(target)).toBe(true);
+      expect(git(["worktree", "list", "--porcelain"], primary)).toContain("branch refs/heads/codex/nestedgit");
+      expect(fs.existsSync(backupsRoot)).toBe(false);
+    };
+
+    fs.mkdirSync(path.join(target, "tracked", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, "tracked", ".git", "secret"), "tracked-secret\n");
+    expectRefusal("tracked/.git", path.join("tracked", ".git", "secret"), "tracked-secret\n");
+    fs.rmSync(path.join(target, "tracked", ".git"), { recursive: true, force: true });
+
+    // Unignored parent, .git directory.
+    fs.mkdirSync(path.join(target, "ordinary", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, "ordinary", ".git", "secret"), "ordinary-secret\n");
+    expectRefusal("ordinary/.git", path.join("ordinary", ".git", "secret"), "ordinary-secret\n");
+    fs.rmSync(path.join(target, "ordinary"), { recursive: true, force: true });
+
+    // Deeper unignored parent, .git file.
+    fs.mkdirSync(path.join(target, "a", "b"), { recursive: true });
+    fs.writeFileSync(path.join(target, "a", "b", "keep.txt"), "deep keep\n");
+    git(["add", "a"], target);
+    git(["commit", "-m", "deep parent"], target);
+    fs.writeFileSync(path.join(target, "a", "b", ".git"), "gitdir: ../elsewhere\n");
+    expectRefusal("a/b/.git", path.join("a", "b", ".git"), "gitdir: ../elsewhere\n");
+    fs.unlinkSync(path.join(target, "a", "b", ".git"));
+
+    // A clean teardown still succeeds afterwards (root .git marker is not nested).
+    const ok = runCli(["teardown", "nestedgit"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(git(["show-ref", "--verify", "refs/heads/codex/nestedgit"], primary)).toContain("codex/nestedgit");
+  });
+
+  it("refuses Windows .git aliases before deleting or unregistering the worktree", () => {
+    if (process.platform !== "win32") return;
+    for (const [name, gitName, atRoot] of [
+      ["uppergit", ".GIT", false],
+      ["mixedgit", ".Git", false],
+      ["dotgit", ".git.", false],
+      ["spacegit", ".git ", false],
+      ["rootdotgit", ".git.", true],
+    ] as const) {
+      const { primary, root } = makeRepo();
+      const target = path.join(root, name);
+      expect(runCli(["setup", name, "--no-install"], primary).status).toBe(0);
+      const parent = atRoot ? target : path.join(target, "ordinary");
+      const metadata = path.join(parent, gitName);
+      fs.mkdirSync(metadata, { recursive: true });
+      fs.writeFileSync(path.join(metadata, "secret"), "fixture metadata\n");
+
+      const result = runCli(["teardown", name], primary);
+      expect(result.status, result.stdout + result.stderr).not.toBe(0);
+      expect(result.stderr).toContain("nested .git");
+      expect(fs.readFileSync(path.join(metadata, "secret"), "utf8")).toBe("fixture metadata\n");
+      expect(fs.existsSync(path.join(target, "file.txt"))).toBe(true);
+      expect(git(["worktree", "list", "--porcelain"], primary)).toContain(`branch refs/heads/codex/${name}`);
+    }
+  }, 20000);
+
+  it("refuses or safely preserves a real nested Git repository and never traverses a link in an ignored .git tree", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "realnested");
+    expect(runCli(["setup", "realnested", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "tracked"), { recursive: true });
+    fs.writeFileSync(path.join(target, "tracked", "keep.txt"), "keep\n");
+    git(["add", "tracked"], target);
+    git(["commit", "-m", "tracked parent"], target);
+    const inner = path.join(target, "tracked", "inner");
+    git(["init", "-b", "main", inner], target);
+    git(["config", "user.email", "fixture@example.invalid"], inner);
+    git(["config", "user.name", "Fixture"], inner);
+    git(["config", "commit.gpgsign", "false"], inner);
+    fs.writeFileSync(path.join(inner, "inner.txt"), "inner work\n");
+    git(["add", "."], inner);
+    git(["commit", "-m", "inner"], inner);
+    const head = git(["rev-parse", "HEAD"], inner).trim();
+    const r = runCli(["teardown", "realnested"], primary);
+    expect(r.status, r.stdout + r.stderr).not.toBe(0);
+    expect(fs.existsSync(target)).toBe(true);
+    expect(git(["rev-parse", "HEAD"], inner).trim()).toBe(head);
+    expect(fs.readFileSync(path.join(inner, "inner.txt"), "utf8")).toBe("inner work\n");
+    expect(git(["worktree", "list", "--porcelain"], primary)).toContain("branch refs/heads/codex/realnested");
+
+    // Link inside an ignored nested .git tree: fail closed, sentinel untouched.
+    const target2 = path.join(root, "gitlink");
+    expect(runCli(["setup", "gitlink", "--no-install"], primary).status).toBe(0);
+    const external = path.join(tmp, "outside-git");
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(external, "sentinel.txt"), "outside\n");
+    fs.mkdirSync(path.join(target2, "runs", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target2, "runs", ".git", "secret"), "keep me\n");
+    let linkMade = true;
+    try { fs.symlinkSync(external, path.join(target2, "runs", ".git", "linkdir"), process.platform === "win32" ? "junction" : "dir"); } catch { linkMade = false; }
+    if (linkMade) {
+      const r2 = runCli(["teardown", "gitlink"], primary);
+      expect(r2.status, r2.stdout + r2.stderr).not.toBe(0);
+      expect(fs.readFileSync(path.join(target2, "runs", ".git", "secret"), "utf8")).toBe("keep me\n");
+      expect(fs.readFileSync(path.join(external, "sentinel.txt"), "utf8")).toBe("outside\n");
+      expect(fs.existsSync(target2)).toBe(true);
+    }
+  });
+
   it.each(["main", "release"])("refuses to reuse a branch checked out in an external worktree (%s primary)", (initialBranch) => {
     const { tmp, primary, root } = makeRepo(initialBranch);
     expect(runCli(["setup", "shared", "--base", initialBranch, "--no-install"], primary).status).toBe(0);

@@ -137,9 +137,24 @@ handled portably: a literal backslash in a POSIX filename is preserved as a
 filename character, distinct from a `/` separator. Backups are retained until
 you delete them yourself; restore by copying files back to the same relative
 paths in a checkout.
+
+Nested `.git` metadata needs special handling because Git omits it from both
+`git status` and the ignored listings. Once an ignored tree is being
+inspected, teardown inventories it on the filesystem rather than trusting
+Git's listing alone, so files under a nested `.git` inside an ignored tree
+(for example `runs/.git/...` or `runs/project/.git/config`, including a `.git`
+file) are backed up like any other ignored file. A nested `.git` file or
+directory found anywhere else — under a tracked or otherwise unignored
+parent, at any depth, including a real nested repository — is **not** backed
+up: teardown refuses before creating a backup or removing anything, names the
+nested `.git` path, and leaves the source and its Git registration unchanged.
+Move or back up that nested repository/metadata yourself, then retry. The
+target root's own `.git` marker is not treated as nested. On Windows, case
+variants and names with trailing dots or spaces are treated as `.git` aliases.
 Teardown fails closed — without removing anything and with the source left
 intact — when any ignored path traverses a symlink/junction, is not a regular
-file, cannot be inspected/copied/verified, or the backup root/directory is a
+file, cannot be inspected/copied/verified, nested `.git` metadata is found
+outside a preserved ignored tree (above), or the backup root/directory is a
 link or escapes its intended sibling root. A partial backup may be retained
 and is named in the error.
 
