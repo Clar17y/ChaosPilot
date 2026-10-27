@@ -7,7 +7,9 @@ only; the application build and runtime do not use them.
 The repository's [AGENTS.md](../AGENTS.md) makes task-owned worktrees the default
 for implementation. `CLAUDE.md` and `GEMINI.md` import that shared policy. Reuse
 an existing task worktree; these instructions do not require a new one for each
-prompt. The files must be present in the checkout where a future session starts.
+prompt. Keep the parent chat/session in the main checkout and use the worktree
+as an explicit execution directory for task commands. The files must be present
+in the checkout where a future session starts.
 
 ```sh
 npm run worktree:setup -- <name> [--base <local-ref>] [--no-install]
@@ -18,6 +20,36 @@ npm run worktree:teardown -- <name>
 Run them through the npm aliases. Setup uses `process.execPath` plus the
 validated `npm_execpath` provided by npm (never a shell command); invoking the
 TypeScript file directly therefore asks you to use the alias or `--no-install`.
+
+## Keep the chat rooted outside temporary worktrees
+
+The main Git checkout, the parent chat's working folder and a command's working
+directory are separate concepts. Use the stable main checkout (for example
+`C:/dev/ChaosPilot`), or an existing higher-level workspace, as the parent chat's
+home. Create temporary task worktrees with these helpers instead of app actions
+that move the chat into a worktree, unless the user explicitly requests that.
+
+Run setup, listing and teardown from the main checkout. For implementation,
+target files in the selected worktree and set each command's `workdir`/`cwd` to
+that worktree; use `git -C <worktree>` for Git commands as appropriate. Bounded
+workers also use the worktree as their execution workspace. Do not change the
+parent chat's working folder or leave its persistent terminal inside the worktree.
+This keeps implementation isolated while allowing cleanup from outside it.
+
+For example, with a main checkout at `C:/dev/ChaosPilot`:
+
+| Action | Execution directory |
+| --- | --- |
+| Keep the parent chat open; run `npm run worktree:setup -- ui-fix` | `C:/dev/ChaosPilot` |
+| Edit task files; run builds, tests and task Git commands | `C:/dev/ChaosPilot-worktrees/ui-fix` |
+| Stop task processes, preserve local data, then run `npm run worktree:teardown -- ui-fix` when finished | `C:/dev/ChaosPilot` |
+
+A chat already attached to a Codex-managed worktree is an existing-work exception:
+preserve and reuse it, then use the app's supported handoff/archive lifecycle.
+The app may refuse to archive the chat's current checkout even though Git lists
+it as a linked worktree. That does not make it the repository's main checkout.
+Check the destination for other tasks' changes before any handoff. If the app
+refuses cleanup, report the blocker; do not bypass it with a script or deletion.
 
 ## Where worktrees go
 
@@ -59,8 +91,10 @@ archive/restore flow for those.
 ## Teardown safety
 
 Teardown is deliberately conservative. Stop any agents or dev servers using
-the worktree first — this is a checked CLI, not containment against arbitrary
-simultaneous writers.
+the worktree first and run teardown from the main checkout, with no terminal
+left inside the target. Keeping the parent chat in the main checkout avoids
+making a temporary worktree its protected working folder. This is a checked
+CLI, not containment against arbitrary simultaneous writers.
 
 It refuses unless the target is a registered, non-primary, attached-branch
 checkout at exactly the computed managed child path. It also refuses when:

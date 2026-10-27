@@ -59,7 +59,9 @@ npm run worktree:teardown -- <name>
 
 Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/<name>` branch, with separate dependencies, configuration and `runs/`. Use a distinct `CHAOSPILOT_PORT` per dev server, and the mock provider unless live credentials/budget are explicitly coordinated — live-budget ledgers are separate per checkout. Teardown is conservative and refuses dirty or ignored local data.
 
-[AGENTS.md](AGENTS.md) makes this the default implementation workflow for coding agents. `CLAUDE.md` and `GEMINI.md` import the same instructions; delegated provider tasks also receive the shared policy through the installed dispatcher. Start future sessions in a checkout containing these files.
+[AGENTS.md](AGENTS.md) makes this the default implementation workflow for coding agents. Keep the parent chat/session anchored in the main checkout (or its existing higher-level workspace), and create temporary worktrees with these scripts. Run task edits and commands in the worktree using explicit paths and per-command working directories; do not move the parent chat into it unless the user explicitly requests that. Run teardown from the main checkout after task processes stop.
+
+`CLAUDE.md` and `GEMINI.md` import the same instructions; delegated provider tasks also receive the shared policy through the installed dispatcher. Start future sessions in the main checkout with these files available. Existing app-managed worktrees still use the app's handoff/archive lifecycle; see [scripts/README.md](scripts/README.md).
 
 ## Commands
 
