@@ -9,6 +9,7 @@ import type {
 } from '../domain.ts';
 import type { RunSummary, ReplayReport } from '../storage.ts';
 import { extractSnapshotDisplay } from './snapshot.ts';
+import { clampSelectedIndex, tabIndexForKey } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
   effectiveAdapterId,
@@ -271,15 +272,22 @@ function renderFindingsView(): void {
     }
     for (const { run, legacy: isLegacy } of withFindings) {
       const row = document.createElement('div');
-      row.className = 'row';
-      const text = document.createElement('p');
-      text.textContent = `${run.id}${isLegacy ? ' · Legacy / system unavailable' : ` · brief revision ${run.systemBrief?.revision ?? 'unavailable'}`} · ${run.findingsCount} finding(s) in the saved record · ${runOutcomeLabel(run.status)}`;
+      row.className = 'row finding-index-row';
+      const textWrap = document.createElement('div');
+      textWrap.className = 'finding-index-text';
+      const heading = document.createElement('p');
+      heading.className = 'finding-index-heading';
+      heading.textContent = `${run.variant} · ${runOutcomeLabel(run.status)} · ${run.findingsCount} finding(s)`;
+      const meta = document.createElement('p');
+      meta.className = 'muted finding-index-meta';
+      meta.textContent = `${run.id}${isLegacy ? ' · Legacy / system unavailable' : ` · brief revision ${run.systemBrief?.revision ?? 'unavailable'}`}`;
+      textWrap.append(heading, meta);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn-secondary btn-xs';
       btn.textContent = 'Inspect run and reproductions';
       btn.addEventListener('click', () => { showView('investigations'); void openRun(run.id); });
-      row.append(text, btn);
+      row.append(textWrap, btn);
       container.appendChild(row);
     }
   }
@@ -330,13 +338,13 @@ function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
   if (mode === 'live') {
     provenanceBadge.classList.add('badge-live');
-    provenanceLabel.textContent = 'PROVENANCE: LIVE (Meta API)';
+    provenanceLabel.textContent = 'Provenance: Live (Meta API)';
   } else if (mode === 'replay') {
     provenanceBadge.classList.add('badge-replay');
-    provenanceLabel.textContent = 'PROVENANCE: REPLAY (Deterministic)';
+    provenanceLabel.textContent = 'Provenance: Replay (deterministic)';
   } else {
     provenanceBadge.classList.add('badge-mock');
-    provenanceLabel.textContent = 'PROVENANCE: MOCK (Scripted)';
+    provenanceLabel.textContent = 'Provenance: Mock (scripted)';
   }
 }
 
@@ -535,10 +543,6 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (!hasRunDetail(
       : `${rec.usage.inputTokens} in / ${rec.usage.outputTokens} out ($${cost})`;
   }
 
-  if (selectedExperimentIndex >= rec.experiments.length) {
-    selectedExperimentIndex = 0;
-  }
-
   renderFindings(rec.findings);
   renderExperiments(rec.experiments);
   renderProposals(rec, proposalDisplay);
@@ -609,7 +613,7 @@ function renderFindings(findings: Finding[]): void {
   if (!findings || findings.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No findings recorded yet. Launch an investigation to observe behavior.';
+    empty.textContent = 'No findings are recorded for this investigation. Review its status, experiment results and coverage before drawing conclusions.';
     findingsContainer.appendChild(empty);
     return;
   }
@@ -635,11 +639,11 @@ function renderFindings(findings: Finding[]): void {
 
     const replayBadge = document.createElement('span');
     replayBadge.className = f.reproduced ? 'pill-badge pill-pass' : 'pill-badge pill-fail';
-    replayBadge.textContent = f.reproduced ? 'REPLAY VERIFIED' : 'REPLAY FAILED';
+    replayBadge.textContent = f.reproduced ? 'Replay verified' : 'Replay failed';
 
     const cleanBadge = document.createElement('span');
     cleanBadge.className = f.cleanControlPassed ? 'pill-badge pill-pass' : 'pill-badge pill-fail';
-    cleanBadge.textContent = f.cleanControlPassed ? 'CLEAN CONTROL PASSED' : 'CLEAN CONTROL FAILED';
+    cleanBadge.textContent = f.cleanControlPassed ? 'Clean control passed' : 'Clean control failed';
 
     badges.appendChild(invariantBadge);
     badges.appendChild(replayBadge);
@@ -679,6 +683,12 @@ function renderFindings(findings: Finding[]): void {
 }
 
 function renderExperiments(experiments: ExperimentRecord[]): void {
+  selectedExperimentIndex = clampSelectedIndex(selectedExperimentIndex, experiments?.length ?? 0);
+  // Preserve keyboard focus across rerenders (polling refreshes this list).
+  const focusedExperiment = document.activeElement instanceof HTMLButtonElement
+    && experimentsContainer.contains(document.activeElement)
+    ? document.activeElement.dataset.experimentIndex
+    : undefined;
   experimentsContainer.textContent = '';
   if (!experiments || experiments.length === 0) {
     const empty = document.createElement('div');
@@ -687,16 +697,17 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     experimentsContainer.appendChild(empty);
     return;
   }
-
   for (let i = 0; i < experiments.length; i++) {
     const expRec = experiments[i]!;
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'experiment-item';
-    if (i === selectedExperimentIndex) {
-      item.classList.add('selected');
-    }
+    const selected = i === selectedExperimentIndex;
+    if (selected) item.classList.add('selected');
+    item.setAttribute('aria-pressed', String(selected));
+    item.dataset.experimentIndex = String(i);
 
-    const left = document.createElement('div');
+    const left = document.createElement('span');
     left.className = 'exp-item-left';
 
     const indexEl = document.createElement('span');
@@ -707,36 +718,43 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     hypEl.className = 'exp-hypothesis';
     hypEl.textContent = expRec.experiment.hypothesis;
 
-    left.appendChild(indexEl);
-    left.appendChild(hypEl);
+    left.append(indexEl, hypEl);
 
-    const right = document.createElement('div');
-    right.className = 'finding-badges';
+    const right = document.createElement('span');
+    right.className = 'experiment-item-right';
 
     const statusPillEl = document.createElement('span');
     const hasViolations = expRec.result.violations && expRec.result.violations.length > 0;
     if (hasViolations) {
       statusPillEl.className = 'pill-badge pill-fail';
-      statusPillEl.textContent = `${expRec.result.violations.length} VIOLATION(S)`;
+      statusPillEl.textContent = `${expRec.result.violations.length} violation(s)`;
     } else if (expRec.result.valid) {
       statusPillEl.className = 'pill-badge pill-pass';
-      statusPillEl.textContent = 'VALID (0 VIOLATIONS)';
+      statusPillEl.textContent = 'Valid · 0 violations';
     } else {
       statusPillEl.className = 'pill-badge pill-fail';
-      statusPillEl.textContent = 'INVALID PLAN';
+      statusPillEl.textContent = 'Invalid plan';
     }
-    right.appendChild(statusPillEl);
+    const hint = document.createElement('span');
+    hint.className = 'exp-inspect-hint';
+    hint.textContent = 'View trace';
+    right.append(statusPillEl, hint);
 
-    item.appendChild(left);
-    item.appendChild(right);
+    item.append(left, right);
 
     item.addEventListener('click', () => {
       selectedExperimentIndex = i;
       renderExperiments(experiments);
       renderSelectedExperimentTrace();
+      const traceTab = document.getElementById('tab-btn-trace') as HTMLButtonElement | null;
+      if (traceTab) activateTab(traceTab, true);
     });
 
     experimentsContainer.appendChild(item);
+  }
+  if (focusedExperiment !== undefined) {
+    const focusIndex = clampSelectedIndex(Number(focusedExperiment), experiments.length);
+    experimentsContainer.querySelector<HTMLButtonElement>(`[data-experiment-index="${focusIndex}"]`)?.focus({ preventScroll: true });
   }
 }
 
@@ -781,9 +799,11 @@ function renderSelectedExperimentTrace(): void {
       sAction.textContent = entry.action;
 
       const sPayload = document.createElement('span');
+      sPayload.className = 'step-payload';
       sPayload.textContent = entry.payload ? JSON.stringify(entry.payload) : (entry.messageId || '-');
 
       const sOutcome = document.createElement('span');
+      sOutcome.className = 'step-outcome';
       sOutcome.textContent = entry.outcome;
 
       stepEl.appendChild(sStep);
@@ -865,7 +885,7 @@ function buildRunRow(r: RunSummary, includeBrief: boolean): HTMLTableRowElement 
   const cells: string[] = includeBrief
     ? [r.id, r.systemBrief ? `Rev ${r.systemBrief.revision} - ${r.systemBrief.name}` : 'Legacy / system unavailable', r.variant, `${r.provider} (${r.mode})`, runOutcomeLabel(r.status), `${r.experimentsCount}`, `${r.findingsCount}`, new Date(r.startedAt).toLocaleString()]
     : [r.id, r.variant, `${r.provider} (${r.mode})`, runOutcomeLabel(r.status), `${r.experimentsCount}`, `${r.findingsCount}`, new Date(r.startedAt).toLocaleString()];
-  for (const text of cells) { const td = document.createElement('td'); td.textContent = text; tr.appendChild(td); }
+  cells.forEach((text, idx) => { const td = document.createElement('td'); if (idx === 0) td.className = 'run-id-cell'; td.textContent = text; tr.appendChild(td); });
   const tdActions = document.createElement('td');
   const actionGroup = document.createElement('div'); actionGroup.className = 'action-btns';
   const btnView = document.createElement('button'); btnView.className = 'btn btn-secondary btn-xs'; btnView.type = 'button'; btnView.textContent = 'View';
@@ -985,13 +1005,18 @@ function updateRunReadiness(): void {
   const reason = launchBlockedReason();
   btnLaunch.disabled = reason !== null;
   btnLaunch.title = reason ?? '';
+  const launchReadiness = document.getElementById('launch-readiness');
+  if (launchReadiness) {
+    launchReadiness.textContent = reason ? reason.charAt(0) + reason.slice(1).toLowerCase() : '';
+    launchReadiness.classList.toggle('hidden', reason === null);
+  }
   syncStopControls();
   if (systemSelect) systemSelect.disabled = isLaunchRequestPending || isSystemSavePending;
   if (btnNewSystem) btnNewSystem.disabled = isLaunchRequestPending || isSystemSavePending;
   renderWorkspaceSummaries();
   if (!adapterReadinessLabel) return;
   adapterReadinessLabel.className = `readiness-label ${reason ? 'readiness-disabled' : 'readiness-ready'}`;
-  adapterReadinessLabel.textContent = reason ?? 'READY FOR INVESTIGATION';
+  adapterReadinessLabel.textContent = reason ? reason.charAt(0) + reason.slice(1).toLowerCase() : 'Ready for investigation';
 }
 
 function launchBlockedReason(): string | null {
@@ -1387,21 +1412,31 @@ if (systemAdapterSelect) systemAdapterSelect.addEventListener('change', markUnsa
 if (systemOverviewInput) systemOverviewInput.addEventListener('input', markUnsavedEdits);
 if (systemRequirementsInput) systemRequirementsInput.addEventListener('input', markUnsavedEdits);
 
-// Tab switching
-const tabButtons = document.querySelectorAll<HTMLButtonElement>('.tab-btn');
-tabButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    tabButtons.forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
-
-    btn.classList.add('active');
-    const targetId = btn.getAttribute('data-tab');
-    if (targetId) {
-      const pane = document.getElementById(targetId);
-      if (pane) pane.classList.add('active');
-    }
+// Tab switching (WAI-ARIA tab pattern: roving tabindex, arrow/Home/End)
+const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
+function activateTab(btn: HTMLButtonElement, moveFocus: boolean): void {
+  tabButtons.forEach((b) => {
+    const selected = b === btn;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-selected', String(selected));
+    b.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
+  const targetId = btn.getAttribute('data-tab');
+  if (targetId) document.getElementById(targetId)?.classList.add('active');
+  if (moveFocus) btn.focus();
+}
+tabButtons.forEach((btn, index) => {
+  btn.addEventListener('click', () => activateTab(btn, false));
+  btn.addEventListener('keydown', (event) => {
+    const next = tabIndexForKey(index, event.key, tabButtons.length);
+    if (next === null) return;
+    event.preventDefault();
+    const target = tabButtons[next];
+    if (target) activateTab(target, true);
   });
 });
+activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
 // Initialization - showView('overview', false) below
