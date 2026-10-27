@@ -12,6 +12,12 @@ import type { ProcessResult, TargetEngineInterface, VenueOrder } from './types.t
 import { TargetEngine as CandidateATarget } from './variants/candidate-a/order-engine.ts';
 import { TargetEngine as CandidateBTarget } from './variants/candidate-b/order-engine.ts';
 import { TargetEngine as CandidateCTarget } from './variants/candidate-c/order-engine.ts';
+import { TargetEngine as CandidateDTarget } from './variants/candidate-d/order-engine.ts';
+import { TargetEngine as CandidateETarget } from './variants/candidate-e/order-engine.ts';
+import { TargetEngine as CandidateFTarget } from './variants/candidate-f/order-engine.ts';
+import { TargetEngine as CandidateGTarget } from './variants/candidate-g/order-engine.ts';
+import { TargetEngine as CandidateHTarget } from './variants/candidate-h/order-engine.ts';
+import { TargetEngine as CandidateITarget } from './variants/candidate-i/order-engine.ts';
 import { TargetEngine as CleanTarget } from './variants/clean/order-engine.ts';
 import { Venue } from './venue.ts';
 
@@ -25,6 +31,18 @@ function createTargetEngine(variant: TargetVariant): TargetEngineInterface {
       return new CandidateBTarget();
     case 'candidate-c':
       return new CandidateCTarget();
+    case 'candidate-d':
+      return new CandidateDTarget();
+    case 'candidate-e':
+      return new CandidateETarget();
+    case 'candidate-f':
+      return new CandidateFTarget();
+    case 'candidate-g':
+      return new CandidateGTarget();
+    case 'candidate-h':
+      return new CandidateHTarget();
+    case 'candidate-i':
+      return new CandidateITarget();
     default:
       throw new Error(`Unknown target variant: ${variant}`);
   }

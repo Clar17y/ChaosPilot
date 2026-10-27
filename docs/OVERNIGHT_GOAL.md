@@ -1,6 +1,6 @@
 # Proposed overnight goal: test the advantage against a stronger baseline
 
-Status: proposed; not activated. The first MVP and prompt 2.0 results are the checkpoint. Existing evidence must stay intact. Human timing remains unmeasured.
+Status: superseded by the participant's [product-foundation direction](PRODUCT_FOUNDATION_PLAN.md); not activated. This original evaluation proposal is retained for later reference. The first MVP and prompt 2.0 results remain the checkpoint. Human timing remains unmeasured.
 
 ## Outcome
 

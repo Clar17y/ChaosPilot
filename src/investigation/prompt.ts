@@ -2,7 +2,7 @@ import * as crypto from 'node:crypto';
 import type { ProviderContext } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
 
-export const PROMPT_VERSION = '2.0';
+export const PROMPT_VERSION = '3.0';
 
 export const SYSTEM_PROMPT_TEMPLATE = [
   'You are an expert distributed systems verification assistant testing an event-driven financial trading system.',
@@ -112,8 +112,31 @@ export function buildInvestigationPrompt(context: ProviderContext): { systemMess
     feedbackSection = `\n\nINVALID PROPOSAL FEEDBACK:\nYour previous proposal was rejected with the following validation errors. Correct these errors without silently omitting requirements:\n${context.feedback.map(f => `- ${f}`).join('\n')}`;
   }
 
-  const userMessage = [
-    `EXPERIMENT PROPOSAL ${context.experimentNumber} OF ${context.maxExperiments}`,
+  let userBriefSection = '';
+  if (context.systemBrief) {
+    const brief = context.systemBrief.brief;
+    const reqList = brief.requirements.length > 0
+      ? brief.requirements.map(r => `  - ${r}`).join('\n')
+      : '  (None specified)';
+    userBriefSection = [
+      '',
+      'USER SYSTEM BRIEF & REQUIREMENTS:',
+      `System: ${brief.name}`,
+      `Overview: ${brief.overview}`,
+      'Supplementary Business Requirements (Context Only):',
+      reqList,
+      'Note: Supplementary business requirements without executable checks remain unverified context and do not alter the deterministic contract invariants.',
+      ''
+    ].join('\n');
+  }
+
+  const userMessageParts = [
+    `EXPERIMENT PROPOSAL ${context.experimentNumber} OF ${context.maxExperiments}`
+  ];
+  if (userBriefSection) {
+    userMessageParts.push(userBriefSection);
+  }
+  userMessageParts.push(
     '',
     'SYSTEM CONTRACT:',
     JSON.stringify(context.contract, null, 2),
@@ -126,7 +149,9 @@ export function buildInvestigationPrompt(context: ProviderContext): { systemMess
     feedbackSection,
     '',
     'Please output the complete JSON experiment for this next proposal.'
-  ].join('\n');
+  );
+
+  const userMessage = userMessageParts.join('\n');
 
   return { systemMessage, userMessage };
 }

@@ -51,8 +51,8 @@ describe('Specialised Investigation Brief & Prompt Builder', () => {
   };
 
   describe('Prompt Constants and Pure Builder', () => {
-    it('exports PROMPT_VERSION 2.0 and stable PROMPT_TEMPLATE_HASH', () => {
-      expect(PROMPT_VERSION).toBe('2.0');
+    it('exports PROMPT_VERSION 3.0 and stable PROMPT_TEMPLATE_HASH', () => {
+      expect(PROMPT_VERSION).toBe('3.0');
       expect(typeof PROMPT_TEMPLATE_HASH).toBe('string');
       expect(PROMPT_TEMPLATE_HASH).toHaveLength(64);
       expect(PROMPT_TEMPLATE_HASH).toMatch(/^[0-9a-f]{64}$/);

@@ -5,11 +5,25 @@ import {
   type Experiment,
   type ExperimentResult,
   type SourceBundle,
+  type SystemContract,
 } from './domain.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
 import { compareSemanticReplay } from './evidence.ts';
+export {
+  SEEDED_TRADING_BRIEF,
+  validateSystemId,
+  validateSystemBrief,
+  computeSnapshotHash,
+  resolveSystemPath,
+  ensureSeededSystem,
+  getSystemBrief,
+  listSystemBriefs,
+  saveSystemBrief,
+  createSystemSnapshot,
+  type SaveSystemOptions,
+} from './systems/index.ts';
 
 export interface RunSummary {
   id: string;
@@ -23,6 +37,14 @@ export interface RunSummary {
   findingsCount: number;
   experimentsCount: number;
   sourceHash: string;
+  /** Minimal pinned brief metadata, present only when the record carries a snapshot. */
+  systemBrief?: {
+    id: string;
+    name: string;
+    revision: number;
+    adapterId: string;
+    hash: string;
+  };
 }
 
 export interface ReplayExperimentOutcome {
@@ -58,6 +80,7 @@ export interface ReplayReport {
 export interface SimulatorApi {
   getSourceBundle(variant: TargetVariant): SourceBundle;
   executeExperiment(experiment: Experiment, variant: TargetVariant): ExperimentResult;
+  getContract?(): SystemContract;
 }
 
 let cachedSimulatorApi: SimulatorApi | null = null;
@@ -243,7 +266,7 @@ export async function listRuns(runsDir = 'runs'): Promise<RunSummary[]> {
           continue;
         }
 
-        summaries.push({
+        const summary: RunSummary = {
           id: parsed.id,
           provider: parsed.provider,
           model: parsed.model || 'unknown',
@@ -255,7 +278,22 @@ export async function listRuns(runsDir = 'runs'): Promise<RunSummary[]> {
           findingsCount: parsed.findings.length,
           experimentsCount: parsed.experiments.length,
           sourceHash: parsed.sourceHash,
-        });
+        };
+        const snap = (parsed as InvestigationRecord).systemBrief;
+        if (
+          snap && typeof snap === 'object' &&
+          snap.brief && typeof snap.brief.id === 'string' &&
+          typeof snap.brief.revision === 'number'
+        ) {
+          summary.systemBrief = {
+            id: snap.brief.id,
+            name: typeof snap.brief.name === 'string' ? snap.brief.name : snap.brief.id,
+            revision: snap.brief.revision,
+            adapterId: typeof snap.brief.adapterId === 'string' ? snap.brief.adapterId : 'unconfigured',
+            hash: typeof snap.hash === 'string' ? snap.hash : '',
+          };
+        }
+        summaries.push(summary);
       } catch {
         continue;
       }

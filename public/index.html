@@ -3,215 +3,375 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ChaosPilot - Negative Scenario Investigation</title>
+  <title>ChaosPilot - System workspace</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="app-layout">
-    <header class="app-header">
-      <div class="header-left">
-        <h1 class="app-title">ChaosPilot</h1>
-        <span class="app-subtitle">Negative testing for event-driven systems</span>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <div class="workspace-layout">
+    <aside class="rail">
+      <div class="brand">Chaos<span>Pilot</span></div>
+      <p class="tagline">Understand the system. Challenge its rules.</p>
+      <div class="control-group">
+        <label for="system-select">System workspace</label>
+        <select id="system-select" class="form-input"></select>
       </div>
-      <div class="header-right">
-        <div id="provenance-badge" class="provenance-badge badge-mock">
-          <span class="badge-dot"></span>
-          <span id="provenance-label">PROVENANCE: MOCK</span>
-        </div>
-        <div id="status-pill" class="status-pill status-idle">
-          <span id="status-text">IDLE</span>
-        </div>
-      </div>
-    </header>
+      <button id="btn-new-system" class="btn btn-secondary rail-wide" type="button">+ New system</button>
+      <nav class="rail-nav" aria-label="System workspace">
+        <button type="button" class="nav-btn" data-view="overview">Overview</button>
+        <button type="button" class="nav-btn" data-view="brief">Brief &amp; requirements</button>
+        <button type="button" class="nav-btn" data-view="capabilities">Capabilities &amp; checks</button>
+        <button type="button" class="nav-btn" data-view="investigations">Investigations</button>
+        <button type="button" class="nav-btn" data-view="findings">Findings &amp; reproductions</button>
+      </nav>
+      <button id="btn-prepare-nav" type="button" class="btn btn-primary rail-wide prepare-action" data-view="prepare">Prepare investigation</button>
+      <p class="rail-note">Selecting <strong>synthetic-trading</strong> always tests the synthetic trading simulator, not an arbitrary application. Other systems can be described and saved as drafts.</p>
+      <p id="announcement" class="visually-hidden" role="status" aria-live="polite"></p>
+    </aside>
 
-    <div id="alert-banner" class="alert-banner hidden">
-      <span id="alert-message"></span>
-      <button id="alert-close" class="btn-text">&times;</button>
+    <div class="workspace-main-wrap">
+      <div id="global-active-run" class="global-active hidden" role="status">
+        <span id="global-active-text">Investigation running</span>
+        <span class="actions">
+          <button type="button" class="btn btn-secondary btn-xs" id="btn-open-global-run">Open run</button>
+          <button type="button" class="btn btn-danger" id="btn-stop-global">Stop investigation</button>
+        </span>
+      </div>
+      <div id="alert-banner" class="alert-banner hidden" role="alert">
+        <span id="alert-message"></span>
+        <button id="alert-close" class="btn-text" type="button" aria-label="Dismiss message">&times;</button>
+      </div>
+
+      <main class="main-content" id="main" tabindex="-1">
+
+        <!-- Overview -->
+        <section class="view" id="view-overview" data-view-panel="overview">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">System workspace</p>
+              <h1 class="view-title" id="title-overview" tabindex="-1">Overview</h1>
+              <p class="muted">A reusable description of the business behaviour you want to investigate.</p>
+            </div>
+            <div class="actions"><button type="button" class="btn btn-primary" data-view="prepare">Prepare investigation</button></div>
+          </header>
+          <div class="grid">
+            <section class="card">
+              <div class="rowtop"><h2>What this system must do</h2><span id="overview-readiness" class="system-badge"></span></div>
+              <p id="overview-purpose">Loading system…</p>
+              <p class="pill-line">
+                <span id="overview-revision" class="system-badge"></span>
+                <span id="overview-adapter" class="system-badge"></span>
+              </p>
+              <button type="button" class="btn btn-secondary" data-view="brief">Read the brief</button>
+            </section>
+            <section class="card">
+              <h2>Verification readiness</h2>
+              <div class="three">
+                <div><div class="big" id="overview-check-count">0</div><small>executable checks available</small></div>
+                <div><div class="big" id="overview-context-count">0</div><small>contextual requirements</small></div>
+                <div><div class="big" id="overview-run-count">0</div><small>saved runs for this system</small></div>
+              </div>
+              <p class="muted">Check availability is not test coverage and not a passing result.</p>
+              <button type="button" class="btn btn-secondary" data-view="capabilities">Inspect capabilities</button>
+            </section>
+          </div>
+          <div class="grid">
+          <section class="card">
+            <h2>Understand, investigate, explain</h2>
+            <div class="step"><b class="number">1</b><div><strong>Describe the business rules</strong><p>Keep expectations visible, editable and separate from executable checks.</p></div></div>
+            <div class="step"><b class="number">2</b><div><strong>Pin the context before launch</strong><p>Each run keeps its brief revision, source scope and execution configuration.</p></div></div>
+            <div class="step"><b class="number">3</b><div><strong>Inspect reproducible evidence</strong><p>Connect an observed violation to a rule, event sequence, replay and clean comparison.</p></div></div>
+          </section>
+          <section class="card">
+            <h2>Latest saved investigation for this system</h2>
+            <div id="overview-run"><p class="muted">No saved investigations for this system yet.</p></div>
+          </section>
+          </div>
+        </section>
+
+        <!-- Brief & requirements -->
+        <section class="view hidden" id="view-brief" data-view-panel="brief">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Current system brief</p>
+              <h1 class="view-title" id="title-brief" tabindex="-1">Brief &amp; requirements</h1>
+              <p class="muted">Edits apply to future investigations. Saved evidence keeps its original snapshot.</p>
+            </div>
+          </header>
+          <section class="card system-card">
+            <div class="system-header">
+              <div>
+                <h2 class="card-title">System brief</h2>
+                <span class="card-subtitle">Author reusable business context. Saving creates a new revision.</span>
+              </div>
+              <div class="system-header-actions">
+                <span id="system-revision-badge" class="system-badge">Rev 1</span>
+                <span id="system-adapter-badge" class="system-badge badge-adapter-exec">synthetic-trading</span>
+                <span id="system-save-status" class="system-save-status">Saved</span>
+              </div>
+            </div>
+            <div class="system-form-grid">
+              <div class="control-group">
+                <label for="system-id-input">System Profile ID</label>
+                <input type="text" id="system-id-input" class="form-input" placeholder="e.g. trading-gateway" readonly>
+                <span class="input-hint">3–64 lowercase letters, numbers, dashes or underscores</span>
+              </div>
+              <div class="control-group">
+                <label for="system-name-input">System Name</label>
+                <input type="text" id="system-name-input" class="form-input" placeholder="e.g. ChaosPilot Trading Gateway">
+              </div>
+              <div class="control-group">
+                <label for="system-adapter-select">Execution Adapter</label>
+                <select id="system-adapter-select" class="form-input">
+                  <option value="synthetic-trading">synthetic-trading (Executable simulator)</option>
+                  <option value="unconfigured">unconfigured (Draft spec - Run disabled)</option>
+                </select>
+              </div>
+            </div>
+            <div class="control-group">
+              <label for="system-overview-input">Business Overview</label>
+              <textarea id="system-overview-input" class="form-input" rows="2" placeholder="High-level description of this event-driven business system..."></textarea>
+            </div>
+            <div class="control-group">
+              <label for="system-requirements-input">Supplementary Business Requirements <span class="badge-tag">Contextual &bull; Not Automatically Verified</span></label>
+              <textarea id="system-requirements-input" class="form-input" rows="4" placeholder="One requirement per line. These provide guidance for model hypotheses but are NOT automatically verified unless supported by an executable oracle."></textarea>
+              <span class="input-hint"><strong>Notice:</strong> Supplementary requirements provide context for investigation hypotheses. They are NOT automatically verified by an executable oracle unless supported by the target simulator adapter.</span>
+            </div>
+            <div class="system-actions">
+              <button id="btn-save-system" class="btn btn-primary" type="button">Save System Brief</button>
+              <button id="btn-discard-system" class="btn btn-secondary" type="button">Discard Changes</button>
+              <span id="system-feedback" class="action-feedback" role="status"></span>
+            </div>
+          </section>
+        </section>
+
+        <!-- Capabilities & checks -->
+        <section class="view hidden" id="view-capabilities" data-view-panel="capabilities">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Execution boundary</p>
+              <h1 class="view-title" id="title-capabilities" tabindex="-1">Capabilities &amp; checks</h1>
+              <p class="muted">Know what this adapter can observe before interpreting its results.</p>
+            </div>
+            <div class="actions"><button type="button" class="btn btn-primary" data-view="prepare">Prepare investigation</button></div>
+          </header>
+          <section class="card">
+            <div class="executable-header">
+              <h2 id="contract-availability-title">Synthetic Trading Rules &amp; Available Checks</h2>
+              <span id="adapter-readiness-label" class="readiness-label readiness-ready">Ready for investigation</span>
+            </div>
+            <p id="contract-availability-description" class="section-desc">These invariants are enforced deterministically by the verifier oracle. Supplementary prose above does not alter these checks.</p>
+            <div id="invariants-list" class="invariants-grid"></div>
+            <details class="contract-details">
+              <summary>View Raw Simulator Contract &amp; Vocabulary</summary>
+              <pre id="raw-contract-view" class="code-block"></pre>
+            </details>
+          </section>
+          <p id="capabilities-scope-note" class="note warn hidden">No adapter is configured for this system, so there is no supported execution contract to show. The synthetic trading operations and message vocabulary are not listed here because they would not run for this system.</p>
+          <div class="grid" id="contract-lists">
+            <section class="card" id="operations-card">
+              <h2>Supported operations</h2>
+              <div id="operations-list"><p class="muted">Loading contract…</p></div>
+            </section>
+            <section class="card" id="messages-card">
+              <h2>Message vocabulary</h2>
+              <div id="messages-list"><p class="muted">Loading contract…</p></div>
+            </section>
+          </div>
+          <section class="card">
+            <h2>Outside the current execution scope</h2>
+            <ul>
+              <li><strong>Unsupported:</strong> real component outages or drops, and real latency or liveness deadlines. Logical delays model ordering only; they do not measure transport latency.</li>
+              <li><strong>Not configured:</strong> external transports such as FIX, TIBCO RV, Solace, Kafka and HTTP.</li>
+              <li><strong>Context only:</strong> supplementary brief prose. It guides hypotheses and is not verified unless an executable check exists.</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- Prepare investigation -->
+        <section class="view hidden" id="view-prepare" data-view-panel="prepare">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Next investigation</p>
+              <h1 class="view-title" id="title-prepare" tabindex="-1">Prepare investigation</h1>
+              <p class="muted">Uses the latest saved brief revision. This configuration does not change any saved run.</p>
+            </div>
+          </header>
+          <div id="prepare-dirty-note" class="note warn hidden">There are unsaved brief edits. Launch is blocked until you save or discard them. <button type="button" class="btn btn-secondary btn-xs" data-view="brief">Review and save edits</button></div>
+          <div class="grid">
+            <section class="card">
+              <h2>1. Review the pinned context</h2>
+              <p class="pill-line"><span id="prepare-revision" class="system-badge"></span><span id="prepare-adapter" class="system-badge"></span></p>
+              <p id="prepare-purpose"></p>
+              <p class="muted" id="prepare-counts"></p>
+              <details>
+                <summary>Read the model-visible context</summary>
+                <h3>Business overview</h3><p id="prepare-overview"></p>
+                <h3>Supplementary requirements (context only)</h3><ul id="prepare-requirements"></ul>
+                <p class="muted">The model sees the saved brief, the public contract and the selected neutral business source. It does not see a hidden catalog or other candidate variants. Selecting synthetic-trading always tests the synthetic trading simulator, not an arbitrary application described in the brief.</p>
+              </details>
+            </section>
+            <section class="card control-card">
+              <h2 class="card-title">2. Set the bounded investigation</h2>
+              <div class="controls-grid prepare-grid">
+                <div class="control-group">
+                  <label for="target-select">Target Variant</label>
+                  <select id="target-select" class="form-input"></select>
+                </div>
+                <div class="control-group">
+                  <label for="provider-select">Provider</label>
+                  <select id="provider-select" class="form-input">
+                    <option value="mock" selected>Mock (Scripted offline mock)</option>
+                    <option value="meta">Meta API (Live model)</option>
+                  </select>
+                  <span id="meta-key-hint" class="input-hint hidden">MODEL_API_KEY required</span>
+                  <span id="prepare-meta-readiness" class="input-hint"></span>
+                </div>
+                <div class="control-group">
+                  <label for="max-experiments-input">Max Experiments</label>
+                  <input type="number" id="max-experiments-input" class="form-input" min="1" max="20" value="5">
+                </div>
+                <div class="control-actions">
+                  <button id="btn-launch" class="btn btn-primary" type="button" disabled>Launch Investigation</button>
+                  <button id="btn-stop" class="btn btn-danger" type="button" disabled>Stop</button>
+                </div>
+              </div>
+              <div class="provenance-notice"><strong>Scripted mode demonstrates the workflow.</strong> Select Meta for a live AI investigation. Saved experiments replay without a model call. Meta readiness reflects only whether the backend reports a configured key; billing is not probed and no credential is shown.</div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Investigations -->
+        <section class="view hidden" id="view-investigations" data-view-panel="investigations">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Saved evidence</p>
+              <h1 class="view-title" id="title-investigations" tabindex="-1">Investigations</h1>
+              <p class="muted">History is scoped to the selected system and the brief revision pinned to each run.</p>
+            </div>
+            <div class="actions"><button type="button" class="btn btn-primary" data-view="prepare">Prepare investigation</button></div>
+          </header>
+          <div id="active-other-system" class="note warn hidden">
+            <span id="active-other-system-text"></span>
+            <button type="button" class="btn btn-secondary btn-xs" id="btn-open-active-run">Open active run</button>
+          </div>
+
+          <section id="active-dashboard" class="card dashboard-card">
+            <div class="dashboard-header">
+              <h2 class="card-title">Investigation</h2>
+              <div class="dashboard-meta">
+                <span id="dash-run-id" class="meta-item">No active run</span>
+                <span id="dash-system-brief" class="meta-item"></span>
+                <span id="dash-target" class="meta-item"></span>
+                <span id="dash-time" class="meta-item"></span>
+                <span id="dash-model" class="meta-item"></span>
+              </div>
+              <div class="header-right" id="dashboard-header-right">
+                <div id="provenance-badge" class="provenance-badge badge-mock"><span class="badge-dot"></span><span id="provenance-label">PROVENANCE: MOCK</span></div>
+                <div id="status-pill" class="status-pill status-idle"><span id="status-text">IDLE</span></div>
+                <button id="btn-stop-dashboard" class="btn btn-danger hidden" type="button">Stop investigation</button>
+              </div>
+            </div>
+            <div id="inspection-notice" class="note warn hidden"></div>
+            <div id="dashboard-empty" class="empty-state">No investigation selected. Open a saved run from history or prepare a new investigation.</div>
+            <div id="dashboard-detail" class="hidden">
+            <details id="run-system-snapshot" class="contract-details hidden">
+              <summary>Requirements used for this investigation</summary>
+              <p id="run-system-overview"></p>
+              <p>Supplementary requirements recorded for this run (context only):</p>
+              <ul id="run-system-requirements"></ul>
+              <p id="run-system-contract"></p>
+            </details>
+            <div class="metrics-row">
+              <div class="metric-box"><span class="metric-label">Status</span><span id="metric-status" class="metric-value">IDLE</span></div>
+              <div class="metric-box"><span class="metric-label">Experiments executed</span><span id="metric-experiments" class="metric-value">0 / 0</span></div>
+              <div class="metric-box"><span class="metric-label">Confirmed Findings</span><span id="metric-findings" class="metric-value highlight">0</span></div>
+              <div class="metric-box"><span class="metric-label">Reported Tokens / Estimated Cost</span><span id="metric-usage" class="metric-value">0 in / 0 out ($0.00)</span></div>
+            </div>
+            <div class="tabs-container">
+              <div class="tabs-nav" role="tablist" aria-label="Run detail">
+                <button class="tab-btn active" data-tab="tab-findings" type="button">Findings (<span id="count-findings">0</span>)</button>
+                <button class="tab-btn" data-tab="tab-experiments" type="button">Experiments (<span id="count-experiments">0</span>)</button>
+                <button class="tab-btn" data-tab="tab-proposals" type="button">Proposals (<span id="count-proposals">0</span>)</button>
+                <button class="tab-btn" data-tab="tab-trace" type="button">Action Trace &amp; Timeline</button>
+                <button class="tab-btn" data-tab="tab-state" type="button">Order &amp; Credit Exposure</button>
+              </div>
+              <div id="tab-findings" class="tab-pane active"><div id="findings-container" class="findings-list"><div class="empty-state">No findings recorded yet. Launch an investigation to observe behavior.</div></div></div>
+              <div id="tab-experiments" class="tab-pane"><div id="experiments-container" class="experiments-list"><div class="empty-state">No experiments executed yet.</div></div></div>
+              <div id="tab-proposals" class="tab-pane"><p id="proposal-summary">No proposals recorded yet.</p><p id="run-notes" class="run-notes"></p><div id="proposals-container"></div></div>
+              <div id="tab-trace" class="tab-pane">
+                <div class="trace-header"><h3 id="trace-title">Execution Trace</h3><span id="trace-exp-selector-label">Select an experiment to view trace.</span></div>
+                <div id="trace-container" class="trace-timeline"><div class="empty-state">Select an experiment from the Experiments tab to inspect action steps.</div></div>
+              </div>
+              <div id="tab-state" class="tab-pane">
+                <div class="state-grid">
+                  <div class="state-section"><h3>Credit &amp; Gateway Accounting</h3><div id="credit-state-table" class="snapshot-table"><div class="empty-state">No snapshot state available.</div></div></div>
+                  <div class="state-section"><h3>Orders Tracked</h3><div id="orders-state-table" class="snapshot-table"><div class="empty-state">No orders active in snapshot.</div></div></div>
+                </div>
+              </div>
+            </div>
+            </div>
+          </section>
+
+          <section class="card history-card">
+            <div class="history-header">
+              <h2 class="card-title">Run History &amp; Replay Verification</h2>
+              <button id="btn-refresh-history" class="btn btn-secondary" type="button">Refresh History</button>
+            </div>
+            <p class="muted" id="history-scope-note">Scoped to the selected system.</p>
+            <div class="table-responsive" role="region" aria-label="Saved investigation history" tabindex="0">
+              <table class="data-table">
+                <thead><tr><th>Run ID</th><th>Brief</th><th>Target</th><th>Provider / Mode</th><th>Status</th><th>Experiments</th><th>Findings</th><th>Started At</th><th>Actions</th></tr></thead>
+                <tbody id="history-tbody"><tr><td colspan="9" class="text-center">Loading run artifacts...</td></tr></tbody>
+              </table>
+            </div>
+            <h3 class="legacy-heading">Legacy / system unavailable</h3>
+            <p class="muted">Older records with no system snapshot. They are not assigned to the selected system.</p>
+            <div class="table-responsive" role="region" aria-label="Legacy run history" tabindex="0">
+              <table class="data-table">
+                <thead><tr><th>Run ID</th><th>Target</th><th>Provider / Mode</th><th>Status</th><th>Experiments</th><th>Findings</th><th>Started At</th><th>Actions</th></tr></thead>
+                <tbody id="legacy-tbody"><tr><td colspan="8" class="text-center">No legacy records.</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- Findings & reproductions -->
+        <section class="view hidden" id="view-findings" data-view-panel="findings">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Business failures and reproductions</p>
+              <h1 class="view-title" id="title-findings" tabindex="-1">Findings &amp; reproductions</h1>
+              <p class="muted">Evidence stays linked to a requirement, an exact sequence and a saved run. Saved reproductions can be inspected and replayed from the run that produced them.</p>
+            </div>
+          </header>
+          <section class="card">
+            <h2>Saved runs with findings</h2>
+            <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
+          </section>
+          <section class="card">
+            <h2>Findings in the currently opened run</h2>
+            <p class="muted">Open a run from Investigations to inspect its findings, replay and clean comparison in detail.</p>
+            <div id="findings-opened-summary"><p class="muted">No run is currently opened.</p></div>
+          </section>
+        </section>
+
+      </main>
+      <footer class="app-footer">
+        <div>ChaosPilot &bull; Source-aware investigation &bull; Deterministic replay</div>
+        <div>Local 127.0.0.1</div>
+      </footer>
     </div>
+  </div>
 
-    <main class="main-content">
-      <!-- Control Panel -->
-      <section class="card control-card">
-        <h2 class="card-title">Investigation Controls</h2>
-        <div class="controls-grid">
-          <div class="control-group">
-            <label for="target-select">Target Variant</label>
-            <select id="target-select" class="form-input">
-              <option value="candidate-a" selected>Candidate A</option>
-              <option value="candidate-b">Candidate B</option>
-              <option value="candidate-c">Candidate C</option>
-              <option value="clean">Clean control</option>
-            </select>
-          </div>
-
-          <div class="control-group">
-            <label for="provider-select">Provider</label>
-            <select id="provider-select" class="form-input">
-              <option value="mock" selected>Mock (Scripted offline mock)</option>
-              <option value="meta">Meta API (Live model)</option>
-            </select>
-            <span id="meta-key-hint" class="input-hint hidden">MODEL_API_KEY required</span>
-          </div>
-
-          <div class="control-group">
-            <label for="max-experiments-input">Max Experiments</label>
-            <input type="number" id="max-experiments-input" class="form-input" min="1" max="20" value="5">
-          </div>
-
-          <div class="control-actions">
-            <button id="btn-launch" class="btn btn-primary">Launch Investigation</button>
-            <button id="btn-stop" class="btn btn-danger" disabled>Stop</button>
-          </div>
-        </div>
-
-        <div class="provenance-notice">
-          <strong>Scripted mode demonstrates the workflow.</strong> Select Meta for a live AI investigation. Saved experiments replay without a model call.
-        </div>
-      </section>
-
-      <!-- Active Run Overview -->
-      <section id="active-dashboard" class="card dashboard-card">
-        <div class="dashboard-header">
-          <h2 class="card-title">Investigation</h2>
-          <div class="dashboard-meta">
-            <span id="dash-run-id" class="meta-item">No active run</span>
-            <span id="dash-target" class="meta-item"></span>
-            <span id="dash-time" class="meta-item"></span>
-            <span id="dash-model" class="meta-item"></span>
-          </div>
-        </div>
-
-        <div class="metrics-row">
-          <div class="metric-box">
-            <span class="metric-label">Status</span>
-            <span id="metric-status" class="metric-value">IDLE</span>
-          </div>
-          <div class="metric-box">
-            <span class="metric-label">Experiments</span>
-            <span id="metric-experiments" class="metric-value">0 / 0</span>
-          </div>
-          <div class="metric-box">
-            <span class="metric-label">Confirmed Findings</span>
-            <span id="metric-findings" class="metric-value highlight">0</span>
-          </div>
-          <div class="metric-box">
-            <span class="metric-label">Reported Tokens / Estimated Cost</span>
-            <span id="metric-usage" class="metric-value">0 in / 0 out ($0.00)</span>
-          </div>
-        </div>
-
-        <div class="tabs-container">
-          <div class="tabs-nav">
-            <button class="tab-btn active" data-tab="tab-findings">Findings (<span id="count-findings">0</span>)</button>
-            <button class="tab-btn" data-tab="tab-experiments">Experiments (<span id="count-experiments">0</span>)</button>
-            <button class="tab-btn" data-tab="tab-proposals">Proposals (<span id="count-proposals">0</span>)</button>
-            <button class="tab-btn" data-tab="tab-trace">Action Trace &amp; Timeline</button>
-            <button class="tab-btn" data-tab="tab-state">Order &amp; Credit Exposure</button>
-          </div>
-
-          <!-- Tab: Findings -->
-          <div id="tab-findings" class="tab-pane active">
-            <div id="findings-container" class="findings-list">
-              <div class="empty-state">No findings recorded yet. Launch an investigation to observe behavior.</div>
-            </div>
-          </div>
-
-          <!-- Tab: Experiments -->
-          <div id="tab-experiments" class="tab-pane">
-            <div id="experiments-container" class="experiments-list">
-              <div class="empty-state">No experiments executed yet.</div>
-            </div>
-          </div>
-
-          <!-- Tab: Trace -->
-          <div id="tab-proposals" class="tab-pane">
-            <p id="proposal-summary">No proposals recorded yet.</p>
-            <p id="run-notes" class="run-notes"></p>
-            <div id="proposals-container"></div>
-          </div>
-
-          <div id="tab-trace" class="tab-pane">
-            <div class="trace-header">
-              <h3 id="trace-title">Execution Trace</h3>
-              <span id="trace-exp-selector-label">Select an experiment to view trace.</span>
-            </div>
-            <div id="trace-container" class="trace-timeline">
-              <div class="empty-state">Select an experiment from the Experiments tab to inspect action steps.</div>
-            </div>
-          </div>
-
-          <!-- Tab: State -->
-          <div id="tab-state" class="tab-pane">
-            <div class="state-grid">
-              <div class="state-section">
-                <h3>Credit &amp; Gateway Accounting</h3>
-                <div id="credit-state-table" class="snapshot-table">
-                  <div class="empty-state">No snapshot state available.</div>
-                </div>
-              </div>
-              <div class="state-section">
-                <h3>Orders Tracked</h3>
-                <div id="orders-state-table" class="snapshot-table">
-                  <div class="empty-state">No orders active in snapshot.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- History & Replay Section -->
-      <section class="card history-card">
-        <div class="history-header">
-          <h2 class="card-title">Run History &amp; Replay Verification</h2>
-          <button id="btn-refresh-history" class="btn btn-secondary">Refresh History</button>
-        </div>
-
-        <div class="table-responsive">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Run ID</th>
-                <th>Target</th>
-                <th>Provider / Mode</th>
-                <th>Status</th>
-                <th>Experiments</th>
-                <th>Findings</th>
-                <th>Started At</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="history-tbody">
-              <tr>
-                <td colspan="8" class="text-center">Loading run artifacts...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Replay Result Modal / Container -->
-        <div id="replay-modal" class="replay-modal hidden">
-          <div class="replay-modal-content">
-            <div class="replay-modal-header">
-              <h3>Deterministic Replay Report</h3>
-              <button id="btn-close-replay" class="btn-text">&times;</button>
-            </div>
-            <div id="replay-report-body" class="replay-report-body">
-              <!-- Rendered via textContent -->
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="app-footer">
-      <div class="footer-left">
-        ChaosPilot &bull; Source-aware investigation &bull; Deterministic replay
+  <div id="replay-modal" class="replay-modal hidden" role="dialog" aria-modal="true" aria-labelledby="replay-modal-title">
+    <div class="replay-modal-content">
+      <div class="replay-modal-header">
+        <h3 id="replay-modal-title">Deterministic Replay Report</h3>
+        <button id="btn-close-replay" class="btn-text" type="button" aria-label="Close replay report">&times;</button>
       </div>
-      <div class="footer-right">
-        Port 4310 &bull; Local 127.0.0.1
-      </div>
-    </footer>
+      <div id="replay-report-body" class="replay-report-body"></div>
+    </div>
   </div>
 
   <script type="module" src="/app.js"></script>

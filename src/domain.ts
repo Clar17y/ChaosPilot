@@ -1,5 +1,5 @@
 // Integration contracts. Target implementation and hidden evaluation metadata live elsewhere.
-export const TARGET_VARIANTS = ['clean', 'candidate-a', 'candidate-b', 'candidate-c'] as const;
+export const TARGET_VARIANTS = ['clean', 'candidate-a', 'candidate-b', 'candidate-c', 'candidate-d', 'candidate-e', 'candidate-f', 'candidate-g', 'candidate-h', 'candidate-i'] as const;
 export type TargetVariant = typeof TARGET_VARIANTS[number];
 export type ProviderKind = 'mock' | 'meta';
 export type Channel = 'market' | 'credit' | 'client' | 'reports';
@@ -31,6 +31,24 @@ export interface SystemContract {
   messages: Record<string, unknown>[];
   invariants: { id: string; description: string }[];
   limits: Record<string, number>;
+}
+
+export interface SystemBrief {
+  schemaVersion: 1;
+  id: string;
+  revision: number;
+  name: string;
+  overview: string;
+  // Additional human requirements are context until a deterministic check is configured.
+  requirements: string[];
+  adapterId: 'synthetic-trading' | 'unconfigured';
+  updatedAt: string;
+}
+
+export interface SystemBriefSnapshot {
+  brief: SystemBrief;
+  contract: SystemContract | null;
+  hash: string;
 }
 
 export interface Violation {
@@ -82,6 +100,7 @@ export interface ProviderContext {
   experimentNumber: number;
   maxExperiments: number;
   feedback?: string[];
+  systemBrief?: SystemBriefSnapshot;
 }
 
 export type ProposalAttemptStatus =
@@ -194,6 +213,7 @@ export interface InvestigationRecord {
     maxProposalAttempts?: number;
   };
   proposalAttempts?: ProposalAttempt[];
+  systemBrief?: SystemBriefSnapshot;
 }
 
 export interface InvestigationOptions {
@@ -204,4 +224,5 @@ export interface InvestigationOptions {
   provider: ExperimentProvider;
   signal?: AbortSignal;
   onUpdate?: (record: InvestigationRecord) => void | Promise<void>;
+  systemBrief?: SystemBriefSnapshot;
 }

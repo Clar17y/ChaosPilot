@@ -14,6 +14,8 @@ import {
   validateRunId,
   normalizeRunInput,
   saveBenchmarkReport,
+  getSystemBrief,
+  createSystemSnapshot,
 } from './storage.ts';
 import { runEvaluation } from './evaluation.ts';
 import {
@@ -36,6 +38,7 @@ interface ParsedArgs {
   trials?: number;
   seeds?: number[];
   id?: string;
+  systemId?: string;
   help?: boolean;
 }
 
@@ -153,6 +156,11 @@ function parseCliArgs(args: string[]): ParsedArgs {
       const val = arg.startsWith('--id=') ? arg.slice('--id='.length) : args[++i];
       if (!val) throw new Error(`Missing value for --id.`);
       result.id = val;
+    } else if (arg === '--system-id' || arg.startsWith('--system-id=') || arg === '--system' || arg.startsWith('--system=')) {
+      const prefix = arg.startsWith('--system-id=') ? '--system-id=' : (arg.startsWith('--system=') ? '--system=' : null);
+      const val = prefix ? arg.slice(prefix.length) : args[++i];
+      if (!val) throw new Error(`Missing value for --system-id.`);
+      result.systemId = val;
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: "${arg}". Use --help to view supported options.`);
     } else {
@@ -196,6 +204,7 @@ Options:
   --trials          Number of trials (default: 3 for evaluate, 2 for benchmark)
   --seeds           Comma-separated seeds (e.g. 1001,1002,1003)
   --id              Run artifact ID for replay command or benchmark ID
+  --system-id       System brief ID to investigate (default: trading-gateway)
   --help, -h        Show this help message
 `);
 }
@@ -204,6 +213,19 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
   const providerKind = args.provider;
   const target = args.target;
   const maxExperiments = args.maxExperiments ?? 5;
+
+  const systemId = args.systemId || 'trading-gateway';
+  const systemsDir = path.join('runs', 'systems');
+  const brief = await getSystemBrief(systemId, systemsDir);
+  if (!brief) {
+    console.error(`\n[Error] System brief "${systemId}" not found in ${systemsDir}.\n`);
+    process.exit(1);
+  }
+  if (brief.adapterId === 'unconfigured') {
+    console.error(`\n[Error] Cannot launch investigation: System brief "${brief.name}" has unconfigured adapter.\n`);
+    process.exit(1);
+  }
+  const snapshot = await createSystemSnapshot(brief);
 
   // Clear missing-key error requirement
   if (providerKind === 'meta') {
@@ -218,6 +240,8 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
 
   console.log(`\n============================================================`);
   console.log(` ChaosPilot Investigation`);
+  console.log(` System Brief:    ${snapshot.brief.name} (Rev ${snapshot.brief.revision})`);
+  console.log(` Brief Hash:      ${snapshot.hash.slice(0, 16)}...`);
   console.log(` Target Variant:  ${target}`);
   console.log(` Provider:        ${providerKind.toUpperCase()}`);
   console.log(` Max Experiments: ${maxExperiments}`);
@@ -270,6 +294,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       variant: target,
       maxExperiments,
       provider,
+      systemBrief: structuredClone(snapshot),
       signal: abortController.signal,
       onUpdate: async (rec) => {
         latestRecord = rec;
@@ -296,6 +321,12 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
   console.log(` Run ID:         ${record.id}`);
   console.log(` Status:         ${record.status.toUpperCase()}`);
   console.log(` Target:         ${record.variant}`);
+  if (record.systemBrief) {
+    console.log(` System Brief:   ${record.systemBrief.brief.name} (Rev ${record.systemBrief.brief.revision})`);
+    console.log(` Brief Hash:     ${record.systemBrief.hash}`);
+  } else {
+    console.log(` System Brief:   None (legacy / direct run)`);
+  }
   console.log(` Provider:       ${record.provider} (${record.model})`);
   console.log(` Mode:           ${record.mode.toUpperCase()}`);
   console.log(` Source Hash:    ${record.sourceHash}`);
