@@ -205,14 +205,15 @@ describe("worktrees CLI", () => {
     expect(fs.readFileSync(path.join(target, "untracked.txt"), "utf8")).toBe("keep me\n");
   });
 
-  it("refuses ignored secrets/evidence/logs but allows generated-only roots", () => {
-    const { primary, root } = makeRepo();
+  it("backs up ignored secrets/evidence/logs byte-for-byte, then removes; generated-only roots stay disposable", () => {
+    const { tmp, primary, root } = makeRepo();
     const target = path.join(root, "ign");
     expect(runCli(["setup", "ign", "--no-install"], primary).status).toBe(0);
 
     const cases: Array<[string, string]> = [
-      [".env", "SECRET=1\n"],
+      [".env", "SECRET=fixture-only\n"],
       [path.join("runs", "evidence.txt"), "evidence\n"],
+      [path.join("runs", "deep dir", "unicodé log.txt"), "unicode content é\n"],
       ["app.log", "log line\n"],
       ["scratch-private.txt", "private\n"],
       [path.join(".llm-output", "note.txt"), "note\n"],
@@ -221,19 +222,262 @@ describe("worktrees CLI", () => {
       const p = path.join(target, rel);
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, content);
-      const r = runCli(["teardown", "ign"], primary);
-      expect(r.status, rel).not.toBe(0);
-      expect(r.stderr).toContain("ignored");
-      expect(fs.readFileSync(p, "utf8")).toBe(content);
-      fs.rmSync(path.join(target, rel.split(path.sep)[0] as string), { recursive: true, force: true });
     }
-
     for (const dir of ["node_modules", "dist", "coverage"]) {
       fs.mkdirSync(path.join(target, dir), { recursive: true });
       fs.writeFileSync(path.join(target, dir, "out.bin"), "generated\n");
     }
     const ok = runCli(["teardown", "ign"], primary);
     expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(git(["show-ref", "--verify", "refs/heads/codex/ign"], primary)).toContain("codex/ign");
+    const m = ok.stdout.match(/Backed up \d+ ignored file\(s\) from .* to (.+?) \(verified byte-for-byte\)/);
+    expect(m, ok.stdout).not.toBeNull();
+    const backup = (m as RegExpMatchArray)[1] as string;
+    expect(backup.startsWith(path.join(tmp, "primary repo-worktree-backups"))).toBe(true);
+    for (const [rel, content] of cases) {
+      expect(fs.readFileSync(path.join(backup, rel), "utf8"), rel).toBe(content);
+    }
+    expect(fs.existsSync(path.join(backup, "node_modules"))).toBe(false);
+    expect(ok.stdout).not.toContain("SECRET=fixture-only");
+    expect(ok.stderr).not.toContain("SECRET=fixture-only");
+  });
+
+  it("allows generated-only teardown without a backup", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "genonly");
+    expect(runCli(["setup", "genonly", "--no-install"], primary).status).toBe(0);
+    for (const dir of ["node_modules", "dist", "coverage"]) {
+      fs.mkdirSync(path.join(target, dir), { recursive: true });
+      fs.writeFileSync(path.join(target, dir, "out.bin"), "generated\n");
+    }
+    const ok = runCli(["teardown", "genonly"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.existsSync(path.join(tmp, "primary repo-worktree-backups"))).toBe(false);
+  });
+
+  it("preserves an empty ignored directory in the backup", () => {
+    const { primary, root } = makeRepo();
+    const target = path.join(root, "emptydir");
+    expect(runCli(["setup", "emptydir", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "runs", "empty", "nested"), { recursive: true });
+    fs.mkdirSync(path.join(target, "runs", "empty", "sibling leaf"), { recursive: true });
+    fs.writeFileSync(path.join(target, "runs", "evidence.txt"), "evidence alongside empty dirs\n");
+    const ok = runCli(["teardown", "emptydir"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    const m = ok.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    const backup = (m as RegExpMatchArray)[1] as string;
+    expect(fs.existsSync(path.join(backup, "runs", "empty", "nested"))).toBe(true);
+    expect(fs.existsSync(path.join(backup, "runs", "empty", "sibling leaf"))).toBe(true);
+    expect(fs.readFileSync(path.join(backup, "runs", "evidence.txt"), "utf8")).toBe("evidence alongside empty dirs\n");
+  });
+
+  it("fails teardown closed on a link inside an ignored directory tree, preserving source", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "nestedlink");
+    expect(runCli(["setup", "nestedlink", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "runs", "empty", "nested"), { recursive: true });
+    fs.writeFileSync(path.join(target, "runs", "evidence.txt"), "keep me\n");
+    const external = path.join(tmp, "outside-tree");
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(external, "sentinel.txt"), "outside\n");
+    let linkMade = true;
+    try { fs.symlinkSync(external, path.join(target, "runs", "empty", "linkdir"), process.platform === "win32" ? "junction" : "dir"); } catch { linkMade = false; }
+    if (linkMade) {
+      const r = runCli(["teardown", "nestedlink"], primary);
+      expect(r.status, r.stdout + r.stderr).not.toBe(0);
+      expect(fs.existsSync(target)).toBe(true);
+      expect(fs.readFileSync(path.join(target, "runs", "evidence.txt"), "utf8")).toBe("keep me\n");
+      expect(fs.existsSync(path.join(target, "runs", "empty", "nested"))).toBe(true);
+      expect(fs.readFileSync(path.join(external, "sentinel.txt"), "utf8")).toBe("outside\n");
+      expect(git(["worktree", "list", "--porcelain"], primary)).toContain("branch refs/heads/codex/nestedlink\n");
+    }
+  });
+
+  it("backs up POSIX filenames containing literal backslashes distinctly from nested paths", () => {
+    // Genuine fixture only on POSIX: Windows forbids `\` in a filename
+    // component (it is the separator there), so this is unproved on Windows.
+    if (process.platform === "win32") return;
+    const { primary, root } = makeRepo();
+    const target = path.join(root, "backslash");
+    expect(runCli(["setup", "backslash", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "runs", "a"), { recursive: true });
+    fs.writeFileSync(path.join(target, "runs", "a\\b.log"), "literal backslash\n");
+    fs.writeFileSync(path.join(target, "runs", "a", "b.log"), "nested path\n");
+    fs.mkdirSync(path.join(target, "runs", "d\\e"), { recursive: true });
+    const ok = runCli(["teardown", "backslash"], primary);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    const m = ok.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    const backup = (m as RegExpMatchArray)[1] as string;
+    expect(fs.readFileSync(path.join(backup, "runs", "a\\b.log"), "utf8")).toBe("literal backslash\n");
+    expect(fs.readFileSync(path.join(backup, "runs", "a", "b.log"), "utf8")).toBe("nested path\n");
+    expect(fs.existsSync(path.join(backup, "runs", "d\\e"))).toBe(true);
+  });
+
+  it("copies primary .env byte-for-byte on setup (also --no-install and reused branch); absent .env continues; codex/ prefix accepted", () => {
+    const { primary, root } = makeRepo();
+    const target = path.join(root, "envcopy");
+    const secret = "FIXTURE_KEY=dummy-only-value\r\nOTHER=1\n";
+    fs.writeFileSync(path.join(primary, ".env"), secret);
+    const setup = runCli(["setup", "codex/envcopy", "--no-install"], primary);
+    expect(setup.status, setup.stderr).toBe(0);
+    expect(setup.stdout).toContain("Copied .env");
+    expect(setup.stdout).not.toContain("dummy-only-value");
+    expect(setup.stderr).not.toContain("dummy-only-value");
+    expect(fs.readFileSync(path.join(target, ".env"), "utf8")).toBe(secret);
+
+    // .env copied by setup is backed up by an immediate teardown.
+    const td = runCli(["teardown", "codex/envcopy"], primary);
+    expect(td.status, td.stderr).toBe(0);
+    expect(fs.existsSync(target)).toBe(false);
+    const m = td.stdout.match(/to (.+?) \(verified byte-for-byte\)/);
+    expect(fs.readFileSync(path.join((m as RegExpMatchArray)[1] as string, ".env"), "utf8")).toBe(secret);
+
+    // Reused branch also receives the .env copy.
+    const reused = runCli(["setup", "envcopy", "--no-install"], primary);
+    expect(reused.status, reused.stderr).toBe(0);
+    expect(reused.stdout).toContain("Reused existing branch");
+    expect(fs.readFileSync(path.join(target, ".env"), "utf8")).toBe(secret);
+    expect(runCli(["teardown", "envcopy"], primary).status).toBe(0);
+
+    // Absent .env: success with a clear message.
+    fs.unlinkSync(path.join(primary, ".env"));
+    const missing = runCli(["setup", "noenv", "--no-install"], primary);
+    expect(missing.status, missing.stderr).toBe(0);
+    expect(missing.stdout).toContain("No .env found in the primary checkout");
+    expect(fs.existsSync(path.join(root, "noenv", ".env"))).toBe(false);
+    expect(runCli(["teardown", "noenv"], primary).status).toBe(0);
+  });
+
+  it("does not overwrite an existing destination .env (tracked .env) on setup", () => {
+    const { primary, root } = makeRepo();
+    fs.writeFileSync(path.join(primary, ".env"), "TRACKED=committed\n");
+    git(["add", "-f", ".env"], primary);
+    git(["commit", "-m", "track env fixture"], primary);
+    fs.writeFileSync(path.join(primary, ".env"), "SECRET=primary-local\n");
+    const setup = runCli(["setup", "trackenv", "--no-install"], primary);
+    expect(setup.status, setup.stderr).toBe(0);
+    expect(setup.stdout).toContain("already exists");
+    expect(fs.readFileSync(path.join(root, "trackenv", ".env"), "utf8").replace(/\r\n/g, "\n")).toBe("TRACKED=committed\n");
+  });
+
+  it("fails teardown closed when the backup root is a link, preserving source bytes", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "safebackup");
+    expect(runCli(["setup", "safebackup", "--no-install"], primary).status).toBe(0);
+    fs.writeFileSync(path.join(target, ".env"), "SECRET=keep-me\n");
+    const external = path.join(tmp, "elsewhere-backup");
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(external, "sentinel.txt"), "outside\n");
+    fs.symlinkSync(external, path.join(tmp, "primary repo-worktree-backups"), "junction");
+    const r = runCli(["teardown", "safebackup"], primary);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("backup root");
+    expect(fs.readFileSync(path.join(target, ".env"), "utf8")).toBe("SECRET=keep-me\n");
+    expect(fs.readFileSync(path.join(external, "sentinel.txt"), "utf8")).toBe("outside\n");
+    expect(fs.readdirSync(external)).toEqual(["sentinel.txt"]);
+  });
+
+  it("fails teardown closed on an ignored symlink after a partial copy, preserving source", () => {
+    const { tmp, primary, root } = makeRepo();
+    const target = path.join(root, "partial");
+    expect(runCli(["setup", "partial", "--no-install"], primary).status).toBe(0);
+    fs.mkdirSync(path.join(target, "runs"), { recursive: true });
+    fs.writeFileSync(path.join(target, "runs", "a.txt"), "first copied\n");
+    const external = path.join(tmp, "outside-secret.txt");
+    fs.writeFileSync(external, "outside\n");
+    let linkMade = true;
+    try { fs.symlinkSync(external, path.join(target, "runs", "z-link.txt")); } catch { linkMade = false; }
+    if (linkMade) {
+      const r = runCli(["teardown", "partial"], primary);
+      expect(r.status, r.stdout + r.stderr).not.toBe(0);
+      expect(fs.readFileSync(path.join(target, "runs", "a.txt"), "utf8")).toBe("first copied\n");
+      expect(fs.readFileSync(external, "utf8")).toBe("outside\n");
+      expect(fs.existsSync(target)).toBe(true);
+      const backupsRoot = path.join(tmp, "primary repo-worktree-backups");
+      if (fs.existsSync(backupsRoot)) {
+        const partials = fs.readdirSync(backupsRoot).filter((d) => d.startsWith("partial-"));
+        // If a partial backup was retained, the first file is recoverable there.
+        if (partials.length > 0) {
+          expect(fs.readFileSync(path.join(backupsRoot, partials[0] as string, "runs", "a.txt"), "utf8")).toBe("first copied\n");
+        }
+      }
+    }
+  });
+
+  it("PowerShell wrappers delegate setup/teardown and accept codex/ (Windows)", () => {
+    if (process.platform !== "win32") return;
+    const { primary, root } = makeRepo();
+    const setupPs = path.join(primary, "scripts", "setup-worktree.ps1");
+    const teardownPs = path.join(primary, "scripts", "teardown-worktree.ps1");
+    // Install the real scripts + a minimal npm alias map into the fixture.
+    fs.mkdirSync(path.join(primary, "scripts"), { recursive: true });
+    for (const f of ["worktrees.ts", "setup-worktree.ps1", "teardown-worktree.ps1"]) {
+      fs.copyFileSync(path.join(repoRoot, "scripts", f), path.join(primary, "scripts", f));
+    }
+    fs.writeFileSync(path.join(primary, "package.json"), JSON.stringify({ name: "fixture", private: true, type: "module", scripts: { "worktree:setup": "node scripts/worktrees.ts setup", "worktree:teardown": "node scripts/worktrees.ts teardown", "worktree:list": "node scripts/worktrees.ts list" } }));
+    git(["add", "."], primary);
+    git(["commit", "-m", "fixture scripts"], primary);
+    expect(fs.existsSync(setupPs)).toBe(true);
+    expect(fs.existsSync(teardownPs)).toBe(true);
+    const ps = (args: string[]) => spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", ...args], { cwd: primary, encoding: "utf8", windowsHide: true });
+    const s = ps(["-File", setupPs, "codex/pswrap", "-NoInstall"]);
+    expect(s.status, (s.stderr ?? "") + (s.stdout ?? "")).toBe(0);
+    expect(fs.existsSync(path.join(root, "pswrap", "file.txt"))).toBe(true);
+    const t = ps(["-File", teardownPs, "pswrap"]);
+    expect(t.status, (t.stderr ?? "") + (t.stdout ?? "")).toBe(0);
+    expect(fs.existsSync(path.join(root, "pswrap"))).toBe(false);
+  });
+
+  it("PowerShell teardown wrapper refuses when the caller's cwd is the target, via the primary wrapper and a junction alias (Windows)", () => {
+    if (process.platform !== "win32") return;
+    const { tmp, primary, root } = makeRepo();
+    fs.mkdirSync(path.join(primary, "scripts"), { recursive: true });
+    for (const f of ["worktrees.ts", "setup-worktree.ps1", "teardown-worktree.ps1"]) {
+      fs.copyFileSync(path.join(repoRoot, "scripts", f), path.join(primary, "scripts", f));
+    }
+    fs.writeFileSync(path.join(primary, "package.json"), JSON.stringify({ name: "fixture", private: true, type: "module", scripts: { "worktree:setup": "node scripts/worktrees.ts setup", "worktree:teardown": "node scripts/worktrees.ts teardown", "worktree:list": "node scripts/worktrees.ts list" } }));
+    git(["add", "."], primary);
+    git(["commit", "-m", "fixture scripts"], primary);
+    const target = path.join(root, "psactive");
+    expect(runCli(["setup", "psactive", "--no-install"], primary).status).toBe(0);
+    fs.writeFileSync(path.join(target, ".env"), "SECRET=caller-cwd-fixture\n");
+    const teardownPs = path.join(primary, "scripts", "teardown-worktree.ps1");
+    const psFrom = (cwd: string) => spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", teardownPs, "psactive"], { cwd, encoding: "utf8", windowsHide: true });
+
+    const backupsRoot = path.join(tmp, "primary repo-worktree-backups");
+    for (const cwd of [target, path.join(target, "scripts")]) {
+      const r = psFrom(cwd);
+      expect(r.status, (r.stderr ?? "") + (r.stdout ?? "")).not.toBe(0);
+      expect((r.stderr ?? "") + (r.stdout ?? "")).toContain("current directory");
+      expect(fs.existsSync(target)).toBe(true);
+      expect(fs.readFileSync(path.join(target, ".env"), "utf8")).toBe("SECRET=caller-cwd-fixture\n");
+      expect(fs.readFileSync(path.join(target, "file.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("base\n");
+      expect(git(["worktree", "list", "--porcelain"], primary)).toContain("branch refs/heads/codex/psactive\n");
+      expect(fs.existsSync(backupsRoot)).toBe(false);
+    }
+
+    let aliasMade = true;
+    const alias = path.join(tmp, "ps-cwd-alias");
+    try { fs.symlinkSync(target, alias, "junction"); } catch { aliasMade = false; }
+    if (aliasMade) {
+      for (const cwd of [alias, path.join(alias, "scripts")]) {
+        const r = psFrom(cwd);
+        expect(r.status, (r.stderr ?? "") + (r.stdout ?? "")).not.toBe(0);
+        expect((r.stderr ?? "") + (r.stdout ?? "")).toContain("current directory");
+        expect(fs.existsSync(target)).toBe(true);
+        expect(fs.readFileSync(path.join(target, ".env"), "utf8")).toBe("SECRET=caller-cwd-fixture\n");
+        expect(git(["worktree", "list", "--porcelain"], primary)).toContain("branch refs/heads/codex/psactive\n");
+        expect(fs.existsSync(backupsRoot)).toBe(false);
+      }
+    }
+
+    // Normal invocation from the primary checkout still succeeds.
+    const ok = psFrom(primary);
+    expect(ok.status, (ok.stderr ?? "") + (ok.stdout ?? "")).toBe(0);
     expect(fs.existsSync(target)).toBe(false);
   });
 

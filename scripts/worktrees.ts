@@ -9,8 +9,13 @@ const USAGE = `Usage:
   npm run worktree:setup -- <name> [--base <local-ref>] [--no-install]
   npm run worktree:list
   npm run worktree:teardown -- <name>
+  scripts/setup-worktree.ps1 [-Name] <name> [-Base <local-ref>] [-NoInstall]
+  scripts/teardown-worktree.ps1 [-Name] <name>
 
 Names are slugs: lowercase ASCII letters, digits and single hyphens.
+A leading codex/ branch prefix is accepted and stripped.
+Setup copies the primary checkout's .env when present. Teardown backs up
+ignored local data before removal. Branches are always retained.
 See scripts/README.md for the safety rules.`;
 
 class CliError extends Error {}
@@ -108,9 +113,10 @@ const RESERVED = new Set(["con", "prn", "aux", "nul",
   ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
   ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`)]);
 
-function validateName(raw: string | undefined): string {
-  if (raw === undefined) throw new UsageError("Missing <name>.\n" + USAGE);
-  if (raw.startsWith("-")) throw new UsageError(`Invalid worktree name "${raw}": names may not look like options.`);
+function validateName(rawInput: string | undefined): string {
+  if (rawInput === undefined) throw new UsageError("Missing <name>.\n" + USAGE);
+  const raw = rawInput.startsWith("codex/") ? rawInput.slice("codex/".length) : rawInput;
+  if (raw.startsWith("-")) throw new UsageError(`Invalid worktree name "${rawInput}": names may not look like options.`);
   if (raw.length < 1 || raw.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(raw)) {
     throw new UsageError(`Invalid worktree name "${raw}": use 1-64 lowercase ASCII letters, digits and single hyphens (no leading/trailing hyphen).`);
   }
@@ -159,21 +165,169 @@ function parseSetupArgs(args: string[]): { name: string; base: string | undefine
   return { name: validateName(name), base, noInstall };
 }
 
-function parseNameOnly(args: string[], command: string): string {
+// Teardown additionally accepts an internal `--caller-cwd <path>` supplied by
+// the PowerShell wrappers, which Push-Location to their own checkout before
+// invoking the CLI and would otherwise hide the caller's real directory.
+function parseTeardownArgs(args: string[]): { name: string; callerCwd: string | undefined } {
   if (args.includes("--help") || args.includes("-h")) { console.log(USAGE); process.exit(0); }
   let name: string | undefined;
-  for (const a of args) {
-    if (a.startsWith("-")) throw new UsageError(`Unknown option "${a}" for ${command}.\n` + USAGE);
-    if (name !== undefined) throw new UsageError(`Unexpected argument "${a}".\n` + USAGE);
-    name = a;
+  let callerCwd: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if (a === "--caller-cwd") {
+      if (callerCwd !== undefined) throw new UsageError("Duplicate --caller-cwd.\n" + USAGE);
+      const v = args[i + 1];
+      if (v === undefined) throw new UsageError("--caller-cwd needs a value.\n" + USAGE);
+      callerCwd = v; i++;
+    } else if (a.startsWith("--caller-cwd=")) {
+      if (callerCwd !== undefined) throw new UsageError("Duplicate --caller-cwd.\n" + USAGE);
+      callerCwd = a.slice("--caller-cwd=".length);
+      if (callerCwd === "") throw new UsageError("--caller-cwd needs a value.\n" + USAGE);
+    } else if (a.startsWith("-")) {
+      throw new UsageError(`Unknown option "${a}" for worktree:teardown.\n` + USAGE);
+    } else if (name === undefined) name = a;
+    else throw new UsageError(`Unexpected argument "${a}".\n` + USAGE);
   }
-  return validateName(name);
+  return { name: validateName(name), callerCwd };
 }
 
 function validateBase(base: string): void {
   if (base === "" || base.startsWith("-") || /\s/.test(base) || base.includes("..") || /[~^:?*[\\]/.test(base)) {
     throw new UsageError(`Invalid --base "${base}": give an existing local ref, for example main.`);
   }
+}
+
+function copyPrimaryEnv(primary: string, target: string, name: string, branch: string): void {
+  const src = path.join(primary, ".env");
+  const dest = path.join(target, ".env");
+  const st = lstatIfExists(src);
+  if (!st) { console.log("No .env found in the primary checkout; continuing without copying it."); return; }
+  if (st.isSymbolicLink() || !st.isFile()) {
+    throw new CliError(`Refusing: the primary checkout's .env is not a regular file and will not be copied: ${src}. The worktree and branch were preserved: ${target} (${branch}).`);
+  }
+  if (lstatIfExists(dest)) { console.log("Destination .env already exists in the new worktree; left unchanged."); return; }
+  try {
+    fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "EEXIST") {
+      console.log("Destination .env already exists in the new worktree; left unchanged."); return;
+    }
+    throw new CliError(`Failed to copy the primary checkout's .env to the new worktree (contents not shown). The worktree and branch were preserved: ${target} (${branch}). Remove it with: npm run worktree:teardown -- ${name}`);
+  }
+  const srcBytes = fs.readFileSync(src);
+  const destBytes = fs.readFileSync(dest);
+  if (!srcBytes.equals(destBytes)) {
+    throw new CliError(`Copied .env did not verify byte-for-byte (contents not shown). The worktree and branch were preserved: ${target} (${branch}).`);
+  }
+  console.log("Copied .env from the primary checkout to the new worktree (contents not shown).");
+}
+
+function backupRootFor(primary: string): string {
+  return path.join(path.dirname(primary), `${path.basename(primary)}-worktree-backups`);
+}
+
+function assertBackupRootSafe(backupRoot: string): void {
+  const st = lstatIfExists(backupRoot);
+  if (st) {
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new CliError(`Refusing: backup root is a link or not a directory: ${backupRoot}`);
+    if (key(fs.realpathSync(backupRoot)) !== key(backupRoot)) throw new CliError(`Refusing: backup root resolves outside its intended path: ${backupRoot}`);
+    return;
+  }
+  fs.mkdirSync(backupRoot, { recursive: true });
+  const created = fs.lstatSync(backupRoot);
+  if (created.isSymbolicLink() || !created.isDirectory() || key(fs.realpathSync(backupRoot)) !== key(backupRoot)) {
+    throw new CliError(`Refusing: backup root is not a real directory inside its intended root: ${backupRoot}`);
+  }
+}
+
+function toNativeRel(relPosix: string): string {
+  if (relPosix === "" || relPosix.startsWith("/") || /^[a-zA-Z]:/.test(relPosix) || relPosix.split("/").some((s) => s === ".." || s === "")) {
+    throw new CliError(`Refusing: ignored path escapes the worktree: ${relPosix}`);
+  }
+  return relPosix.split("/").join(path.sep);
+}
+
+// `git ls-files -z` emits repository paths with `/` separators on every
+// platform. A literal backslash is a valid filename character on POSIX, so
+// only Windows (where `\` cannot appear in a filename) may fold it to `/`;
+// folding it on POSIX would collide distinct names such as `runs/a\b.log`
+// and `runs/a/b.log`.
+function normalizeGitPath(p: string): string {
+  return process.platform === "win32" ? p.replace(/\\/g, "/") : p;
+}
+
+// Recursively expand collapsed ignored directories into every descendant
+// directory, so nested empty directories are retained in the backup. Fails
+// closed on links, unreadable entries and non-regular files; never follows
+// a symlink/junction.
+function expandIgnoredDirs(target: string, relDirs: string[]): string[] {
+  const found = new Set<string>();
+  const visit = (relPosix: string): void => {
+    if (found.has(relPosix)) return;
+    found.add(relPosix);
+    const abs = path.join(target, toNativeRel(relPosix));
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch {
+      throw new CliError(`Refusing: cannot inspect ignored directory ${relPosix} in ${target}. Source worktree preserved; check its permissions and retry.`);
+    }
+    for (const entry of [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const childRel = `${relPosix}/${entry.name}`;
+      const childAbs = path.join(abs, entry.name);
+      let st: fs.Stats;
+      try { st = fs.lstatSync(childAbs); } catch {
+        throw new CliError(`Refusing: cannot inspect ignored entry ${childRel} in ${target}. Source worktree preserved; check its permissions and retry.`);
+      }
+      if (st.isSymbolicLink()) {
+        throw new CliError(`Refusing: ignored path traverses a link and cannot be safely preserved: ${childRel} in ${target}. Source worktree preserved.`);
+      }
+      if (st.isDirectory()) visit(childRel);
+      else if (!st.isFile()) {
+        throw new CliError(`Refusing: ignored entry is not a regular file and cannot be safely preserved: ${childRel} in ${target}. Source worktree preserved.`);
+      }
+    }
+  };
+  for (const relPosix of relDirs) visit(relPosix);
+  return [...found].sort();
+}
+
+// Copies every preserved ignored file, verifying bytes. Throws CliError on
+// any unsafe or non-copyable entry; the caller has not removed anything yet.
+function backupIgnoredData(target: string, backupDir: string, files: string[], emptyDirs: string[]): number {
+  let copied = 0;
+  for (const relPosix of [...files].sort()) {
+    const rel = toNativeRel(relPosix);
+    const src = path.join(target, rel);
+    if (!isAtOrUnder(src, target) || key(src) === key(target)) throw new CliError(`Refusing: ignored path escapes the worktree: ${relPosix}`);
+    // Walk every component; never traverse a symlink/junction.
+    let cursor = target;
+    for (const segment of relPosix.split("/")) {
+      cursor = path.join(cursor, segment);
+      let st: fs.Stats;
+      try { st = fs.lstatSync(cursor); } catch { throw new CliError(`Failed to preserve ignored data; backup (possibly partial) retained at ${backupDir}, source worktree preserved: cannot read ${relPosix}`); }
+      if (st.isSymbolicLink()) throw new CliError(`Refusing: ignored path traverses a link and cannot be safely preserved: ${relPosix}. Backup (possibly partial) retained at ${backupDir}; source worktree preserved.`);
+      if (key(cursor) !== key(src) && !st.isDirectory()) throw new CliError(`Refusing: ignored path has a non-directory component: ${relPosix}. Backup (possibly partial) retained at ${backupDir}; source worktree preserved.`);
+      if (key(cursor) === key(src) && !st.isFile()) throw new CliError(`Refusing: ignored entry is not a regular file and cannot be safely preserved: ${relPosix}. Backup (possibly partial) retained at ${backupDir}; source worktree preserved.`);
+    }
+    const dest = path.join(backupDir, rel);
+    if (!isAtOrUnder(dest, backupDir)) throw new CliError(`Refusing: backup path escapes the backup directory: ${relPosix}`);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+      if (!fs.readFileSync(src).equals(fs.readFileSync(dest))) throw new Error("verify mismatch");
+    } catch {
+      throw new CliError(`Failed to preserve ignored data; backup (possibly partial) retained at ${backupDir}, source worktree preserved: could not copy and verify ${relPosix} byte-for-byte.`);
+    }
+    copied++;
+  }
+  for (const relPosix of emptyDirs) {
+    const rel = toNativeRel(relPosix);
+    const dest = path.join(backupDir, rel);
+    if (!isAtOrUnder(dest, backupDir)) throw new CliError(`Refusing: backup path escapes the backup directory: ${relPosix}`);
+    try { fs.mkdirSync(dest, { recursive: true }); } catch {
+      throw new CliError(`Failed to preserve ignored data; backup retained at ${backupDir}, source worktree preserved: could not create directory ${relPosix}.`);
+    }
+  }
+  return copied;
 }
 
 async function setup(args: string[]): Promise<void> {
@@ -209,6 +363,8 @@ async function setup(args: string[]): Promise<void> {
   console.log(branchExists
     ? `Reused existing branch ${branch} (no reset) in new worktree ${target}`
     : `Created worktree ${target} on new branch ${branch} from ${effectiveBase}`);
+
+  copyPrimaryEnv(primary, target, name, branch);
 
   if (noInstall) { console.log("Skipped install (--no-install). Run `npm ci` there when dependencies are needed."); return; }
   await install(target, name, branch);
@@ -250,12 +406,18 @@ async function list(args: string[]): Promise<void> {
 const ALLOWED_IGNORED_ROOTS = new Set(["node_modules", "dist", "coverage"]);
 
 async function teardown(args: string[]): Promise<void> {
-  const name = parseNameOnly(args, "worktree:teardown");
+  const { name, callerCwd } = parseTeardownArgs(args);
   const { primary, root, entries } = await resolveContext();
   const target = path.join(root, name);
 
-  if (isAtOrUnder(process.cwd(), target)) {
-    throw new CliError("Refusing: your current directory is inside the target worktree. Run teardown from another checkout.");
+  // Check the process cwd and, when a wrapper relocated before invoking us,
+  // the actual caller's cwd it supplied. This must refuse before any backup
+  // or removal.
+  const callerCandidates = [process.cwd(), ...(callerCwd !== undefined ? [path.resolve(callerCwd)] : [])];
+  for (const candidate of callerCandidates) {
+    if (isAtOrUnder(candidate, target)) {
+      throw new CliError("Refusing: your current directory is inside the target worktree. Run teardown from another checkout.");
+    }
   }
   // Managed root must be a real directory, not a link/junction.
   let rootStat: fs.Stats;
@@ -270,8 +432,14 @@ async function teardown(args: string[]): Promise<void> {
   if (key(realTarget) !== key(target) || key(path.dirname(realTarget)) !== key(fs.realpathSync(root))) {
     throw new CliError(`Refusing: target does not resolve to a direct child of the managed root: ${target}`);
   }
-  if (isAtOrUnder(fs.realpathSync(process.cwd()), realTarget)) {
-    throw new CliError("Refusing: your current directory is inside the target worktree. Run teardown from another checkout.");
+  for (const candidate of callerCandidates) {
+    let realCandidate: string;
+    try { realCandidate = fs.realpathSync(candidate); } catch {
+      throw new CliError(`Refusing: cannot resolve your current directory: ${candidate}. Run teardown from another checkout.`);
+    }
+    if (isAtOrUnder(realCandidate, realTarget)) {
+      throw new CliError("Refusing: your current directory is inside the target worktree. Run teardown from another checkout.");
+    }
   }
 
   const entry = findEntry(entries, target);
@@ -286,23 +454,62 @@ async function teardown(args: string[]): Promise<void> {
   if (status.toString("utf8").split("\0").filter(Boolean).length > 0) {
     throw new CliError(`Refusing: worktree has tracked, staged or untracked changes: ${target}. Commit, stash or remove them yourself first.`);
   }
-  // Git removal would also delete ignored files, so inspect them explicitly.
-  const ignored = (await git(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], primary))
+  // Git removal would also delete ignored files, so inspect and preserve them.
+  const ignoredDirs = (await git(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], primary))
     .toString("utf8").split("\0").filter(Boolean)
-    .map((s) => s.replace(/\\/g, "/").replace(/\/$/, ""));
-  for (const item of ignored) {
+    .map((s) => normalizeGitPath(s).replace(/\/$/, ""));
+  const generatedRoots = new Set<string>();
+  const preservedDirs: string[] = [];
+  for (const item of ignoredDirs) {
     const rootComponent = item.split("/")[0] as string;
-    if (item !== rootComponent || !ALLOWED_IGNORED_ROOTS.has(rootComponent)) {
-      throw new CliError(`Refusing: ignored content would be deleted: ${item} in ${target}. Only root node_modules/, dist/ and coverage/ are disposable. Move or delete it yourself first.`);
+    if (item === rootComponent && ALLOWED_IGNORED_ROOTS.has(rootComponent)) {
+      let ignoredStat: fs.Stats;
+      try { ignoredStat = fs.lstatSync(path.join(target, rootComponent)); } catch { continue; }
+      if (ignoredStat.isSymbolicLink() || !ignoredStat.isDirectory()) {
+        throw new CliError(`Refusing: ignored ${rootComponent} is a link or not a generated directory: ${target}`);
+      }
+      generatedRoots.add(rootComponent);
+    } else {
+      // A collapsed ignored directory (possibly empty) is preserved by path.
+      const native = toNativeRel(item);
+      try {
+        const dirStat = fs.lstatSync(path.join(target, native));
+        if (dirStat.isSymbolicLink()) throw new CliError(`Refusing: ignored directory is a link and cannot be safely preserved: ${item} in ${target}. Source worktree preserved.`);
+        if (dirStat.isDirectory()) preservedDirs.push(item);
+      } catch (err) { if (err instanceof CliError) throw err; /* file entries need no dir */ }
     }
-    const ignoredStat = fs.lstatSync(path.join(target, rootComponent));
-    if (ignoredStat.isSymbolicLink() || !ignoredStat.isDirectory()) {
-      throw new CliError(`Refusing: ignored ${rootComponent} is a link or not a generated directory: ${target}`);
+  }
+  const ignoredFiles = [...new Set((await git(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"], primary))
+    .toString("utf8").split("\0").filter(Boolean)
+    .map((s) => normalizeGitPath(s)))];
+  // A regular file named like a generated root is valuable, not disposable.
+  for (const file of ignoredFiles) {
+    const rootComponent = file.split("/")[0] as string;
+    if (file === rootComponent && ALLOWED_IGNORED_ROOTS.has(rootComponent) && !generatedRoots.has(rootComponent)) {
+      const st = fs.lstatSync(path.join(target, rootComponent));
+      if (st.isSymbolicLink() || !st.isDirectory()) {
+        throw new CliError(`Refusing: ignored ${rootComponent} is a link or not a generated directory: ${target}`);
+      }
     }
+  }
+  const preservedFiles = ignoredFiles.filter((f) => !generatedRoots.has(f.split("/")[0] as string));
+  // Expand collapsed ignored directories before creating any backup, so a
+  // link/unreadable/non-regular descendant fails with the source untouched.
+  const meaningfulDirs = expandIgnoredDirs(target, preservedDirs.filter((d) => !generatedRoots.has(d.split("/")[0] as string)));
+
+  let backupDir: string | undefined;
+  if (preservedFiles.length > 0 || meaningfulDirs.length > 0) {
+    const backupRoot = backupRootFor(primary);
+    if (isAtOrUnder(backupRoot, target) || isAtOrUnder(target, backupRoot)) throw new CliError(`Refusing: backup root overlaps the target worktree: ${backupRoot}`);
+    assertBackupRootSafe(backupRoot);
+    backupDir = fs.mkdtempSync(path.join(backupRoot, `${name}-`));
+    if (!isAtOrUnder(backupDir, backupRoot) || key(backupDir) === key(backupRoot)) throw new CliError(`Refusing: backup directory escapes its intended root: ${backupDir}`);
+    const copied = backupIgnoredData(target, backupDir, preservedFiles, meaningfulDirs);
+    console.log(`Backed up ${copied} ignored file(s) from ${target} to ${backupDir} (verified byte-for-byte). Restore by copying them back to the same relative paths in a checkout.`);
   }
 
   await git(["worktree", "remove", target], primary);
-  console.log(`Removed worktree ${target}. Branch ${entry.branch.replace(/^refs\/heads\//, "")} and its commits were retained.`);
+  console.log(`Removed worktree ${target}. Branch ${entry.branch.replace(/^refs\/heads\//, "")} and its commits were retained.${backupDir ? ` Ignored local data backup: ${backupDir}` : ""}`);
 }
 
 async function main(): Promise<void> {
