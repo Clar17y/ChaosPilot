@@ -7,7 +7,10 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
+    "worktree:setup": "node scripts/worktrees.ts setup",
+    "worktree:list": "node scripts/worktrees.ts list",
+    "worktree:teardown": "node scripts/worktrees.ts teardown",
     "pretest": "npm run build",
     "test": "vitest run --dir tests",
     "dev": "npm run build && npm start",
