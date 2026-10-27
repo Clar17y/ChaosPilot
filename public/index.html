@@ -25,7 +25,7 @@
         <button type="button" class="nav-btn" data-view="findings">Findings &amp; reproductions</button>
       </nav>
       <button id="btn-prepare-nav" type="button" class="btn btn-primary rail-wide prepare-action" data-view="prepare">Prepare investigation</button>
-      <p class="rail-note">Selecting <strong>synthetic-trading</strong> always tests the synthetic trading simulator, not an arbitrary application. Other systems can be described and saved as drafts.</p>
+      <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator. It does not test an arbitrary application. The inventory reservation adapter is not available on this server, so it cannot be selected or run here. Other systems can be described and saved as drafts.</p>
       <p id="announcement" class="visually-hidden" role="status" aria-live="polite"></p>
     </aside>
 
@@ -123,7 +123,8 @@
               <div class="control-group">
                 <label for="system-adapter-select">Execution adapter</label>
                 <select id="system-adapter-select" class="form-input">
-                  <option value="synthetic-trading">synthetic-trading (Executable simulator)</option>
+                  <option value="synthetic-trading">synthetic-trading (Executable synthetic trading simulator)</option>
+                  <option value="inventory-reservation" disabled>inventory-reservation (Not available on this server — cannot be saved or run)</option>
                   <option value="unconfigured">unconfigured (Draft spec - Run disabled)</option>
                 </select>
               </div>
@@ -208,7 +209,7 @@
                 <summary>Read the model-visible context</summary>
                 <h3>Business overview</h3><p id="prepare-overview"></p>
                 <h3>Supplementary requirements (context only)</h3><ul id="prepare-requirements"></ul>
-                <p class="muted">The model sees the saved brief, the public contract and the selected neutral business source. It does not see a hidden catalog or other candidate variants. Selecting synthetic-trading always tests the synthetic trading simulator, not an arbitrary application described in the brief.</p>
+                <p class="muted">The model sees the saved brief, the selected system's public contract and the selected neutral business source. It does not see a hidden catalog or other candidate variants. The adapter always tests its synthetic simulator, not an arbitrary application described in the brief.</p>
               </details>
             </section>
             <section class="card control-card">
@@ -246,7 +247,7 @@
         <section class="view hidden" id="view-investigations" data-view-panel="investigations">
           <header class="view-head">
             <div>
-              <p class="eyebrow">Saved evidence</p>
+              <p class="eyebrow">Investigation evidence</p>
               <h1 class="view-title" id="title-investigations" tabindex="-1">Investigations</h1>
               <p class="muted">History is scoped to the selected system and the brief revision pinned to each run.</p>
             </div>
@@ -291,6 +292,53 @@
               <div class="metric-box"><span class="metric-label">Confirmed Findings</span><span id="metric-findings" class="metric-value highlight">0</span></div>
               <div class="metric-box"><span class="metric-label">Reported Tokens / Estimated Cost</span><span id="metric-usage" class="metric-value">0 in / 0 out ($0.00)</span></div>
             </div>
+            <section class="card reproduction-card" id="reproduction-player" aria-labelledby="repro-title">
+              <div class="repro-head">
+                <div>
+                  <p class="eyebrow" id="repro-eyebrow">Recorded evidence · recorded playback only</p>
+                  <h2 id="repro-title" tabindex="-1">Reproduction timeline</h2>
+                  <p class="muted" id="repro-description">Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.</p>
+                </div>
+                <div class="repro-rerun">
+                  <button type="button" class="btn btn-primary" id="btn-repro-rerun">Rerun saved investigation</button>
+                  <p id="repro-fresh-status" class="input-hint" role="status"></p>
+                </div>
+              </div>
+              <div class="repro-provenance" id="repro-provenance" aria-label="Reproduction provenance"></div>
+              <p id="repro-invalid" class="note warn hidden"></p>
+              <div id="repro-empty" class="empty-state">Select a finding or experiment to open its recorded reproduction.</div>
+              <div id="repro-body" class="repro-body hidden">
+                <ol id="repro-timeline" class="repro-timeline" aria-label="Recorded steps"></ol>
+                <div class="repro-detail">
+                  <p id="repro-step-count" class="repro-step-count" aria-live="polite"></p>
+                  <h3 id="repro-step-title">Before the first recorded step</h3>
+                  <p id="repro-step-kind" class="muted"></p>
+                  <p id="repro-step-detail"></p>
+                  <div class="repro-compare">
+                    <div id="repro-expected" class="repro-expected hidden"><h4 id="repro-expected-label"></h4><p id="repro-expected-text"></p></div>
+                    <div id="repro-observed" class="repro-observed"><h4>Observed behaviour (from recorded trace)</h4><p id="repro-observed-text"></p></div>
+                  </div>
+                  <h4>Credit exposure after this step (recorded state)</h4>
+                  <div id="repro-credit" class="repro-credit"></div>
+                  <div id="repro-exposure-bar" class="repro-bar hidden" aria-hidden="true"><span id="repro-bar-used"></span><span id="repro-bar-reserved"></span></div>
+                  <p id="repro-exposure-legend" class="muted"></p>
+                  <details class="contract-details"><summary>Recorded action, payload and state for this entry</summary>
+                    <p><strong>Action:</strong> <span id="repro-action"></span></p>
+                    <p><strong>Outcome:</strong> <span id="repro-outcome"></span></p>
+                    <h4>Payload</h4><pre id="repro-payload" class="code-block"></pre>
+                    <h4>Recorded state</h4><pre id="repro-state" class="code-block"></pre>
+                  </details>
+                  <p id="repro-unattributed" class="note warn hidden"></p>
+                  <div class="repro-controls" role="group" aria-label="Recorded playback controls">
+                    <button type="button" class="btn btn-secondary" id="btn-repro-prev">Previous step</button>
+                    <button type="button" class="btn btn-primary" id="btn-repro-play" aria-pressed="false">Play recorded steps</button>
+                    <button type="button" class="btn btn-secondary" id="btn-repro-next">Next step</button>
+                    <button type="button" class="btn btn-secondary" id="btn-repro-reset">Reset</button>
+                  </div>
+                  <p class="input-hint">Playback is distinct from real execution. Colour is used only for rule compliance or violation, always with text; order acceptance or rejection by itself is shown neutrally.</p>
+                </div>
+              </div>
+            </section>
             <div class="tabs-container">
               <div class="tabs-nav" role="tablist" aria-label="Run detail">
                 <button class="tab-btn active" data-tab="tab-findings" type="button" role="tab" id="tab-btn-findings" aria-controls="tab-findings" aria-selected="true">Findings (<span id="count-findings">0</span>)</button>

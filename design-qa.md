@@ -74,3 +74,41 @@ The requested Meta review produced four further frontend findings, accepted by p
 | Out-of-order status response | Terminal result followed by delayed running body restored RUNNING and Stop, while backend was completed | Same delivery order retained COMPLETED with Stop hidden; `meta-repair-status-order.png` |
 
 The new request-boundary tests exercise code actually delegated to by the handlers, including immediate/deferred Stop, failure/retry, rapid settlement, terminal-before-running response order, slow-request progress, generation invalidation/stale errors, and failed profile loads without replacing context. Primary added the coupled terminal-controls case after browser acceptance exposed it. The stable final host run passed **401 tests in 24 files**, typecheck and production build. Earlier unchanged simulator, profile-store, snapshot and replay checks remain applicable. Full browser injection of every transport/init error combination is not claimed; the tests and specific observations above define the evidence.
+
+# Reproduction player - design verification
+
+This section was originally written in a different, combined checkout. Its
+screenshots were local-only files in that checkout's ignored output directory;
+they are not included in this repository and are not available to readers of
+this pull request, so no screenshot comparison can be checked from here. They
+are described, not linked, for that reason: a desktop source capture, a desktop
+implementation capture, a full-view comparison, a focused comparison, and a
+390 x 844 mobile capture, all of a saved candidate-C finding at the fourth key
+event with credit limit 100 and recorded exposure 200.
+
+Findings and repairs recorded at that time:
+- [P2] The initial player showed ten low-level rows and pushed controls beyond the demo frame. The final player derives four key events only for a validated, unambiguous credit-admission sequence, preserves source trace positions, and falls back to the complete trace otherwise.
+- [P2] Initial credit figures were visually subordinate. The final view emphasises the limit and total exposure, and the composition bar includes a limit marker.
+- [P1] Non-credit failures could be incorrectly labelled as credit-limit failures, and multiple entries sharing an action index could be assigned a violation ambiguously. Fixed by using the recorded invariant and only associating a violation when exactly one entry matches. A separate saved non-credit example and focused tests were checked at that time.
+- [P1] Recorded playback and real replay are distinct controls. The real replay reproduced the saved experiment with matching source and no model invocation at that time.
+
+Required visual surfaces:
+- Typography: existing product font and hierarchy retained; player title and failure figures enlarged.
+- Layout: aligned desktop two-column evidence and action areas; 390px view stacks content with no document horizontal overflow.
+- Colors: green represents a hypothetical rule-satisfying outcome, red a recorded violation; labels carry the same meaning in text.
+- Assets: source uses product UI rather than photography or illustrations; existing product identity retained.
+- Copy: the expected outcome is explicitly hypothetical, legacy brief absence is visible, and the synthetic target and historical status are identified.
+
+Intentional differences: the player lives within the existing investigation workspace instead of a separate page; key events are explicitly labelled as a selection from the full trace; additional provenance and replay distinctions prevent claims not supported by the saved record. A full accessibility audit and every provider failure timing were not tested.
+
+Historical checks: the combined checkout this section came from recorded 489
+passing tests plus typecheck/build and browser checks, and marked itself
+passed. That result belongs to that other combined checkout, not to this
+candidate, and cannot be verified from this pull request. It is retained only
+as historical context and is not a result for this branch.
+
+Current verification for this candidate is reported separately in the pull
+request / task handoff (focused test and typecheck commands actually run on
+this checkout), not asserted in this note.
+
+final result: not claimed for this candidate - see the separately reported current verification

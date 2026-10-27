@@ -12,6 +12,24 @@ describe('browser entry point', () => {
     expect(applicationScript).toMatch(/\btype=["']module["']/);
   });
 
+  it('ships the reproduction player controls with accessible labels', async () => {
+    const html = await readFile(htmlUrl, 'utf8');
+    for (const id of ['reproduction-player', 'btn-repro-prev', 'btn-repro-next', 'btn-repro-play', 'btn-repro-reset', 'btn-repro-rerun', 'repro-timeline']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(html).toContain('recorded playback only');
+    expect(html).not.toContain('Concept — not implemented');
+  });
+
+  it('does not offer the unsupported inventory adapter as executable', async () => {
+    const html = await readFile(htmlUrl, 'utf8');
+    expect(html).not.toContain('Executable synthetic inventory reservation');
+    const option = html.match(/<option\b[^>]*value=["']inventory-reservation["'][^>]*>/)?.[0];
+    expect(option).toBeDefined();
+    expect(option).toMatch(/\bdisabled\b/);
+    expect(html).toContain('not available on this server');
+  });
+
   it('does not reveal planted fault classes in target choices', async () => {
     const html = await readFile(htmlUrl, 'utf8');
     const choices = html.match(/<select\b[^>]*id=["']target-select["'][^>]*>([\s\S]*?)<\/select>/)?.[1];
