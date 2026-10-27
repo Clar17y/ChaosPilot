@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
-import { compareSemanticReplay } from '../evidence.ts';
+import { compareSemanticReplay, canonicalJson } from '../evidence.ts';
+import { computeSnapshotHash, validateSystemBrief } from '../systems/index.ts';
 import type {
   Experiment,
   ExperimentProvider,
@@ -16,6 +17,7 @@ import type {
   ProviderResponseAudit,
   RequestAuditCallback,
   SourceBundle,
+  SystemBriefSnapshot,
   SystemContract,
   TargetVariant,
   Usage
@@ -83,6 +85,65 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
 
   const contractHash = crypto.createHash('sha256').update(JSON.stringify(contract)).digest('hex');
 
+  let systemBriefSnapshot: SystemBriefSnapshot | undefined = undefined;
+  if (options.systemBrief !== undefined && options.systemBrief !== null) {
+    if (
+      typeof options.systemBrief !== 'object' ||
+      !options.systemBrief.brief ||
+      typeof options.systemBrief.brief !== 'object' ||
+      typeof options.systemBrief.hash !== 'string' ||
+      options.systemBrief.hash.trim().length === 0
+    ) {
+      throw new Error(
+        'Invalid system brief snapshot structure: must contain brief object and non-empty hash string'
+      );
+    }
+
+    const validated = validateSystemBrief(options.systemBrief.brief);
+    if (!validated.valid) {
+      throw new Error(`Invalid system brief in snapshot: ${validated.error}`);
+    }
+
+    const clonedBrief = structuredClone(validated.brief);
+    const clonedContract = options.systemBrief.contract
+      ? structuredClone(options.systemBrief.contract)
+      : null;
+
+    const computedHash = computeSnapshotHash(clonedBrief, clonedContract);
+    if (options.systemBrief.hash !== computedHash) {
+      throw new Error(
+        `System brief snapshot hash mismatch: supplied hash "${options.systemBrief.hash}" does not match canonical computed hash "${computedHash}"`
+      );
+    }
+
+    if (clonedBrief.adapterId === 'unconfigured') {
+      throw new Error(
+        `Cannot run investigation: System brief "${clonedBrief.name}" has unconfigured adapter.`
+      );
+    }
+    if (clonedBrief.adapterId !== 'synthetic-trading') {
+      throw new Error(
+        `Cannot run investigation: System brief "${clonedBrief.name}" has unsupported adapter "${clonedBrief.adapterId}".`
+      );
+    }
+
+    if (!clonedContract) {
+      throw new Error('System brief for synthetic-trading must have an executing contract');
+    }
+
+    const executingContractCanonical = canonicalJson(contract);
+    const briefContractCanonical = canonicalJson(clonedContract);
+    if (executingContractCanonical !== briefContractCanonical) {
+      throw new Error('System brief contract does not match executing simulator contract');
+    }
+
+    systemBriefSnapshot = {
+      brief: clonedBrief,
+      contract: clonedContract,
+      hash: computedHash,
+    };
+  }
+
   const record: InvestigationRecord = {
     schemaVersion: 1,
     id,
@@ -102,6 +163,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     },
     errors: [],
     proposalAttempts: [],
+    systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
     contextAudit: {
       sourcePaths: source.files.map(f => f.path),
       contractHash,
@@ -204,7 +266,8 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       history,
       experimentNumber: experimentCount + 1,
       maxExperiments,
-      feedback: feedback.length > 0 ? [...feedback] : undefined
+      feedback: feedback.length > 0 ? [...feedback] : undefined,
+      systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined
     };
 
     let reply: ProviderReply;

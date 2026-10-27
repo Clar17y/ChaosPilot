@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Action, Experiment, TargetVariant } from '../src/domain.ts';
+import { TARGET_VARIANTS } from '../src/domain.ts';
 import {
   computeSourceHash,
   executeExperiment,
@@ -30,7 +31,7 @@ describe('Simulator Contract and Bundle Separation', () => {
   });
 
   it('provides isolated source bundles with neutral filenames and exact hash matching', () => {
-    for (const variant of ['clean', 'candidate-a', 'candidate-b', 'candidate-c'] as const) {
+    for (const variant of TARGET_VARIANTS) {
       const bundle = getSourceBundle(variant);
       expect(bundle.hash).toBeDefined();
       expect(bundle.files).toHaveLength(3);
@@ -43,9 +44,12 @@ describe('Simulator Contract and Bundle Separation', () => {
 
       // Verify no leaked answer keys or hidden variant switches in source files
       for (const file of bundle.files) {
-        expect(file.content).not.toContain('candidate-a');
-        expect(file.content).not.toContain('candidate-b');
-        expect(file.content).not.toContain('candidate-c');
+        for (const candidate of TARGET_VARIANTS) {
+          if (candidate !== 'clean') {
+            expect(file.content).not.toContain(candidate);
+          }
+        }
+
         expect(file.content).not.toContain('defect');
         expect(file.content).not.toContain('oracle');
       }
@@ -62,17 +66,9 @@ describe('Simulator Contract and Bundle Separation', () => {
   });
 
   it('ensures different variants have distinct source hashes', () => {
-    const cleanBundle = getSourceBundle('clean');
-    const aBundle = getSourceBundle('candidate-a');
-    const bBundle = getSourceBundle('candidate-b');
-    const cBundle = getSourceBundle('candidate-c');
-
-    expect(cleanBundle.hash).not.toEqual(aBundle.hash);
-    expect(cleanBundle.hash).not.toEqual(bBundle.hash);
-    expect(aBundle.hash).not.toEqual(bBundle.hash);
-    expect(cleanBundle.hash).not.toEqual(cBundle.hash);
-    expect(aBundle.hash).not.toEqual(cBundle.hash);
-    expect(bBundle.hash).not.toEqual(cBundle.hash);
+    const hashes = TARGET_VARIANTS.map((v) => getSourceBundle(v).hash);
+    const uniqueHashes = new Set(hashes);
+    expect(uniqueHashes.size).toBe(TARGET_VARIANTS.length);
   });
 });
 
@@ -1183,7 +1179,7 @@ it('binds source to the loaded runtime for the entire process in TS and compiled
         assert.throws(() => runtime.getSourceBundle('clean'), /restart required/);
         assert.throws(() => runtime.executeExperiment(exp, 'clean'), /restart required/);
       } finally { fs.writeFileSync(coldFile, coldBefore); }
-      for (const variant of ['clean', 'candidate-a', 'candidate-b', 'candidate-c']) {
+      for (const variant of ['clean', 'candidate-a', 'candidate-b', 'candidate-c', 'candidate-d', 'candidate-e', 'candidate-f', 'candidate-g', 'candidate-h', 'candidate-i']) {
         const original = runtime.getSourceBundle(variant);
         const copy = runtime.getSourceBundle(variant); copy.files[0].content = 'caller mutation';
         assert.equal(runtime.getSourceBundle(variant).hash, original.hash);

@@ -2,12 +2,14 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import type {
-  TargetVariant,
-  ProviderKind,
-  InvestigationRecord,
-  InvestigationOptions,
-  ExperimentProvider,
+import {
+  TARGET_VARIANTS,
+  type TargetVariant,
+  type ProviderKind,
+  type InvestigationRecord,
+  type InvestigationOptions,
+  type ExperimentProvider,
+  type SystemBrief,
 } from './domain.ts';
 import {
   saveRun,
@@ -17,7 +19,22 @@ import {
   replayRun,
   validateRunId,
   getSimulatorApi,
+  isKnownTargetVariant,
+  getSystemBrief,
+  listSystemBriefs,
+  saveSystemBrief,
+  createSystemSnapshot,
+  validateSystemId,
+  validateSystemBrief,
 } from './storage.ts';
+import {
+  SystemIntegrityError,
+  SystemConflictError,
+  SystemNotFoundError,
+  SystemRevisionConflictError,
+  SystemLockTimeoutError,
+  SystemLockReleaseError,
+} from './systems/index.ts';
 
 export interface ActiveInvestigationState {
   id: string;
@@ -30,6 +47,7 @@ export interface ActiveInvestigationState {
 
 export interface ServerOptions {
   runsDir?: string;
+  systemsDir?: string;
   investigationRunner?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
   providerFactory?: (kind: ProviderKind) => ExperimentProvider;
   publicDir?: string;
@@ -71,6 +89,7 @@ export class ChaosPilotServer {
   private startingController: AbortController | null = null;
   private latestRecord: InvestigationRecord | null = null;
   private runsDir: string;
+  private systemsDir: string;
   private publicDir: string;
   private distDir: string;
   private runnerOverride?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
@@ -78,6 +97,7 @@ export class ChaosPilotServer {
 
   constructor(options: ServerOptions = {}) {
     this.runsDir = options.runsDir || 'runs';
+    this.systemsDir = options.systemsDir || path.join(this.runsDir, 'systems');
     this.publicDir = options.publicDir || path.resolve(process.cwd(), 'public');
     this.distDir = options.distDir || path.resolve(process.cwd(), 'dist');
     this.runnerOverride = options.investigationRunner;
@@ -334,6 +354,7 @@ export class ChaosPilotServer {
             startedAt: active?.startedAt,
             currentRecord: active ? active.record : this.startingController ? null : this.latestRecord,
             metaKeyConfigured: Boolean(process.env.MODEL_API_KEY && process.env.MODEL_API_KEY.trim().length > 0),
+            targetVariants: TARGET_VARIANTS,
           });
           return;
         }
@@ -343,10 +364,171 @@ export class ChaosPilotServer {
           try {
             const sim = await getSimulatorApi();
             // In simulator/contract.ts or index.ts
-            const contract = (sim as any).getContract ? (sim as any).getContract() : { name: 'ChaosPilot Gateway' };
+            const contract = sim.getContract ? sim.getContract() : { name: 'ChaosPilot Gateway' };
             this.sendJson(res, 200, contract);
           } catch {
             this.sendJson(res, 503, { error: 'Simulator contract unavailable' });
+          }
+          return;
+        }
+
+        // GET /api/targets - Supported public target variants
+        if (method === 'GET' && pathname === '/api/targets') {
+          this.sendJson(res, 200, TARGET_VARIANTS);
+          return;
+        }
+
+        // GET /api/systems - List all system briefs
+        if (method === 'GET' && pathname === '/api/systems') {
+          try {
+            const briefs = await listSystemBriefs(this.systemsDir);
+            this.sendJson(res, 200, briefs);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof SystemLockTimeoutError || err instanceof SystemLockReleaseError) {
+              this.sendJson(res, 503, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: msg });
+            }
+          }
+          return;
+        }
+
+        // POST /api/systems - Create a new system brief
+        if (method === 'POST' && pathname === '/api/systems') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          const validated = validateSystemBrief(data);
+          if (!validated.valid) {
+            this.sendJson(res, 400, { error: validated.error });
+            return;
+          }
+          try {
+            const saved = await saveSystemBrief(validated.brief, this.systemsDir, { mode: 'create' });
+            this.sendJson(res, 201, saved);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof SystemLockTimeoutError || err instanceof SystemLockReleaseError) {
+              this.sendJson(res, 503, { error: msg });
+            } else if (err instanceof SystemConflictError || msg.includes('already exists')) {
+              this.sendJson(res, 409, { error: msg });
+            } else if (err instanceof SystemIntegrityError) {
+              this.sendJson(res, 500, { error: msg });
+            } else {
+              this.sendJson(res, 400, { error: msg });
+            }
+          }
+          return;
+        }
+
+        // System routes with ID: /api/systems/:id and /api/systems/:id/snapshot
+        const systemMatch = pathname.match(/^\/api\/systems\/([a-zA-Z0-9_-]+)$/);
+        const snapshotMatch = pathname.match(/^\/api\/systems\/([a-zA-Z0-9_-]+)\/snapshot$/);
+
+        if (method === 'GET' && snapshotMatch && snapshotMatch[1]) {
+          const id = snapshotMatch[1];
+          if (!validateSystemId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid system ID' });
+            return;
+          }
+          try {
+            const brief = await getSystemBrief(id, this.systemsDir);
+            if (!brief) {
+              this.sendJson(res, 404, { error: 'System brief not found' });
+              return;
+            }
+            const sim = await getSimulatorApi();
+            const contract = sim.getContract ? sim.getContract() : null;
+            const snapshot = await createSystemSnapshot(brief, contract);
+            this.sendJson(res, 200, snapshot);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof SystemIntegrityError) {
+              this.sendJson(res, 500, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: msg });
+            }
+          }
+          return;
+        }
+
+        if (method === 'GET' && systemMatch && systemMatch[1]) {
+          const id = systemMatch[1];
+          if (!validateSystemId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid system ID' });
+            return;
+          }
+          try {
+            const brief = await getSystemBrief(id, this.systemsDir);
+            if (!brief) {
+              this.sendJson(res, 404, { error: 'System brief not found' });
+              return;
+            }
+            this.sendJson(res, 200, brief);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof SystemIntegrityError) {
+              this.sendJson(res, 500, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: msg });
+            }
+          }
+          return;
+        }
+
+        if (method === 'PUT' && systemMatch && systemMatch[1]) {
+          const id = systemMatch[1];
+          if (!validateSystemId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid system ID' });
+            return;
+          }
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          const bodyObj = (data || {}) as Record<string, unknown>;
+          if (bodyObj.id !== id) {
+            this.sendJson(res, 400, { error: 'System ID in payload must match URL path' });
+            return;
+          }
+          const validated = validateSystemBrief(data);
+          if (!validated.valid) {
+            this.sendJson(res, 400, { error: validated.error });
+            return;
+          }
+          try {
+            const saved = await saveSystemBrief(validated.brief, this.systemsDir, {
+              mode: 'update',
+              expectedRevision: typeof bodyObj.revision === 'number' ? bodyObj.revision : undefined,
+            });
+            this.sendJson(res, 200, saved);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof SystemLockTimeoutError || err instanceof SystemLockReleaseError) {
+              this.sendJson(res, 503, { error: msg });
+            } else if (err instanceof SystemNotFoundError || msg.includes('not found')) {
+              this.sendJson(res, 404, { error: msg });
+            } else if (err instanceof SystemRevisionConflictError || msg.includes('Revision conflict')) {
+              this.sendJson(res, 409, { error: msg });
+            } else if (err instanceof SystemIntegrityError) {
+              this.sendJson(res, 500, { error: msg });
+            } else {
+              this.sendJson(res, 400, { error: msg });
+            }
           }
           return;
         }
@@ -373,14 +555,15 @@ export class ChaosPilotServer {
           const abortController = new AbortController();
           this.startingController = abortController;
           let onStartAbort!: () => void;
-          const cancelledStart = new Promise<{ data?: unknown; error: string; status: number }>(resolve => {
-            onStartAbort = () => resolve({ error: 'Investigation start cancelled', status: 409 });
+          const cancelledStart = new Promise<{ data?: unknown; error: string; status: number; code?: string }>(resolve => {
+            onStartAbort = () => resolve({ error: 'Investigation start cancelled', status: 409, code: 'START_CANCELLED' });
             abortController.signal.addEventListener('abort', onStartAbort, { once: true });
           });
           try {
-            const { data, error, status } = await Promise.race([this.readJsonBody(req), cancelledStart]);
+            const raced = await Promise.race([this.readJsonBody(req), cancelledStart]);
+            const { data, error, status } = raced;
             if (error) {
-              this.sendJson(res, status || 400, { error });
+              this.sendJson(res, status || 400, { error, ...('code' in raced && raced.code ? { code: raced.code } : {}) });
               return;
             }
 
@@ -391,6 +574,59 @@ export class ChaosPilotServer {
               Math.max(Number(body.maxExperiments) || 5, 1),
               20
             );
+
+            if (!isKnownTargetVariant(variant)) {
+              this.sendJson(res, 400, { error: `Invalid target variant: "${String(variant)}"` });
+              return;
+            }
+
+            // System brief snapshot resolution
+            const systemId = typeof body.systemId === 'string' && body.systemId.trim()
+              ? body.systemId.trim()
+              : 'trading-gateway';
+
+            if (!validateSystemId(systemId)) {
+              this.sendJson(res, 400, { error: `Invalid system ID: "${systemId}"` });
+              return;
+            }
+
+            let brief: SystemBrief | null = null;
+            try {
+              brief = await getSystemBrief(systemId, this.systemsDir);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (err instanceof SystemIntegrityError) {
+                this.sendJson(res, 500, { error: msg });
+                return;
+              }
+              this.sendJson(res, 500, { error: msg });
+              return;
+            }
+            if (!brief) {
+              this.sendJson(res, 404, { error: `System brief "${systemId}" not found` });
+              return;
+            }
+
+            if (
+              typeof body.expectedRevision === 'number' &&
+              brief.revision !== body.expectedRevision
+            ) {
+              this.sendJson(res, 409, {
+                error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}`,
+              });
+              return;
+            }
+
+            if (brief.adapterId === 'unconfigured') {
+              this.sendJson(res, 400, {
+                error: `Cannot launch investigation: System brief "${brief.name}" has unconfigured adapter.`,
+              });
+              return;
+            }
+
+            const sim = await getSimulatorApi();
+            const executingContract = sim.getContract ? sim.getContract() : null;
+            const systemSnapshot = await createSystemSnapshot(brief, executingContract);
 
             // Never accept API keys or custom endpoints from the browser
             if (providerKind === 'meta' && (!process.env.MODEL_API_KEY || !process.env.MODEL_API_KEY.trim())) {
@@ -430,7 +666,7 @@ export class ChaosPilotServer {
             }
 
             if (abortController.signal.aborted) {
-              this.sendJson(res, 409, { error: 'Investigation start cancelled' });
+              this.sendJson(res, 409, { error: 'Investigation start cancelled', code: 'START_CANCELLED' });
               return;
             }
 
@@ -453,6 +689,7 @@ export class ChaosPilotServer {
                   maxExperiments,
                   provider,
                   signal: abortController.signal,
+                  systemBrief: structuredClone(systemSnapshot),
                   onUpdate: (record) => {
                     if (this.activeInvestigation && this.activeInvestigation.id === runId) {
                       this.activeInvestigation.record = record;
@@ -490,6 +727,12 @@ export class ChaosPilotServer {
               variant,
               provider: providerKind,
               maxExperiments,
+              systemBrief: {
+                id: systemSnapshot.brief.id,
+                name: systemSnapshot.brief.name,
+                revision: systemSnapshot.brief.revision,
+                hash: systemSnapshot.hash,
+              },
             });
             return;
           } finally {

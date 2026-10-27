@@ -751,7 +751,7 @@ describe('Investigation Test Suite', () => {
       expect(record.contextAudit).toBeDefined();
       expect(record.contextAudit.sourcePaths).toEqual(['engine.ts']);
       expect(record.contextAudit.contractHash).toHaveLength(64);
-      expect(record.contextAudit.promptVersion).toBe('2.0');
+      expect(record.contextAudit.promptVersion).toBe('3.0');
       expect(record.contextAudit.promptTemplateHash).toBeDefined();
     });
   });

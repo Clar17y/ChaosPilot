@@ -10,9 +10,31 @@ A confirmed finding additionally carries a matching source identity, reproducibl
 
 `src/domain.ts` defines integration records. `src/simulator/` owns business rules, logical venue, scheduler, input decoding, invariant checks and target source bundles. `src/investigation/` owns the bounded investigation lifecycle. `src/providers/` owns Meta transport, mock proposals, request validation and usage accounting. The server, CLI and evaluator consume the same core APIs.
 
-The runtime model may see only the public contract, selected target source and experiment observations. It has no shell or general filesystem tool. Source paths are selected by the host; the model cannot choose arbitrary files. Environment configuration, tests, hidden selectors, answer keys, other implementations and verifier internals are not included.
+The runtime model may see the selected system's business overview and contextual requirements, public contract, selected target source and experiment observations. It has no shell or general filesystem tool. Source paths are selected by the host; the model cannot choose arbitrary files. Environment configuration, tests, hidden selectors, answer keys, other implementations and verifier internals are not included.
 
 Source awareness permits reading ordinary faulty code. It does not permit supplying a defect label, planted trigger or clean reference. The exact business code shown to the model must correspond to the executed candidate. Hashes bind observations and replay to that source.
+
+## System briefs and executable contracts
+
+`src/systems/` stores versioned system briefs as JSON under the configured run directory. A brief has a stable ID, name, overview, contextual requirement list and adapter selection. The browser supports create, edit, save and selection; the CLI accepts a saved system ID. Dirty forms cannot launch, and an expected revision guards against launching a profile that another client has changed.
+
+Only `synthetic-trading` is executable. An `unconfigured` profile can preserve a future system definition but cannot start a provider. A trading profile uses the same public trading contract and simulator; editing prose does not change their behavior or turn a new domain into an adapter. The UI therefore distinguishes the ten existing deterministic checks from supplementary requirements that are context only.
+
+New runs pin a full brief/contract snapshot with a revision and canonical content hash. The engine validates it against the execution contract and copies it into the provider context and run record. A later profile edit cannot rewrite old evidence. Legacy records without a snapshot remain readable and explicitly lack that provenance. Prompt 3.0 includes this business context; the archived prompt 2.0 comparison remains an earlier, separate evaluation.
+
+Creation, update and seeding share a per-system filesystem lock and compare-and-swap revision check. Lock acquisition is bounded and never steals an apparently old lock. Only an absent seed file is created automatically; invalid existing files fail visibly and remain intact. A process crash can leave a lock requiring operator inspection after confirming that no writer remains. There is no automatic crash-recovery or lock-stealing claim. Writes use a temporary file followed by rename; this provides atomic replacement under the supported local filesystem, not a power-loss durability guarantee.
+
+The known development fault catalog lives in `src/testing/fault-catalog.ts`. It contains human/test descriptions and reproductions for candidates A–I, and is excluded from provider context and target source bundles. Each new candidate changes one business behavior under the unchanged public verifier. This library proves catchability of known scenarios; it is not a held-out discovery benchmark.
+
+## Browser workspace
+
+The plain TypeScript client separates Overview, Brief & requirements, Capabilities & checks, Prepare investigation, Investigations and Findings & reproductions. These views use the same profile, launch, status, artifact and replay APIs. The illustrative Astra prototype is a design reference; its sample records and proposed fields are not runtime data.
+
+The selected system, editable draft, inspected run and globally active investigation have distinct identities. Navigation retains an unsaved draft, while profile switching and launch require save or discard. An inspected run shows its own pinned system/revision; findings from another system are not attributed to the selected workspace. A global run bar preserves cancellation access across views. Unconfigured profiles expose no executable trading operations.
+
+`src/web/workspace.ts` holds client state predicates and history grouping. Run summaries include optional system ID, name, revision and snapshot hash, derived while storage already reads the record. This avoids fetching every full run again merely to group history. Records without that metadata remain explicitly unassigned legacy records. The run detail fetch still provides the full immutable snapshot and evidence.
+
+`src/web/request-boundaries.ts` supplies the async operations used by the actual handlers. Stop follows the lifecycle's deferred/immediate decision, independently of a launch handler still awaiting status. Stop controls use the unsettled-start phase; the broader launch-handler guard prevents a second overlapping launch. Status responses apply in request order only when no newer response has already applied, with explicit-action generations invalidating older work. This allows slow requests to make progress while preventing stale responses or errors from restoring older state. Drafts have no saved workspace ID, and profile-loading errors are shown without replacing existing loaded context or dirty edits.
 
 ## Simulation state
 

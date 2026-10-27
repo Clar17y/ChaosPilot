@@ -19,6 +19,20 @@ Open [http://127.0.0.1:4310](http://127.0.0.1:4310). Start with the explicitly l
 
 The application runs locally. No database, containers, authentication service or external messaging installation is needed.
 
+## Define a system before investigating
+
+The application opens as a system workspace. Select or create a profile, then use **Brief & requirements** to save its business overview and additional requirements. **Capabilities & checks** shows the adapter's public trading contract and ten deterministic checks. Save or discard edits before launching so the run uses the requirements shown on screen.
+
+Additional prose gives the investigator context. It does **not** create an executable check. Only the synthetic trading adapter currently runs experiments; profiles for other systems can be saved with an unconfigured adapter and remain drafts. Selecting the trading adapter for a profile still executes this synthetic trading system, not an arbitrary external application.
+
+New browser and CLI investigations save an immutable brief, revision, contract and content hash. Editing a profile later leaves earlier run evidence intact. Older artifacts explicitly show that no system brief was recorded. CLI selection uses `--system-id <saved-profile-id>`; the default is `trading-gateway`.
+
+**Overview** summarises the selected system. **Prepare investigation** reviews the saved context and bounded run configuration. **Investigations** groups actual history by system and pinned brief revision, with older unassigned records shown separately. **Findings & reproductions** links findings to their saved run; inspect the exact sequence, source, pinned requirements, replay and clean comparison there. A global control keeps an active investigation visible and stoppable while navigating between views or systems.
+
+The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable prototype](docs/design/astra/prototype.html) guided this integration. The prototype's sample investigation data is illustrative; the application uses persisted records and real execution/replay APIs. Fields outside the saved brief schema remain design proposals.
+
+The integrated application passes 401 tests in 24 files, the TypeScript check and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
+
 ## Live Meta configuration
 
 Copy `.env.example` to `.env` and set `MODEL_API_KEY` locally. Do not put credentials in browser fields, exported experiments, Git or chat. The server reads configuration; the browser does not receive the key.
@@ -63,9 +77,11 @@ See [authentic artifacts and reproduction instructions](examples/README.md) and 
 
 The completed clean-target follow-up executed two model-generated experiments with no invariant violations; repeated truncation consumed another proposal slot. This is limited evidence, not proof of correctness.
 
-The subsequent frozen prompt 2.0 batch gave both models findings in **2/2 trials on a new synthetic target**, using one experiment each, while the unchanged conventional generator found it in **0/2 trials** within three experiments each. All 41 recorded experiments replayed identically. Total reported estimated API cost was **$0.953607**. Human timing was unmeasured, and fixture-author blinding was partial. See [controlled results and limitations](docs/CONTROLLED_RESULTS.md) and [the complete authentic reports](examples/controlled-v2/README.md). Automated validation currently passes **293 tests**, the TypeScript check and production build.
+The subsequent frozen prompt 2.0 batch gave both models findings in **2/2 trials on a new synthetic target**, using one experiment each, while the unchanged conventional generator found it in **0/2 trials** within three experiments each. All 41 recorded experiments replayed identically. Total reported estimated API cost was **$0.953607**. Human timing was unmeasured, and fixture-author blinding was partial. See [controlled results and limitations](docs/CONTROLLED_RESULTS.md) and [the complete authentic reports](examples/controlled-v2/README.md). That archived revision passed 293 tests, the TypeScript check and production build. The current requirements workflow changes the investigator prompt to 3.0 and has not had a new live comparison.
 
-Targets are `clean`, `candidate-a`, `candidate-b` and `candidate-c`. Candidate identities are evaluation configuration, not model instructions. The investigator receives the selected implementation as ordinary source, without another variant, the answer key or known reproductions. Default calibration excludes C; select it explicitly for replication.
+Targets are `clean` and nine independently selectable candidates, A through I. Candidate identities are execution configuration, not model instructions. The investigator receives the selected implementation as ordinary source, without another variant, the answer key or known reproductions. Default benchmark calibration remains A/B; select other targets explicitly.
+
+The [known fault lab](docs/FAULT_LAB.md) adds stale market and credit updates, split-fill accounting, mismatched execution prices, conflicting execution IDs and premature terminal order status to the original three faults. Its [offline catchability record](examples/fault-lab/README.md) contains nine known reproductions, exact replays and clean controls. These are deliberately authored recipes, **not new AI discovery results**. No live model calls were used for this expansion.
 
 ## What an experiment can do
 
