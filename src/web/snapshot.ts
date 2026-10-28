@@ -156,3 +156,202 @@ export function extractSnapshotDisplay(rawSnapshot: unknown): SnapshotDisplayMod
     hasOrders: orders.length > 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Inspected-run state presentation (domain selected by the pinned adapter)
+// ---------------------------------------------------------------------------
+
+export type StateAdapterKind = 'trading' | 'inventory' | 'unknown';
+
+export interface StatePresentation {
+  kind: StateAdapterKind;
+  tabTitle: string;
+  primaryTitle: string;
+  secondaryTitle: string;
+  primaryEmpty: string;
+  secondaryEmpty: string;
+}
+
+const STATE_PRESENTATIONS: Record<StateAdapterKind, StatePresentation> = {
+  trading: {
+    kind: 'trading',
+    tabTitle: 'Order & credit exposure',
+    primaryTitle: 'Credit & Gateway Accounting',
+    secondaryTitle: 'Orders Tracked',
+    primaryEmpty: 'No snapshot state available.',
+    secondaryEmpty: 'No orders active in snapshot.',
+  },
+  inventory: {
+    kind: 'inventory',
+    tabTitle: 'Inventory & reservations',
+    primaryTitle: 'Stock by SKU',
+    secondaryTitle: 'Reservations',
+    primaryEmpty: 'No stock recorded in snapshot.',
+    secondaryEmpty: 'No reservations recorded in snapshot.',
+  },
+  unknown: {
+    kind: 'unknown',
+    tabTitle: 'Run state',
+    primaryTitle: 'State',
+    secondaryTitle: 'State details',
+    primaryEmpty: 'State unavailable: unknown system adapter for this run.',
+    secondaryEmpty: 'State unavailable: unknown system adapter for this run.',
+  },
+};
+
+export function statePresentationFor(kind: StateAdapterKind): StatePresentation {
+  return STATE_PRESENTATIONS[kind];
+}
+
+/** Pinned adapter id carried by an inspected record, or null when absent/malformed. */
+export function inspectedRunAdapterId(
+  record: { systemBrief?: { brief?: { adapterId?: unknown } | null } | null } | null | undefined,
+): string | null {
+  const adapterId = record?.systemBrief?.brief?.adapterId;
+  return typeof adapterId === 'string' && adapterId.length > 0 ? adapterId : null;
+}
+
+/**
+ * State domain for an inspected run, from its pinned brief — never from the
+ * currently selected profile. Legacy records with no brief snapshot are the
+ * original trading runs and stay trading; a pinned brief with an unrecognised
+ * or missing adapter is unknown, never mislabeled as trading.
+ */
+export function stateKindForInspectedRun(
+  adapterId: string | null | undefined,
+  hasPinnedBrief: boolean,
+): StateAdapterKind {
+  if (adapterId === 'inventory-reservation') return 'inventory';
+  if (adapterId === 'synthetic-trading') return 'trading';
+  if (!hasPinnedBrief && (adapterId === null || adapterId === undefined)) return 'trading';
+  return 'unknown';
+}
+
+export function stateKindForRecord(
+  record: { systemBrief?: { brief?: { adapterId?: unknown } | null } | null } | null | undefined,
+): StateAdapterKind {
+  return stateKindForInspectedRun(inspectedRunAdapterId(record), Boolean(record?.systemBrief));
+}
+
+// ---------------------------------------------------------------------------
+// Inventory snapshot display model
+// ---------------------------------------------------------------------------
+
+export interface InventoryStockDisplay {
+  sku: string;
+  received: number | '-';
+  onHand: number | '-';
+  /** Sum of remaining reservations for this SKU; '-' when it cannot be derived honestly. */
+  reservedRemaining: number | '-';
+  /** onHand - reservedRemaining; may be negative (over-reservation is shown, not clamped). */
+  available: number | '-';
+  overReserved: boolean;
+  displayText: string;
+}
+
+export interface InventoryReservationDisplay {
+  reservationId: string;
+  sku: string;
+  quantity: number | '-';
+  remaining: number | '-';
+  shipped: number | '-';
+  cancelled: number | '-';
+  displayText: string;
+}
+
+export interface InventorySnapshotDisplay {
+  stock: InventoryStockDisplay[];
+  reservations: InventoryReservationDisplay[];
+  hasStock: boolean;
+  hasReservations: boolean;
+  stockAvailable: boolean;
+  reservationsAvailable: boolean;
+}
+
+function finiteNumber(value: unknown): number | '-' {
+  return typeof value === 'number' && Number.isFinite(value) ? value : '-';
+}
+
+function textOrDash(value: unknown): string {
+  return typeof value === 'string' && value.length > 0 ? value : '-';
+}
+
+/**
+ * Pure display model for an inventory experiment snapshot
+ * (`{ target: { stock, reservations, accepted }, ... }`, flat fallback).
+ * Missing or malformed quantities render as '-'; nothing is invented as zero
+ * and over-reservation is reported as-is (negative availability).
+ */
+export function extractInventorySnapshotDisplay(rawSnapshot: unknown): InventorySnapshotDisplay {
+  const empty: InventorySnapshotDisplay = {
+    stock: [], reservations: [], hasStock: false, hasReservations: false,
+    stockAvailable: false, reservationsAvailable: false,
+  };
+  if (!isRecord(rawSnapshot)) return empty;
+  const target = isRecord(rawSnapshot.target) ? rawSnapshot.target : rawSnapshot;
+
+  const reservations: InventoryReservationDisplay[] = [];
+  const reservationsRecord = isRecord(target.reservations) ? target.reservations : null;
+  let unknownReservationSku = false;
+  if (reservationsRecord) {
+    for (const [reservationId, rawReservation] of Object.entries(reservationsRecord)) {
+      const entry = isRecord(rawReservation) ? rawReservation : {};
+      if (typeof entry.sku !== 'string' || !entry.sku || entry.sku.trim() !== entry.sku) {
+        unknownReservationSku = true;
+      }
+      const sku = textOrDash(entry.sku);
+      const quantity = finiteNumber(entry.quantity);
+      const remaining = finiteNumber(entry.remaining);
+      const shipped = finiteNumber(entry.shipped);
+      const cancelled = finiteNumber(entry.cancelled);
+      reservations.push({
+        reservationId,
+        sku,
+        quantity,
+        remaining,
+        shipped,
+        cancelled,
+        displayText: `SKU: ${sku} | Quantity: ${quantity} | Remaining: ${remaining} | Shipped: ${shipped} | Cancelled: ${cancelled}`,
+      });
+    }
+  }
+
+  const stock: InventoryStockDisplay[] = [];
+  const stockRecord = isRecord(target.stock) ? target.stock : null;
+  if (stockRecord) {
+    for (const [sku, rawStock] of Object.entries(stockRecord)) {
+      const entry = isRecord(rawStock) ? rawStock : {};
+      const received = finiteNumber(entry.received);
+      const onHand = finiteNumber(entry.onHand);
+      let reservedRemaining: number | '-' = '-';
+      if (reservationsRecord && !unknownReservationSku) {
+        let sum = 0;
+        let malformed = false;
+        for (const reservation of reservations) {
+          if (reservation.sku !== sku) continue;
+          if (reservation.remaining === '-' || !Number.isSafeInteger(reservation.remaining)) { malformed = true; break; }
+          sum += reservation.remaining;
+          if (!Number.isSafeInteger(sum)) { malformed = true; break; }
+        }
+        if (!malformed) reservedRemaining = sum;
+      }
+      const difference = onHand !== '-' && reservedRemaining !== '-' && Number.isSafeInteger(onHand)
+        ? onHand - reservedRemaining : NaN;
+      const available: number | '-' = Number.isSafeInteger(difference) ? difference : '-';
+      const overReserved = available !== '-' && available < 0;
+      const parts = [
+        `Received: ${received}`,
+        `On hand: ${onHand}`,
+        `Reserved (remaining): ${reservedRemaining}`,
+        `Available: ${available}`,
+      ];
+      if (overReserved) parts.push('Over-reserved');
+      stock.push({ sku, received, onHand, reservedRemaining, available, overReserved, displayText: parts.join(' | ') });
+    }
+  }
+
+  return {
+    stock, reservations, hasStock: stock.length > 0, hasReservations: reservations.length > 0,
+    stockAvailable: stockRecord !== null, reservationsAvailable: reservationsRecord !== null,
+  };
+}

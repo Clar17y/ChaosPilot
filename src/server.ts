@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import { resolveAdapter, assertAdapterVariant } from './adapters/index.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -355,6 +356,7 @@ export class ChaosPilotServer {
             currentRecord: active ? active.record : this.startingController ? null : this.latestRecord,
             metaKeyConfigured: Boolean(process.env.MODEL_API_KEY && process.env.MODEL_API_KEY.trim().length > 0),
             targetVariants: TARGET_VARIANTS,
+            targetVariantsByAdapter: Object.fromEntries(['synthetic-trading', 'inventory-reservation'].map((adapterId) => [adapterId, [...resolveAdapter(adapterId).variants]])),
           });
           return;
         }
@@ -362,7 +364,8 @@ export class ChaosPilotServer {
         // GET /api/contract - Public system contract (never exposes secrets or hidden keys)
         if (method === 'GET' && pathname === '/api/contract') {
           try {
-            const sim = await getSimulatorApi();
+            const adapterId = new URL(req.url || '/', 'http://localhost').searchParams.get('adapterId') ?? 'synthetic-trading';
+            const sim = adapterId === 'synthetic-trading' ? await getSimulatorApi() : resolveAdapter(adapterId);
             // In simulator/contract.ts or index.ts
             const contract = sim.getContract ? sim.getContract() : { name: 'ChaosPilot Gateway' };
             this.sendJson(res, 200, contract);
@@ -374,7 +377,9 @@ export class ChaosPilotServer {
 
         // GET /api/targets - Supported public target variants
         if (method === 'GET' && pathname === '/api/targets') {
-          this.sendJson(res, 200, TARGET_VARIANTS);
+          const adapterId = new URL(req.url || '/', 'http://localhost').searchParams.get('adapterId') ?? 'synthetic-trading';
+          try { this.sendJson(res, 200, resolveAdapter(adapterId).variants); }
+          catch (error) { this.sendJson(res, 400, { error: String(error) }); }
           return;
         }
 
@@ -445,9 +450,7 @@ export class ChaosPilotServer {
               this.sendJson(res, 404, { error: 'System brief not found' });
               return;
             }
-            const sim = await getSimulatorApi();
-            const contract = sim.getContract ? sim.getContract() : null;
-            const snapshot = await createSystemSnapshot(brief, contract);
+            const snapshot = await createSystemSnapshot(brief);
             this.sendJson(res, 200, snapshot);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -624,9 +627,9 @@ export class ChaosPilotServer {
               return;
             }
 
-            const sim = await getSimulatorApi();
-            const executingContract = sim.getContract ? sim.getContract() : null;
-            const systemSnapshot = await createSystemSnapshot(brief, executingContract);
+            try { assertAdapterVariant(brief.adapterId, variant); }
+            catch (error) { this.sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) }); return; }
+            const systemSnapshot = await createSystemSnapshot(brief);
 
             // Never accept API keys or custom endpoints from the browser
             if (providerKind === 'meta' && (!process.env.MODEL_API_KEY || !process.env.MODEL_API_KEY.trim())) {

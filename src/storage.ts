@@ -1,5 +1,5 @@
 import {
-  TARGET_VARIANTS,
+  ALL_TARGET_VARIANTS,
   type TargetVariant,
   type InvestigationRecord,
   type Experiment,
@@ -10,7 +10,10 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
-import { compareSemanticReplay } from './evidence.ts';
+import { canonicalJson, compareSemanticReplay, computeContractHash, computeLegacyRawContractHash } from './evidence.ts';
+import { assertAdapterVariant, resolveAdapter } from './adapters/index.ts';
+import { computeSnapshotHash, validateSystemBrief } from './systems/index.ts';
+import { getPromptIdentity } from './investigation/prompt.ts';
 export {
   SEEDED_TRADING_BRIEF,
   validateSystemId,
@@ -62,6 +65,16 @@ export interface ReplayExperimentOutcome {
   replayedResult: ExperimentResult;
 }
 
+export type ReplayContextStatus = 'identical' | 'drifted' | 'unknown' | 'unverified-legacy';
+
+export interface ReplayContextCheck {
+  kind: 'prompt' | 'contract' | 'contract-hash' | 'clean-source' | 'target-source' | 'system-brief';
+  status: ReplayContextStatus;
+  detail: string;
+  saved?: string;
+  current?: string;
+}
+
 export interface ReplayReport {
   runId: string;
   variant: TargetVariant;
@@ -75,6 +88,9 @@ export interface ReplayReport {
   outcomes: ReplayExperimentOutcome[];
   timestamp: string;
   note?: string;
+  contextChecks?: ReplayContextCheck[];
+  contextDrift?: string[];
+  contextStatus?: 'verified' | 'drifted' | 'unknown' | 'legacy-unknown';
 }
 
 export interface SimulatorApi {
@@ -103,7 +119,7 @@ export async function getSimulatorApi(): Promise<SimulatorApi> {
 }
 
 export const isKnownTargetVariant = (v: unknown): v is TargetVariant =>
-  typeof v === 'string' && (TARGET_VARIANTS as readonly string[]).includes(v);
+  typeof v === 'string' && (ALL_TARGET_VARIANTS as readonly string[]).includes(v);
 
 const VALID_PROVIDERS = new Set(['mock', 'meta']);
 const VALID_MODES = new Set(['live', 'mock']);
@@ -343,7 +359,182 @@ export async function replayRun(
     record = target;
   }
 
-  const simulator = simulatorOverride || (await getSimulatorApi());
+  const rawAudit = record.contextAudit as InvestigationRecord['contextAudit'] | undefined;
+  const adapterId = record.systemBrief?.brief?.adapterId ?? rawAudit?.adapterId ?? 'synthetic-trading';
+  assertAdapterVariant(adapterId, record.variant);
+  // Contradictory saved audit identity is rejected for every record, with or
+  // without a snapshot; legitimately absent historic fields are not rejected.
+  if (rawAudit?.adapterId !== undefined && rawAudit.adapterId !== adapterId) throw new Error('Replay adapter, variant or prompt audit mismatch');
+  if (rawAudit?.variant !== undefined && rawAudit.variant !== record.variant) throw new Error('Replay adapter, variant or prompt audit mismatch');
+  const hasSnapshot = record.systemBrief !== undefined;
+  const audit = record.contextAudit as InvestigationRecord['contextAudit'] | undefined;
+  const contextChecks: ReplayContextCheck[] = [];
+  // Checks whose drift/unknown state blocks an exact-reproduction claim.
+  const gatingChecks: ReplayContextCheck[] = [];
+  const addCheck = (check: ReplayContextCheck, gating: boolean) => {
+    contextChecks.push(check);
+    if (gating) gatingChecks.push(check);
+  };
+
+  // Internal integrity of the pinned snapshot itself: a mismatch here means
+  // the saved record is inconsistent, regardless of current-code evolution.
+  if (hasSnapshot) {
+    const snapshot = record.systemBrief!;
+    const validated = validateSystemBrief(snapshot?.brief);
+    if (!validated.valid) throw new Error(`Invalid replay system brief: ${validated.error}`);
+    if (snapshot.hash !== computeSnapshotHash(validated.brief, snapshot.contract)) throw new Error('Replay system brief snapshot hash mismatch');
+    // adapter/variant audit contradictions are checked universally above.
+  } else {
+    addCheck({ kind: 'system-brief', status: 'unknown', detail: 'Legacy record without a pinned system brief snapshot; brief/contract context was not recorded.' }, false);
+  }
+
+  const simulator = simulatorOverride || (adapterId === 'synthetic-trading' ? await getSimulatorApi() : resolveAdapter(adapterId));
+
+  // Saved experiment/finding plan identity is internal evidence integrity for
+  // every adapter and snapshot mode. Only evidence actually present is
+  // checked, so genuinely missing historical optional fields stay compatible.
+  for (const exp of record.experiments) {
+    if (exp.result?.sourceHash && record.sourceHash && exp.result.sourceHash !== record.sourceHash) throw new Error('Replay experiment source or plan identity mismatch');
+    if (exp.experiment !== undefined && exp.result?.experiment !== undefined && canonicalJson(exp.experiment) !== canonicalJson(exp.result.experiment)) throw new Error('Replay experiment source or plan identity mismatch');
+  }
+  for (const finding of record.findings) {
+    if (finding.sourceHash && record.sourceHash && finding.sourceHash !== record.sourceHash) throw new Error('Replay finding source or plan identity mismatch');
+    if (finding.replay !== undefined && finding.experimentIndex !== undefined) {
+      const exp = record.experiments.find(e => e.index === finding.experimentIndex);
+      if (!exp || canonicalJson(finding.replay) !== canonicalJson(exp.experiment)) throw new Error('Replay finding source or plan identity mismatch');
+    }
+  }
+
+  // --- Context drift vs current code (reported, never aborting replay) ---
+  let currentContract: SystemContract | undefined;
+  let currentContractKnown = false;
+  if (simulator.getContract) {
+    try {
+      currentContract = simulator.getContract();
+      currentContractKnown = true;
+    } catch {
+      currentContractKnown = false;
+    }
+  }
+
+  if (hasSnapshot) {
+    const snapshot = record.systemBrief!;
+    // Prompt: verify saved audit against recorded proposal audits first.
+    const proposalRequests = (record.proposalAttempts ?? []).flatMap(a => a.request ? [a.request] : []);
+    const distinctProposalPrompts = new Set(proposalRequests.filter(r => r.promptVersion && r.promptTemplateHash).map(r => `${r.promptVersion}|${r.promptTemplateHash}`));
+    if (distinctProposalPrompts.size > 1) throw new Error('Replay adapter, variant or prompt audit mismatch: recorded proposal audits disagree on prompt identity');
+    for (const req of proposalRequests) {
+      if (audit?.promptVersion && req.promptVersion && req.promptVersion !== audit.promptVersion) throw new Error('Replay adapter, variant or prompt audit mismatch');
+      if (audit?.promptTemplateHash && req.promptTemplateHash && req.promptTemplateHash !== audit.promptTemplateHash) throw new Error('Replay adapter, variant or prompt audit mismatch');
+    }
+    const savedPromptVersion = audit?.promptVersion || proposalRequests[0]?.promptVersion;
+    const savedPromptHash = audit?.promptTemplateHash || proposalRequests[0]?.promptTemplateHash;
+    let promptIdentity: ReturnType<typeof getPromptIdentity> | undefined;
+    try { promptIdentity = getPromptIdentity(adapterId); } catch { promptIdentity = undefined; }
+    if (!promptIdentity || !savedPromptVersion || !savedPromptHash) {
+      addCheck({ kind: 'prompt', status: 'unknown', detail: 'Saved or current prompt identity is incomplete; prompt context cannot be proved identical.', saved: savedPromptHash || savedPromptVersion, current: promptIdentity?.promptTemplateHash }, true);
+    } else if (savedPromptVersion === promptIdentity.promptVersion && savedPromptHash === promptIdentity.promptTemplateHash) {
+      addCheck({ kind: 'prompt', status: 'identical', detail: 'Saved prompt identity matches the current prompt and recorded proposal audits.', saved: savedPromptHash, current: promptIdentity.promptTemplateHash }, true);
+    } else {
+      addCheck({ kind: 'prompt', status: 'drifted', detail: `Saved prompt (version ${savedPromptVersion}) differs from the current prompt (version ${promptIdentity.promptVersion}); ${proposalRequests.length ? 'the saved prompt is corroborated by recorded proposal audits.' : 'no proposal audits were recorded to corroborate the saved prompt.'}`, saved: savedPromptHash, current: promptIdentity.promptTemplateHash }, true);
+    }
+
+    // Contract content drift (canonical, key-order independent).
+    if (!snapshot.contract) {
+      addCheck({ kind: 'contract', status: 'unknown', detail: 'Pinned snapshot carries no contract; contract context cannot be compared.' }, true);
+    } else if (!currentContractKnown) {
+      addCheck({ kind: 'contract', status: 'unknown', detail: 'Current adapter contract is unavailable; contract drift cannot be determined.' }, true);
+    } else if (canonicalJson(currentContract) === canonicalJson(snapshot.contract)) {
+      addCheck({ kind: 'contract', status: 'identical', detail: 'Saved contract is canonically identical to the current adapter contract.' }, true);
+    } else {
+      const stripDescription = (c: SystemContract) => { const { description: _d, name: _n, ...rest } = c; return rest; };
+      const descriptionOnly = canonicalJson(stripDescription(currentContract!)) === canonicalJson(stripDescription(snapshot.contract));
+      addCheck({ kind: 'contract', status: 'drifted', detail: descriptionOnly ? 'Saved contract differs from the current adapter contract in name/description only.' : 'Saved contract differs semantically from the current adapter contract.' }, true);
+    }
+
+    // Contract audit hash: canonical for new records, legacy raw for old ones.
+    if (snapshot.contract) {
+      const auditHash = audit?.contractHash;
+      const canonicalSaved = computeContractHash(snapshot.contract);
+      if (!auditHash) {
+        addCheck({ kind: 'contract-hash', status: 'unknown', detail: 'Recorded contract audit hash is missing; contract provenance cannot be proved.', current: canonicalSaved }, true);
+      } else if (auditHash === canonicalSaved) {
+        addCheck({ kind: 'contract-hash', status: 'identical', detail: 'Recorded contract audit hash matches the canonical hash of the saved contract.', saved: auditHash, current: canonicalSaved }, true);
+      } else if (auditHash === computeLegacyRawContractHash(snapshot.contract)) {
+        addCheck({ kind: 'contract-hash', status: 'identical', detail: 'Recorded contract audit hash matches the legacy raw-order hash of the saved contract.', saved: auditHash, current: canonicalSaved }, true);
+      } else if (currentContractKnown && canonicalJson(currentContract) === canonicalJson(snapshot.contract) && auditHash === computeLegacyRawContractHash(currentContract)) {
+        addCheck({ kind: 'contract-hash', status: 'identical', detail: 'Recorded contract audit hash matches the legacy raw-order hash of the canonically identical executing contract (snapshot key order differs).', saved: auditHash, current: canonicalSaved }, true);
+      } else if (currentContractKnown && (auditHash === computeContractHash(currentContract) || auditHash === computeLegacyRawContractHash(currentContract))) {
+        throw new Error('Replay contract audit mismatch: recorded contract hash matches the current contract, not the saved snapshot contract');
+      } else if (currentContractKnown && canonicalJson(currentContract) === canonicalJson(snapshot.contract)) {
+        throw new Error('Replay contract audit mismatch');
+      } else {
+        addCheck({ kind: 'contract-hash', status: 'unverified-legacy', detail: 'Recorded contract audit hash matches neither the canonical nor a provable legacy raw-order hash of the saved contract, and the historical executing key order cannot be reconstructed because the current contract differs or is unavailable; contract provenance is unverified.', saved: auditHash, current: canonicalSaved }, true);
+      }
+    }
+  }
+
+  // Legacy records without a snapshot: any recorded prompt/contract audit
+  // evidence is still compared with the current adapter context. Drift or an
+  // unverifiable recorded hash blocks exactness; genuinely absent metadata is
+  // reported as unknown without blocking the historical source+execution claim.
+  if (!hasSnapshot) {
+    const proposalRequests = (record.proposalAttempts ?? []).flatMap(a => a.request ? [a.request] : []);
+    const distinctProposalPrompts = new Set(proposalRequests.filter(r => r.promptVersion && r.promptTemplateHash).map(r => `${r.promptVersion}|${r.promptTemplateHash}`));
+    if (distinctProposalPrompts.size > 1) throw new Error('Replay adapter, variant or prompt audit mismatch: recorded proposal audits disagree on prompt identity');
+    for (const req of proposalRequests) {
+      if (audit?.promptVersion && req.promptVersion && req.promptVersion !== audit.promptVersion) throw new Error('Replay adapter, variant or prompt audit mismatch');
+      if (audit?.promptTemplateHash && req.promptTemplateHash && req.promptTemplateHash !== audit.promptTemplateHash) throw new Error('Replay adapter, variant or prompt audit mismatch');
+    }
+    const savedPromptVersion = audit?.promptVersion || proposalRequests.find(r => r.promptVersion)?.promptVersion;
+    const savedPromptHash = audit?.promptTemplateHash || proposalRequests.find(r => r.promptTemplateHash)?.promptTemplateHash;
+    let promptIdentity: ReturnType<typeof getPromptIdentity> | undefined;
+    try { promptIdentity = getPromptIdentity(adapterId); } catch { promptIdentity = undefined; }
+    if (!savedPromptVersion && !savedPromptHash) {
+      addCheck({ kind: 'prompt', status: 'unknown', detail: 'Legacy record carries no recorded prompt identity; prompt context was not recorded.', current: promptIdentity?.promptTemplateHash }, false);
+    } else if (!promptIdentity) {
+      addCheck({ kind: 'prompt', status: 'unknown', detail: 'Current prompt identity is unavailable; the recorded prompt identity cannot be verified.', saved: savedPromptHash || savedPromptVersion }, true);
+    } else if ((!savedPromptVersion || savedPromptVersion === promptIdentity.promptVersion) && (!savedPromptHash || savedPromptHash === promptIdentity.promptTemplateHash)) {
+      addCheck({ kind: 'prompt', status: 'identical', detail: 'Recorded legacy prompt identity matches the current prompt on every recorded field.', saved: savedPromptHash || savedPromptVersion, current: promptIdentity.promptTemplateHash }, true);
+    } else {
+      addCheck({ kind: 'prompt', status: 'drifted', detail: `Recorded legacy prompt (version ${savedPromptVersion ?? 'unrecorded'}) differs from the current prompt (version ${promptIdentity.promptVersion}).`, saved: savedPromptHash || savedPromptVersion, current: promptIdentity.promptTemplateHash }, true);
+    }
+
+    const auditHash = audit?.contractHash;
+    if (!auditHash) {
+      addCheck({ kind: 'contract-hash', status: 'unknown', detail: 'Legacy record carries no recorded contract audit hash; contract context was not recorded.' }, false);
+    } else if (!currentContractKnown) {
+      addCheck({ kind: 'contract-hash', status: 'unknown', detail: 'Current adapter contract is unavailable; the recorded legacy contract hash cannot be verified.', saved: auditHash }, true);
+    } else if (auditHash === computeContractHash(currentContract) || auditHash === computeLegacyRawContractHash(currentContract)) {
+      addCheck({ kind: 'contract-hash', status: 'identical', detail: 'Recorded legacy contract audit hash matches the current adapter contract (canonical or legacy raw-order hash).', saved: auditHash, current: computeContractHash(currentContract) }, true);
+    } else {
+      addCheck({ kind: 'contract-hash', status: 'unverified-legacy', detail: 'Recorded legacy contract audit hash matches neither the canonical nor the legacy raw-order hash of the current contract; it may reflect contract drift or an unreconstructable historical key order, so contract provenance is unverified.', saved: auditHash, current: computeContractHash(currentContract) }, true);
+    }
+  }
+
+  // Clean-control source identity. Always reported: a snapshot-backed record
+  // without a recorded clean hash is unknown and cannot claim full-context
+  // verification; a recorded hash that drifted or cannot be compared blocks
+  // exactness in every mode; a genuinely absent legacy hash does not.
+  {
+    const cleanGating = hasSnapshot || Boolean(audit?.cleanSourceHash);
+    if (audit?.cleanSourceHash && record.variant === 'clean' && audit.cleanSourceHash !== record.sourceHash) {
+      throw new Error('Replay clean control source identity is internally inconsistent with the recorded clean target source hash');
+    }
+    if (!audit?.cleanSourceHash) {
+      addCheck({ kind: 'clean-source', status: 'unknown', detail: 'No clean-control source hash was recorded; clean-control identity cannot be proved.' }, cleanGating);
+    } else {
+      let currentCleanHash: string | undefined;
+      try { currentCleanHash = simulator.getSourceBundle('clean').hash; } catch { currentCleanHash = undefined; }
+      if (!currentCleanHash) {
+        addCheck({ kind: 'clean-source', status: 'unknown', detail: 'Current clean-control source is unavailable; clean-control drift cannot be determined.', saved: audit.cleanSourceHash }, cleanGating);
+      } else if (currentCleanHash === audit.cleanSourceHash) {
+        addCheck({ kind: 'clean-source', status: 'identical', detail: 'Saved clean-control source hash matches the current clean source.', saved: audit.cleanSourceHash, current: currentCleanHash }, cleanGating);
+      } else {
+        addCheck({ kind: 'clean-source', status: 'drifted', detail: 'Saved clean-control source hash differs from the current clean source.', saved: audit.cleanSourceHash, current: currentCleanHash }, cleanGating);
+      }
+    }
+  }
 
   // 1. Check current source bundle hash for the target variant
   let currentSourceHash = '';
@@ -360,6 +551,15 @@ export async function replayRun(
     record.sourceHash &&
     currentSourceHash === record.sourceHash
   );
+  addCheck({
+    kind: 'target-source',
+    status: currentSourceHash === 'unavailable' || !currentSourceHash ? 'unknown' : sourceIdentical ? 'identical' : 'drifted',
+    detail: sourceIdentical
+      ? 'Saved target source hash matches the current target source.'
+      : 'Saved target source hash differs from, or cannot be compared with, the current target source.',
+    saved: record.sourceHash,
+    current: currentSourceHash,
+  }, hasSnapshot);
 
   // 2. Deterministically replay each experiment without model invocation
   const outcomes: ReplayExperimentOutcome[] = [];
@@ -403,15 +603,33 @@ export async function replayRun(
     record.experiments.length > 0 &&
     experimentsReproduced === record.experiments.length;
 
-  // Exact reproduction can ONLY be claimed if source is identical AND all exact semantic comparisons match
-  const exactReproductionClaimed = sourceIdentical && allExactMatched;
+  const contextDrift = contextChecks.filter(c => c.status !== 'identical').map(c => `${c.kind}: ${c.detail}`);
+  const gatingBlocked = gatingChecks.some(c => c.status !== 'identical');
+  const contextStatus: NonNullable<ReplayReport['contextStatus']> = gatingChecks.some(c => c.status === 'drifted')
+    ? 'drifted'
+    : gatingBlocked
+      ? 'unknown'
+      : !hasSnapshot
+        ? 'legacy-unknown'
+        : 'verified';
+
+  // Exact reproduction can ONLY be claimed if source is identical, all exact
+  // semantic comparisons match, and no applicable saved context has drifted
+  // or is unproved. Legacy records without a pinned snapshot keep the
+  // historical source+execution definition, reported as legacy-unknown.
+  const exactReproductionClaimed = sourceIdentical && allExactMatched && !gatingBlocked;
   const reproduced = exactReproductionClaimed;
 
   let note: string;
-  if (!sourceIdentical) {
+  if (gatingBlocked) {
+    const blocked = gatingChecks.filter(c => c.status !== 'identical').map(c => `${c.kind} (${c.status})`).join(', ');
+    note = `Replay context differs from or cannot be proved against current context: ${blocked}. Per-experiment outcomes are reported, but exact reproduction cannot be claimed.`;
+  } else if (!sourceIdentical) {
     note = `Source changed or diverged: original source hash (${record.sourceHash}) does not match current runtime source hash (${currentSourceHash}). Exact reproduction cannot be claimed.`;
   } else if (!allExactMatched) {
     note = `Source identical, but execution trace or snapshot diverged from original run. Exact reproduction failed.`;
+  } else if (!hasSnapshot) {
+    note = `Source identical: exact reproduction verified deterministically with no provider invocation (trace, snapshot, violations, rejections, validity all match). Legacy record without a pinned system brief; recorded prompt/contract/clean audit evidence, where present, did not contradict the current context.`;
   } else {
     note = `Source identical: exact reproduction verified deterministically with no provider invocation (trace, snapshot, violations, rejections, validity all match).`;
   }
@@ -429,6 +647,9 @@ export async function replayRun(
     outcomes,
     timestamp: new Date().toISOString(),
     note,
+    contextChecks,
+    contextDrift,
+    contextStatus,
   };
 }
 

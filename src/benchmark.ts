@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeContractHash } from './evidence.ts';
 import {
   TARGET_VARIANTS,
   type TargetVariant,
@@ -903,10 +904,7 @@ export async function runBenchmark(options: BenchmarkOptions = {}): Promise<Benc
     }
     try {
       const contract = sim.getContract();
-      const contractHash = crypto
-        .createHash('sha256')
-        .update(JSON.stringify(contract), 'utf8')
-        .digest('hex');
+      const contractHash = computeContractHash(contract);
       targetContractHashes[t] = contractHash;
     } catch {
       targetContractHashes[t] = 'unknown';
@@ -1292,7 +1290,7 @@ export async function runBenchmark(options: BenchmarkOptions = {}): Promise<Benc
             currentIdentityProblem = `Current target source identity is unavailable after the trial: ${error instanceof Error ? error.message : String(error)}`;
           }
           try {
-            const currentHash = crypto.createHash('sha256').update(JSON.stringify(sim.getContract()), 'utf8').digest('hex');
+            const currentHash = computeContractHash(sim.getContract());
             if (expectedContractHash !== 'unknown' && currentHash !== expectedContractHash) {
               violationNote = `Target contractHash changed during the trial: expected ${expectedContractHash}, got ${currentHash}.`;
             }

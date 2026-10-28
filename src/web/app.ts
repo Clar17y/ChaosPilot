@@ -8,7 +8,8 @@ import type {
   SystemContract,
 } from '../domain.ts';
 import type { RunSummary, ReplayReport } from '../storage.ts';
-import { extractSnapshotDisplay } from './snapshot.ts';
+import { extractInventorySnapshotDisplay, extractSnapshotDisplay, stateKindForRecord, statePresentationFor } from './snapshot.ts';
+import { clampSelectedIndex, formatContractEntry, replayOutcome, tabIndexForKey } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
   effectiveAdapterId,
@@ -23,15 +24,23 @@ import {
   classifyStartFailure,
   InvestigationLifecycle,
 
+  adapterLabel,
+  contractChecksVisible,
+  contractListsVisible,
+  isExecutableAdapter,
   shouldClearInspectionOnSelection,
   stopControlState,
-  tradingContractVisible,
+  TargetSelectionSession,
+  type SnapshotLoadState,
+  type TargetLoadState,
   type WorkspaceView,
 } from './workspace.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
   fetchSystemBriefs,
+  loadAdapterTargets,
+  loadSystemContract,
   parseApiErrorResponse,
   requestInvestigationStop,
   StatusRequestCoordinator,
@@ -46,6 +55,7 @@ interface ServerStatusResponse {
   currentRecord?: InvestigationRecord | null;
   metaKeyConfigured: boolean;
   targetVariants?: string[];
+  targetVariantsByAdapter?: Record<string, string[]>;
 }
 
 // State
@@ -77,6 +87,12 @@ let serverRunStatus: string = 'idle';
 let lastFocusedElement: HTMLElement | null = null;
 const historySequencer = new RequestSequencer();
 const recordSequencer = new RequestSequencer();
+const snapshotSequencer = new RequestSequencer();
+let snapshotState: SnapshotLoadState = 'none';
+let snapshotSystemId: string | null = null;
+let snapshotIdentity: { id: string; revision: number; adapterId: string } | null = null;
+const targetSequencer = new RequestSequencer();
+const targetSelection = new TargetSelectionSession();
 const lifecycle = new InvestigationLifecycle();
 let latestLiveRecord: InvestigationRecord | null = null;
 
@@ -181,7 +197,40 @@ function showView(view: WorkspaceView, focusHeading = true): void {
   if (view === 'overview' || view === 'prepare') renderWorkspaceSummaries();
 }
 
+function selectedTargetIdentity(): { id: string; revision: number; adapterId: string } | null {
+  return selectedSystem
+    ? { id: selectedSystem.id, revision: selectedSystem.revision, adapterId: selectedSystem.adapterId }
+    : null;
+}
+function effectiveTargetState(): TargetLoadState {
+  return targetSelection.effectiveStateFor(selectedTargetIdentity(), !isDraftMode && !hasUnsavedSystemEdits);
+}
+function scopedVariants(): string[] {
+  return targetSelection.scopedVariantsFor(selectedTargetIdentity(), !isDraftMode && !hasUnsavedSystemEdits);
+}
+function resetTargetChoices(state: TargetLoadState = 'idle'): void {
+  targetSequencer.invalidate();
+  // Capture the displayed choice before the select is emptied below; a later
+  // empty display must not overwrite it (TargetSelectionSession guards that).
+  targetSelection.reset(state, targetSelect?.value || null);
+  refreshTargetChoices();
+}
+function snapshotReadyForSelected(): boolean {
+  return Boolean(selectedSystem) && snapshotState === 'ready' && snapshotSystemId === selectedSystem?.id
+    && snapshotIdentity !== null && snapshotIdentity.id === selectedSystem?.id
+    && snapshotIdentity.revision === selectedSystem?.revision && snapshotIdentity.adapterId === selectedSystem?.adapterId
+    && !isDraftMode && !hasUnsavedSystemEdits;
+}
+function effectiveSnapshotState(): SnapshotLoadState {
+  if (isDraftMode || !selectedSystem) return 'none';
+  if (hasUnsavedSystemEdits) return 'none';
+  if (snapshotSystemId !== selectedSystem.id) return snapshotState === 'loading' ? 'loading' : 'none';
+  if (snapshotState === 'ready' && !snapshotReadyForSelected()) return 'error';
+  return snapshotState;
+}
+function refreshTargetChoices(): void { updateTargetChoices(scopedVariants()); }
 function checkCount(): number {
+  if (!snapshotReadyForSelected()) return 0;
   return executableCheckCount(effectiveAdapter(), contractCheckCount);
 }
 
@@ -200,15 +249,15 @@ function renderWorkspaceSummaries(): void {
   if (titleOverview) titleOverview.textContent = name;
   set('overview-purpose', overview || 'No business purpose saved yet.');
   set('overview-revision', revision === null ? 'Unsaved draft' : `Current brief · revision ${revision}`);
-  set('overview-adapter', adapter === 'synthetic-trading' ? 'Synthetic trading adapter' : 'No adapter configured');
-  set('overview-readiness', adapter === 'synthetic-trading' ? 'Ready for supported scope' : 'Draft · adapter unconfigured');
+  set('overview-adapter', isExecutableAdapter(adapter) ? `${adapterLabel(adapter)} adapter` : 'No adapter configured');
+  set('overview-readiness', isExecutableAdapter(adapter) && snapshotReadyForSelected() ? 'Ready for supported scope' : isExecutableAdapter(adapter) ? 'Contract not confirmed' : 'Draft · adapter unconfigured');
   set('overview-check-count', String(checks));
   set('overview-context-count', String(requirements.length));
   const { scoped } = partitionRuns(lastRunSummaries, workspaceSystemId());
   set('overview-run-count', String(scoped.length));
 
   set('prepare-revision', revision === null ? 'Unsaved draft — save before launch' : `Brief revision ${revision}`);
-  set('prepare-adapter', adapter === 'synthetic-trading' ? 'Synthetic trading' : 'Adapter unconfigured');
+  set('prepare-adapter', isExecutableAdapter(adapter) ? adapterLabel(adapter) : 'Adapter unconfigured');
   set('prepare-purpose', overview || 'No business purpose saved yet.');
   set('prepare-overview', overview || 'No business purpose saved yet.');
   set('prepare-counts', `${checks} executable checks · ${requirements.length} contextual requirements without checks`);
@@ -271,15 +320,22 @@ function renderFindingsView(): void {
     }
     for (const { run, legacy: isLegacy } of withFindings) {
       const row = document.createElement('div');
-      row.className = 'row';
-      const text = document.createElement('p');
-      text.textContent = `${run.id}${isLegacy ? ' · Legacy / system unavailable' : ` · brief revision ${run.systemBrief?.revision ?? 'unavailable'}`} · ${run.findingsCount} finding(s) in the saved record · ${runOutcomeLabel(run.status)}`;
+      row.className = 'row finding-index-row';
+      const textWrap = document.createElement('div');
+      textWrap.className = 'finding-index-text';
+      const heading = document.createElement('p');
+      heading.className = 'finding-index-heading';
+      heading.textContent = `${run.variant} · ${runOutcomeLabel(run.status)} · ${run.findingsCount} finding(s)`;
+      const meta = document.createElement('p');
+      meta.className = 'muted finding-index-meta';
+      meta.textContent = `${run.id}${isLegacy ? ' · Legacy / system unavailable' : ` · brief revision ${run.systemBrief?.revision ?? 'unavailable'}`}`;
+      textWrap.append(heading, meta);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn-secondary btn-xs';
       btn.textContent = 'Inspect run and reproductions';
       btn.addEventListener('click', () => { showView('investigations'); void openRun(run.id); });
-      row.append(text, btn);
+      row.append(textWrap, btn);
       container.appendChild(row);
     }
   }
@@ -324,19 +380,19 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable — not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id} — not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
   if (mode === 'live') {
     provenanceBadge.classList.add('badge-live');
-    provenanceLabel.textContent = 'PROVENANCE: LIVE (Meta API)';
+    provenanceLabel.textContent = 'Provenance: Live (Meta API)';
   } else if (mode === 'replay') {
     provenanceBadge.classList.add('badge-replay');
-    provenanceLabel.textContent = 'PROVENANCE: REPLAY (Deterministic)';
+    provenanceLabel.textContent = 'Provenance: Replay (deterministic)';
   } else {
     provenanceBadge.classList.add('badge-mock');
-    provenanceLabel.textContent = 'PROVENANCE: MOCK (Scripted)';
+    provenanceLabel.textContent = 'Provenance: Mock (scripted)';
   }
 }
 
@@ -360,6 +416,9 @@ function updateStatusPill(status: string): void {
 
 function updateTargetChoices(variants: string[]): void {
   if (!targetSelect) return;
+  // Capture before clearing: after a reset/loading clear this is empty and
+  // must not erase the choice captured earlier (session ignores empties).
+  targetSelection.captureDisplayedSelection(targetSelect.value || null);
   const currentVal = targetSelect.value;
   const existingOptions = Array.from(targetSelect.options).map(o => o.value);
   const isSame = existingOptions.length === variants.length &&
@@ -376,6 +435,8 @@ function updateTargetChoices(variants: string[]): void {
     opt.value = v;
     if (v === 'clean') {
       opt.textContent = 'Clean control';
+    } else if (v === 'inventory-candidate-a') {
+      opt.textContent = 'Inventory Candidate A';
     } else if (v.startsWith('candidate-')) {
       const letter = v.slice('candidate-'.length).toUpperCase();
       opt.textContent = `Candidate ${letter}`;
@@ -385,13 +446,13 @@ function updateTargetChoices(variants: string[]): void {
     targetSelect.appendChild(opt);
   }
 
-  if (variants.includes(currentVal)) {
-    targetSelect.value = currentVal;
-  } else if (variants.includes('candidate-a')) {
-    targetSelect.value = 'candidate-a';
-  } else if (variants.length > 0) {
-    targetSelect.value = variants[0]!;
-  }
+  // The confirmed session selection (resolved against the newly fetched list
+  // for its adapter) wins; the just-cleared DOM value is not a fallback.
+  const resolved = targetSelection.selection && variants.includes(targetSelection.selection)
+    ? targetSelection.selection
+    : null;
+  if (resolved) targetSelect.value = resolved;
+  else if (currentVal && variants.includes(currentVal)) targetSelect.value = currentVal;
 }
 
 async function fetchStatus(): Promise<void> {
@@ -428,10 +489,9 @@ function applyStatusResponse(data: ServerStatusResponse): void {
     }
     updateActiveOtherSystemNotice();
 
-    // Update target dropdown if variants returned
-    if (data.targetVariants && Array.isArray(data.targetVariants)) {
-      updateTargetChoices(data.targetVariants);
-    }
+    // Status target fields are discovery/compat data only. They must not
+    // replace the selected system's scoped choices from /api/targets, even
+    // while a target request is pending or a run is active for another system.
 
     // Update launch and stop controls
     if (data.active) {
@@ -535,10 +595,6 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (!hasRunDetail(
       : `${rec.usage.inputTokens} in / ${rec.usage.outputTokens} out ($${cost})`;
   }
 
-  if (selectedExperimentIndex >= rec.experiments.length) {
-    selectedExperimentIndex = 0;
-  }
-
   renderFindings(rec.findings);
   renderExperiments(rec.experiments);
   renderProposals(rec, proposalDisplay);
@@ -609,7 +665,7 @@ function renderFindings(findings: Finding[]): void {
   if (!findings || findings.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No findings recorded yet. Launch an investigation to observe behavior.';
+    empty.textContent = 'No findings are recorded for this investigation. Review its status, experiment results and coverage before drawing conclusions.';
     findingsContainer.appendChild(empty);
     return;
   }
@@ -635,11 +691,11 @@ function renderFindings(findings: Finding[]): void {
 
     const replayBadge = document.createElement('span');
     replayBadge.className = f.reproduced ? 'pill-badge pill-pass' : 'pill-badge pill-fail';
-    replayBadge.textContent = f.reproduced ? 'REPLAY VERIFIED' : 'REPLAY FAILED';
+    replayBadge.textContent = f.reproduced ? 'Replay verified' : 'Replay failed';
 
     const cleanBadge = document.createElement('span');
     cleanBadge.className = f.cleanControlPassed ? 'pill-badge pill-pass' : 'pill-badge pill-fail';
-    cleanBadge.textContent = f.cleanControlPassed ? 'CLEAN CONTROL PASSED' : 'CLEAN CONTROL FAILED';
+    cleanBadge.textContent = f.cleanControlPassed ? 'Clean control passed' : 'Clean control failed';
 
     badges.appendChild(invariantBadge);
     badges.appendChild(replayBadge);
@@ -679,6 +735,12 @@ function renderFindings(findings: Finding[]): void {
 }
 
 function renderExperiments(experiments: ExperimentRecord[]): void {
+  selectedExperimentIndex = clampSelectedIndex(selectedExperimentIndex, experiments?.length ?? 0);
+  // Preserve keyboard focus across rerenders (polling refreshes this list).
+  const focusedExperiment = document.activeElement instanceof HTMLButtonElement
+    && experimentsContainer.contains(document.activeElement)
+    ? document.activeElement.dataset.experimentIndex
+    : undefined;
   experimentsContainer.textContent = '';
   if (!experiments || experiments.length === 0) {
     const empty = document.createElement('div');
@@ -687,16 +749,17 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     experimentsContainer.appendChild(empty);
     return;
   }
-
   for (let i = 0; i < experiments.length; i++) {
     const expRec = experiments[i]!;
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'experiment-item';
-    if (i === selectedExperimentIndex) {
-      item.classList.add('selected');
-    }
+    const selected = i === selectedExperimentIndex;
+    if (selected) item.classList.add('selected');
+    item.setAttribute('aria-pressed', String(selected));
+    item.dataset.experimentIndex = String(i);
 
-    const left = document.createElement('div');
+    const left = document.createElement('span');
     left.className = 'exp-item-left';
 
     const indexEl = document.createElement('span');
@@ -707,49 +770,90 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     hypEl.className = 'exp-hypothesis';
     hypEl.textContent = expRec.experiment.hypothesis;
 
-    left.appendChild(indexEl);
-    left.appendChild(hypEl);
+    left.append(indexEl, hypEl);
 
-    const right = document.createElement('div');
-    right.className = 'finding-badges';
+    const right = document.createElement('span');
+    right.className = 'experiment-item-right';
 
     const statusPillEl = document.createElement('span');
     const hasViolations = expRec.result.violations && expRec.result.violations.length > 0;
     if (hasViolations) {
       statusPillEl.className = 'pill-badge pill-fail';
-      statusPillEl.textContent = `${expRec.result.violations.length} VIOLATION(S)`;
+      statusPillEl.textContent = `${expRec.result.violations.length} violation(s)`;
     } else if (expRec.result.valid) {
       statusPillEl.className = 'pill-badge pill-pass';
-      statusPillEl.textContent = 'VALID (0 VIOLATIONS)';
+      statusPillEl.textContent = 'Valid · 0 violations';
     } else {
       statusPillEl.className = 'pill-badge pill-fail';
-      statusPillEl.textContent = 'INVALID PLAN';
+      statusPillEl.textContent = 'Invalid plan';
     }
-    right.appendChild(statusPillEl);
+    const hint = document.createElement('span');
+    hint.className = 'exp-inspect-hint';
+    hint.textContent = 'View trace';
+    right.append(statusPillEl, hint);
 
-    item.appendChild(left);
-    item.appendChild(right);
+    item.append(left, right);
 
     item.addEventListener('click', () => {
       selectedExperimentIndex = i;
       renderExperiments(experiments);
       renderSelectedExperimentTrace();
+      const traceTab = document.getElementById('tab-btn-trace') as HTMLButtonElement | null;
+      if (traceTab) activateTab(traceTab, true);
     });
 
     experimentsContainer.appendChild(item);
   }
+  if (focusedExperiment !== undefined) {
+    const focusIndex = clampSelectedIndex(Number(focusedExperiment), experiments.length);
+    experimentsContainer.querySelector<HTMLButtonElement>(`[data-experiment-index="${focusIndex}"]`)?.focus({ preventScroll: true });
+  }
+}
+
+/** State tab domain follows the inspected run's pinned adapter, never the selected profile. Returns the active presentation. */
+function applyStatePresentation() {
+  const presentation = statePresentationFor(stateKindForRecord(currentInvestigationRecord));
+  const tabBtn = document.getElementById('tab-btn-state');
+  if (tabBtn) tabBtn.textContent = presentation.tabTitle;
+  const primary = document.getElementById('state-primary-title');
+  if (primary) primary.textContent = presentation.primaryTitle;
+  const secondary = document.getElementById('state-secondary-title');
+  if (secondary) secondary.textContent = presentation.secondaryTitle;
+  return presentation;
+}
+
+function appendStateRow(host: HTMLElement, key: string, text: string): void {
+  const row = document.createElement('div');
+  row.className = 'kv-row';
+  const keySpan = document.createElement('span');
+  keySpan.textContent = key;
+  const valSpan = document.createElement('span');
+  valSpan.textContent = text;
+  row.appendChild(keySpan);
+  row.appendChild(valSpan);
+  host.appendChild(row);
+}
+
+function appendStateEmpty(host: HTMLElement, text: string): void {
+  const empty = document.createElement('div');
+  empty.className = 'empty-state';
+  empty.textContent = text;
+  host.appendChild(empty);
 }
 
 function renderSelectedExperimentTrace(): void {
   traceContainer.textContent = '';
   creditStateTable.textContent = '';
   ordersStateTable.textContent = '';
+  const statePresentation = applyStatePresentation();
 
   if (!currentInvestigationRecord || !currentInvestigationRecord.experiments[selectedExperimentIndex]) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No experiment selected.';
     traceContainer.appendChild(empty);
+    appendStateEmpty(creditStateTable, statePresentation.primaryEmpty);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
     return;
   }
 
@@ -781,9 +885,11 @@ function renderSelectedExperimentTrace(): void {
       sAction.textContent = entry.action;
 
       const sPayload = document.createElement('span');
+      sPayload.className = 'step-payload';
       sPayload.textContent = entry.payload ? JSON.stringify(entry.payload) : (entry.messageId || '-');
 
       const sOutcome = document.createElement('span');
+      sOutcome.className = 'step-outcome';
       sOutcome.textContent = entry.outcome;
 
       stepEl.appendChild(sStep);
@@ -796,7 +902,28 @@ function renderSelectedExperimentTrace(): void {
     }
   }
 
-  // Render snapshot state using pure display model
+  // Render snapshot state using the pure display model for the inspected run's domain.
+  // All target-derived strings are assigned via textContent (never HTML).
+  if (statePresentation.kind === 'inventory') {
+    const inventoryModel = extractInventorySnapshotDisplay(expRec.result.snapshot);
+    if (!inventoryModel.hasStock) {
+      appendStateEmpty(creditStateTable, inventoryModel.stockAvailable ? statePresentation.primaryEmpty : 'Stock state unavailable in snapshot.');
+    } else {
+      for (const stock of inventoryModel.stock) appendStateRow(creditStateTable, stock.sku, stock.displayText);
+    }
+    if (!inventoryModel.hasReservations) {
+      appendStateEmpty(ordersStateTable, inventoryModel.reservationsAvailable ? statePresentation.secondaryEmpty : 'Reservation state unavailable in snapshot.');
+    } else {
+      for (const reservation of inventoryModel.reservations) appendStateRow(ordersStateTable, reservation.reservationId, reservation.displayText);
+    }
+    return;
+  }
+  if (statePresentation.kind === 'unknown') {
+    appendStateEmpty(creditStateTable, statePresentation.primaryEmpty);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
+    return;
+  }
+
   const displayModel = extractSnapshotDisplay(expRec.result.snapshot);
 
   const creditEntries: [string, string][] = [
@@ -807,36 +934,12 @@ function renderSelectedExperimentTrace(): void {
     ['availableCredit', displayModel.credit.availableCredit],
   ];
 
-  for (const [k, val] of creditEntries) {
-    const row = document.createElement('div');
-    row.className = 'kv-row';
-    const keySpan = document.createElement('span');
-    keySpan.textContent = k;
-    const valSpan = document.createElement('span');
-    valSpan.textContent = val;
-    row.appendChild(keySpan);
-    row.appendChild(valSpan);
-    creditStateTable.appendChild(row);
-  }
+  for (const [k, val] of creditEntries) appendStateRow(creditStateTable, k, val);
 
-  // Orders
   if (!displayModel.hasOrders) {
-    const emptyOrders = document.createElement('div');
-    emptyOrders.className = 'empty-state';
-    emptyOrders.textContent = 'No orders active in snapshot.';
-    ordersStateTable.appendChild(emptyOrders);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
   } else {
-    for (const ord of displayModel.orders) {
-      const row = document.createElement('div');
-      row.className = 'kv-row';
-      const keySpan = document.createElement('span');
-      keySpan.textContent = ord.orderId;
-      const valSpan = document.createElement('span');
-      valSpan.textContent = ord.displayText;
-      row.appendChild(keySpan);
-      row.appendChild(valSpan);
-      ordersStateTable.appendChild(row);
-    }
+    for (const ord of displayModel.orders) appendStateRow(ordersStateTable, ord.orderId, ord.displayText);
   }
 }
 
@@ -865,7 +968,7 @@ function buildRunRow(r: RunSummary, includeBrief: boolean): HTMLTableRowElement 
   const cells: string[] = includeBrief
     ? [r.id, r.systemBrief ? `Rev ${r.systemBrief.revision} - ${r.systemBrief.name}` : 'Legacy / system unavailable', r.variant, `${r.provider} (${r.mode})`, runOutcomeLabel(r.status), `${r.experimentsCount}`, `${r.findingsCount}`, new Date(r.startedAt).toLocaleString()]
     : [r.id, r.variant, `${r.provider} (${r.mode})`, runOutcomeLabel(r.status), `${r.experimentsCount}`, `${r.findingsCount}`, new Date(r.startedAt).toLocaleString()];
-  for (const text of cells) { const td = document.createElement('td'); td.textContent = text; tr.appendChild(td); }
+  cells.forEach((text, idx) => { const td = document.createElement('td'); if (idx === 0) td.className = 'run-id-cell'; td.textContent = text; tr.appendChild(td); });
   const tdActions = document.createElement('td');
   const actionGroup = document.createElement('div'); actionGroup.className = 'action-btns';
   const btnView = document.createElement('button'); btnView.className = 'btn btn-secondary btn-xs'; btnView.type = 'button'; btnView.textContent = 'View';
@@ -941,7 +1044,11 @@ function showReplayReport(report: ReplayReport): void {
   addLine('Source Identical Match:', report.sourceIdentical ? 'YES' : 'NO (Source changed)');
   addLine('Exact Reproduction Claimed:', report.exactReproductionClaimed ? 'CONFIRMED' : 'CANNOT BE CLAIMED', !report.exactReproductionClaimed);
   addLine('Experiments Matched:', `${report.experimentsReproduced} / ${report.experimentsTotal}`);
-  addLine('Deterministic Replay Result:', report.reproduced ? 'ALL EXPERIMENTS REPRODUCED' : 'MISMATCH DETECTED');
+  const outcome = replayOutcome(report);
+  const replayLabel = outcome === 'reproduced' ? 'ALL EXPERIMENTS REPRODUCED'
+    : outcome === 'unconfirmed' ? 'EXPERIMENTS MATCHED; EXACT REPLAY UNCONFIRMED'
+    : outcome === 'empty' ? 'NO EXPERIMENTS REPLAYED' : 'MISMATCH DETECTED';
+  addLine('Deterministic Replay Result:', replayLabel);
   addLine('Replay Engine:', 'Local Deterministic Simulator (No model invocation)');
 
   const noteEl = document.createElement('div');
@@ -965,33 +1072,47 @@ function setSaveStatus(type: 'saved' | 'draft' | 'error', text: string): void {
 function updateAdapterBadge(adapterId: string): void {
   if (!systemAdapterBadge) return;
   systemAdapterBadge.textContent = adapterId;
-  if (adapterId === 'synthetic-trading') {
-    systemAdapterBadge.className = 'system-badge badge-adapter-exec';
-  } else {
-    systemAdapterBadge.className = 'system-badge badge-adapter-unconfigured';
-  }
-  const executable = adapterId === 'synthetic-trading';
-  document.getElementById('invariants-list')?.classList.toggle('hidden', !executable);
-  document.getElementById('raw-contract-view')?.closest('details')?.classList.toggle('hidden', !executable); document.getElementById('contract-lists')?.classList.toggle('hidden', !tradingContractVisible(adapterId)); document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', tradingContractVisible(adapterId));
+  systemAdapterBadge.className = isExecutableAdapter(adapterId) ? 'system-badge badge-adapter-exec' : 'system-badge badge-adapter-unconfigured';
+  const visible = contractChecksVisible({ effectiveAdapterId: adapterId, snapshotState: effectiveSnapshotState(), isDraftMode, hasUnsavedSystemEdits });
+  const listsVisible = visible && contractListsVisible(adapterId);
+  document.getElementById('invariants-list')?.classList.toggle('hidden', !visible);
+  document.getElementById('raw-contract-view')?.closest('details')?.classList.toggle('hidden', !visible);
+  document.getElementById('contract-lists')?.classList.toggle('hidden', !listsVisible);
+  document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', listsVisible);
   const heading = document.getElementById('contract-availability-title');
   const description = document.getElementById('contract-availability-description');
-  if (heading) heading.textContent = executable ? 'Synthetic Trading Rules & Available Checks' : 'No Executable Contract Configured';
-  if (description) description.textContent = executable
-    ? 'These trading checks are available to the deterministic verifier. Their presence is not evidence that an investigation exercised them. Supplementary prose does not alter these checks.'
-    : 'This profile can preserve business requirements, but it has no execution adapter or deterministic checks. Investigations are disabled.';
+  const note = document.getElementById('capabilities-scope-note');
+  if (isExecutableAdapter(adapterId) && !visible) {
+    if (heading) heading.textContent = `${adapterLabel(adapterId)} Rules & Available Checks`;
+    if (description) description.textContent = snapshotState === 'error' ? 'The system contract could not be loaded. Checks are unavailable until it loads successfully.' : 'Loading the selected system contract… Checks are unavailable until it is confirmed.';
+    if (note) note.textContent = 'The selected system contract is not confirmed yet, so no operations, messages or checks are shown.';
+  } else if (isExecutableAdapter(adapterId)) {
+    if (heading) heading.textContent = adapterId === 'inventory-reservation' ? 'Synthetic Inventory Reservation Rules & Available Checks' : 'Synthetic Trading Rules & Available Checks';
+    if (description) description.textContent = 'These checks are available to the deterministic verifier for the selected system. Their presence is not evidence that an investigation exercised them. Supplementary prose does not alter these checks.';
+  } else {
+    if (heading) heading.textContent = 'No Executable Contract Configured';
+    if (description) description.textContent = 'This profile can preserve business requirements, but it has no execution adapter or deterministic checks. Investigations are disabled.';
+    if (note) note.textContent = 'No adapter is configured for this system, so there is no supported execution contract to show. Operations and message vocabulary from another system are not listed here because they would not run for this system.';
+  }
 }
 
 function updateRunReadiness(): void {
   const reason = launchBlockedReason();
   btnLaunch.disabled = reason !== null;
   btnLaunch.title = reason ?? '';
+  const launchReadiness = document.getElementById('launch-readiness');
+  if (launchReadiness) {
+    launchReadiness.textContent = reason ? reason.charAt(0) + reason.slice(1).toLowerCase() : '';
+    launchReadiness.classList.toggle('hidden', reason === null);
+  }
   syncStopControls();
+  if (targetSelect) targetSelect.disabled = effectiveTargetState() !== 'ready' || scopedVariants().length === 0;
   if (systemSelect) systemSelect.disabled = isLaunchRequestPending || isSystemSavePending;
   if (btnNewSystem) btnNewSystem.disabled = isLaunchRequestPending || isSystemSavePending;
   renderWorkspaceSummaries();
   if (!adapterReadinessLabel) return;
   adapterReadinessLabel.className = `readiness-label ${reason ? 'readiness-disabled' : 'readiness-ready'}`;
-  adapterReadinessLabel.textContent = reason ?? 'READY FOR INVESTIGATION';
+  adapterReadinessLabel.textContent = reason ? reason.charAt(0) + reason.slice(1).toLowerCase() : 'Ready for investigation';
 }
 
 function launchBlockedReason(): string | null {
@@ -1003,6 +1124,10 @@ function launchBlockedReason(): string | null {
     hasUnsavedSystemEdits,
     hasSelectedSystem: Boolean(selectedSystem),
     selectedAdapterId: selectedSystem?.adapterId ?? null,
+    snapshotState: effectiveSnapshotState(),
+    selectedVariant: targetSelect?.value || null,
+    allowedVariants: scopedVariants(),
+    targetState: effectiveTargetState(),
   });
 }
 
@@ -1017,9 +1142,21 @@ function setSystemSavePending(pending: boolean): void {
 
 function markUnsavedEdits(): void {
   hasUnsavedSystemEdits = true;
+  snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null;
   setSaveStatus('draft', isDraftMode ? 'New Profile (Draft)' : 'Unsaved Edits (Draft)');
+  clearContractDisplay();
   updateAdapterBadge(systemAdapterSelect.value);
+  resetTargetChoices();
   updateRunReadiness();
+}
+function clearContractDisplay(): void {
+  contractCheckCount = 0;
+  for (const id of ['operations-list', 'messages-list']) {
+    const host = document.getElementById(id);
+    if (host) { host.textContent = ''; const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'No confirmed contract for the selected system.'; host.appendChild(p); }
+  }
+  if (invariantsList) invariantsList.textContent = '';
+  if (rawContractView) rawContractView.textContent = '';
 }
 
 function selectSystem(system: SystemBrief): void { recordSequencer.invalidate(); if (shouldClearInspectionOnSelection({ recordId: currentInvestigationRecord?.id ?? null, recordSystemId: currentInvestigationRecord?.systemBrief?.brief.id ?? null, activeRecordId, selectedSystemId: system.id })) { currentInvestigationRecord = null; lifecycle.clearInspection(); isInspectingHistory = false; renderEmptyDashboard('No investigation selected for this system. Open a saved run from its history below.'); }
@@ -1040,9 +1177,16 @@ function selectSystem(system: SystemBrief): void { recordSequencer.invalidate();
   if (systemRevisionBadge) systemRevisionBadge.textContent = `Rev ${system.revision}`;
   renderHistory();
   updateActiveOtherSystemNotice();
+  snapshotSequencer.invalidate();
+  snapshotSystemId = system.id;
+  snapshotIdentity = null;
+  snapshotState = isExecutableAdapter(system.adapterId) ? 'loading' : 'none';
+  clearContractDisplay();
+  resetTargetChoices(isExecutableAdapter(system.adapterId) ? 'loading' : 'idle');
   updateAdapterBadge(system.adapterId);
   setSaveStatus('saved', 'Saved');
   updateRunReadiness();
+  if (isExecutableAdapter(system.adapterId)) { void fetchSystemContract(system.id); void fetchAdapterTargetsForSelected(system); }
   if (systemFeedback) systemFeedback.textContent = ''; updateInspectionNotice(); syncStopControls(); renderFindingsView();
 }
 
@@ -1093,15 +1237,74 @@ async function loadSystems(): Promise<void> {
   }
 }
 
-async function fetchContract(): Promise<void> {
-  try {
-    const res = await fetch('/api/contract');
-    if (!res.ok) return;
-    const contract: SystemContract = await res.json();
-    renderContract(contract);
-  } catch {
-    // Graceful handling
-  }
+async function fetchAdapterTargetsForSelected(system: SystemBrief): Promise<void> {
+  const expected = { id: system.id, revision: system.revision, adapterId: system.adapterId };
+  await loadAdapterTargets({
+    fetchFn: (url) => fetch(url),
+    adapterId: system.adapterId,
+    sequencer: targetSequencer,
+    isCurrentSelection: () => Boolean(
+      selectedSystem && selectedSystem.id === expected.id
+      && selectedSystem.revision === expected.revision
+      && selectedSystem.adapterId === expected.adapterId
+      && !isDraftMode && !hasUnsavedSystemEdits,
+    ),
+    onLoading: () => {
+      targetSelection.beginLoad(expected, targetSelect?.value || null);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onReady: (variants) => {
+      targetSelection.applyReady(expected, variants);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onEmpty: () => {
+      targetSelection.applyEmpty(expected);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onError: () => {
+      targetSelection.applyError(expected);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+  });
+}
+
+async function fetchSystemContract(systemId: string): Promise<void> {
+  const expected = selectedSystem && selectedSystem.id === systemId
+    ? { id: systemId, revision: selectedSystem.revision, adapterId: selectedSystem.adapterId }
+    : { id: systemId };
+  await loadSystemContract({
+    fetchFn: (url) => fetch(url),
+    expected,
+    sequencer: snapshotSequencer,
+    isCurrentSelection: () => Boolean(
+      selectedSystem && selectedSystem.id === expected.id
+      && (expected.revision === undefined || selectedSystem.revision === expected.revision)
+      && (expected.adapterId === undefined || selectedSystem.adapterId === expected.adapterId)
+      && !isDraftMode && !hasUnsavedSystemEdits,
+    ),
+    onLoading: () => {
+      snapshotState = 'loading'; snapshotSystemId = systemId; snapshotIdentity = null;
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+    },
+    onReady: (snapshot) => {
+      snapshotState = 'ready'; snapshotSystemId = snapshot.brief.id;
+      snapshotIdentity = { id: snapshot.brief.id, revision: snapshot.brief.revision, adapterId: snapshot.brief.adapterId };
+      renderContract(snapshot.contract!);
+      updateRunReadiness();
+    },
+    onIncompatible: () => {
+      snapshotState = 'incompatible'; snapshotIdentity = null; clearContractDisplay();
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+    },
+    onError: (err) => {
+      snapshotState = 'error'; snapshotIdentity = null; clearContractDisplay();
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+      if (systemFeedback) {
+        systemFeedback.textContent = `System contract unavailable: ${err instanceof Error ? err.message : String(err)} Reselect or reload the system profile to retry.`;
+        systemFeedback.className = 'action-feedback error';
+      }
+    },
+  });
 }
 
 function renderKeyedList(id: string, items: Record<string, unknown>[] | undefined, label: (item: Record<string, unknown>) => string): void {
@@ -1126,8 +1329,8 @@ function renderKeyedList(id: string, items: Record<string, unknown>[] | undefine
 
 function renderContract(contract: SystemContract): void {
   contractCheckCount = Array.isArray(contract.invariants) ? contract.invariants.length : 0;
-  renderKeyedList('operations-list', contract.operations, item => `${String(item.op ?? 'operation')}: ${String(item.description ?? '')}`);
-  renderKeyedList('messages-list', contract.messages, item => `${String(item.channel ?? '')}/${String(item.type ?? '')}: ${String(item.description ?? '')}`); updateAdapterBadge(effectiveAdapter() ?? 'unconfigured');
+  renderKeyedList('operations-list', contract.operations, item => formatContractEntry(item));
+  renderKeyedList('messages-list', contract.messages, item => formatContractEntry(item)); updateAdapterBadge(effectiveAdapter() ?? 'unconfigured');
   renderWorkspaceSummaries();
   if (rawContractView) {
     rawContractView.textContent = JSON.stringify(contract, null, 2);
@@ -1244,6 +1447,13 @@ providerSelect.addEventListener('change', () => {
   fetchStatus();
 });
 
+if (targetSelect) {
+  targetSelect.addEventListener('change', () => {
+    // Explicit choice wins over any earlier captured preference for the next refresh.
+    targetSelection.select(targetSelect.value || null);
+  });
+}
+
 // System Profile selection & editing events
 if (systemSelect) {
   systemSelect.addEventListener('change', () => {
@@ -1267,6 +1477,7 @@ if (btnNewSystem) {
     }
     isDraftMode = true;
     hasUnsavedSystemEdits = true;
+    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; clearContractDisplay(); resetTargetChoices();
     const newId = `profile-${Date.now().toString(36)}`;
     systemIdInput.value = newId;
     systemIdInput.readOnly = false;
@@ -1302,7 +1513,7 @@ if (btnSaveSystem) {
 
     const id = systemIdInput.value.trim();
     const name = systemNameInput.value.trim();
-    const adapterId = systemAdapterSelect.value as 'synthetic-trading' | 'unconfigured';
+    const adapterId = systemAdapterSelect.value;
     const overview = systemOverviewInput.value;
     const rawReqs = systemRequirementsInput.value.split('\n');
     const requirements = rawReqs.map(r => r.trim()).filter(r => r.length > 0);
@@ -1387,26 +1598,35 @@ if (systemAdapterSelect) systemAdapterSelect.addEventListener('change', markUnsa
 if (systemOverviewInput) systemOverviewInput.addEventListener('input', markUnsavedEdits);
 if (systemRequirementsInput) systemRequirementsInput.addEventListener('input', markUnsavedEdits);
 
-// Tab switching
-const tabButtons = document.querySelectorAll<HTMLButtonElement>('.tab-btn');
-tabButtons.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    tabButtons.forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
-
-    btn.classList.add('active');
-    const targetId = btn.getAttribute('data-tab');
-    if (targetId) {
-      const pane = document.getElementById(targetId);
-      if (pane) pane.classList.add('active');
-    }
+// Tab switching (WAI-ARIA tab pattern: roving tabindex, arrow/Home/End)
+const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
+function activateTab(btn: HTMLButtonElement, moveFocus: boolean): void {
+  tabButtons.forEach((b) => {
+    const selected = b === btn;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-selected', String(selected));
+    b.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
+  const targetId = btn.getAttribute('data-tab');
+  if (targetId) document.getElementById(targetId)?.classList.add('active');
+  if (moveFocus) btn.focus();
+}
+tabButtons.forEach((btn, index) => {
+  btn.addEventListener('click', () => activateTab(btn, false));
+  btn.addEventListener('keydown', (event) => {
+    const next = tabIndexForKey(index, event.key, tabButtons.length);
+    if (next === null) return;
+    event.preventDefault();
+    const target = tabButtons[next];
+    if (target) activateTab(target, true);
   });
 });
+activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
 // Initialization - showView('overview', false) below
 fetchStatus();
 loadHistory();
-fetchContract();
 loadSystems();
 startPolling();

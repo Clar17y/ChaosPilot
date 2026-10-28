@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InvestigationLifecycle, partitionRuns, stopControlState } from '../src/web/workspace.ts';
+import { InvestigationLifecycle, partitionRuns, RequestSequencer, stopControlState } from '../src/web/workspace.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
   fetchSystemBriefs,
+  loadAdapterTargets,
   requestInvestigationStop,
   StatusRequestCoordinator,
   type StopPostResult,
@@ -166,6 +167,38 @@ describe('status response ordering', () => {
     await p1;
     expect(applied).toEqual(['completed']);
     expect(errors).toEqual([]);
+  });
+});
+
+describe('target loading vs global status polling', () => {
+  it('status polling (incl. active run for another system) does not replace scoped targets while a target request is pending', async () => {
+    const seq = new RequestSequencer();
+    const targetFetch = deferred<{ ok: boolean; status: number; json: () => Promise<unknown> }>();
+    let variants: string[] = [];
+    let state = 'idle';
+    const pending = loadAdapterTargets({
+      fetchFn: () => targetFetch.promise, adapterId: 'inventory-reservation', sequencer: seq,
+      isCurrentSelection: () => true,
+      onLoading: () => { state = 'loading'; variants = []; },
+      onReady: (v) => { state = 'ready'; variants = [...v]; },
+      onError: () => { state = 'error'; variants = []; },
+    });
+    // Global status applies (active run belongs to a different system) — it
+    // carries legacy/global target fields, but app.ts never feeds them into
+    // scoped choices; only the pending per-adapter load may set variants.
+    const statuses = new StatusRequestCoordinator();
+    let statusSeen: unknown = null;
+    await statuses.run(
+      async () => ({ active: true, systemId: 'other-system', targetVariants: ['clean', 'candidate-a'], targetVariantsByAdapter: { 'synthetic-trading': ['clean', 'candidate-a'] } }),
+      (v) => { statusSeen = v; },
+      () => {},
+    );
+    expect(statusSeen).toMatchObject({ active: true, systemId: 'other-system' });
+    expect(state).toBe('loading');
+    expect(variants).toEqual([]); // still blocked, no stale/invented choices
+    targetFetch.resolve({ ok: true, status: 200, json: async () => ['clean', 'inventory-candidate-a'] });
+    await expect(pending).resolves.toBe('ready');
+    expect(variants).toEqual(['clean', 'inventory-candidate-a']);
   });
 });
 

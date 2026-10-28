@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { ChaosPilotServer, createServer } from '../src/server.ts';
+import { PROMPT_TEMPLATE_HASH, PROMPT_VERSION } from '../src/investigation/index.ts';
 import { main as cliMain } from '../src/cli.ts';
 import {
   saveRun,
@@ -101,8 +102,11 @@ function createDummyRecord(id: string, variant: TargetVariant = 'candidate-a'): 
     errors: [],
     contextAudit: {
       sourcePaths: ['order-engine.ts'],
-      contractHash: 'contract-hash',
-      promptVersion: '1.0',
+      // Legacy fixture: no contract hash was recorded, and the recorded prompt
+      // identity is the current one, so source+execution exactness is testable.
+      contractHash: '',
+      promptVersion: PROMPT_VERSION,
+      promptTemplateHash: PROMPT_TEMPLATE_HASH,
     },
   };
 }

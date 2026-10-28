@@ -1,4 +1,5 @@
-import type { ExperimentResult } from './domain.ts';
+import * as crypto from 'node:crypto';
+import type { ExperimentResult, SystemContract } from './domain.ts';
 
 /**
  * Pure canonical JSON serializer that normalizes object property key order
@@ -21,6 +22,16 @@ export function canonicalJson(value: unknown): string {
     }
   }
   return '{' + entries.join(',') + '}';
+}
+
+/** Canonical (key-order independent) SHA-256 hash of a system contract. */
+export function computeContractHash(contract: SystemContract | null | undefined): string {
+  return crypto.createHash('sha256').update(canonicalJson(contract ?? null), 'utf8').digest('hex');
+}
+
+/** Legacy raw-order SHA-256 hash, retained only to verify historical records. */
+export function computeLegacyRawContractHash(contract: SystemContract | null | undefined): string {
+  return crypto.createHash('sha256').update(JSON.stringify(contract ?? null), 'utf8').digest('hex');
 }
 
 export interface SemanticReplayComparison {
@@ -69,7 +80,13 @@ export function compareSemanticReplay(
   const violationsMatched =
     canonicalJson(original.violations || []) === canonicalJson(replayed.violations || []);
   if (!violationsMatched) {
-    mismatches.push('Violations mismatch between original and replayed execution');
+    const stripIds = (vs: typeof original.violations) =>
+      (vs || []).map((v) => { const { id: _id, ...rest } = v; return rest; });
+    if (canonicalJson(stripIds(original.violations)) === canonicalJson(stripIds(replayed.violations))) {
+      mismatches.push('Violations mismatch between original and replayed execution: violation IDs differ while semantic violation content otherwise matches (possible legacy duplicate-ID format)');
+    } else {
+      mismatches.push('Violations mismatch between original and replayed execution');
+    }
   }
 
   const rejectionsMatched =
