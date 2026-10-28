@@ -18,6 +18,8 @@ describe('browser entry point', () => {
       expect(html).toContain(`id="${id}"`);
     }
     expect(html).toContain('recorded playback only');
+    expect(html).toContain('id="repro-evidence-heading"');
+    expect(html).toContain('Original finding summary (historical)');
     expect(html).not.toContain('Concept — not implemented');
   });
 

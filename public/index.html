@@ -300,11 +300,23 @@
                   <p class="muted" id="repro-description">Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.</p>
                 </div>
                 <div class="repro-rerun">
-                  <button type="button" class="btn btn-primary" id="btn-repro-rerun">Rerun saved investigation</button>
+                  <button type="button" class="btn btn-primary" id="btn-repro-rerun">Rerun this experiment</button>
                   <p id="repro-fresh-status" class="input-hint" role="status"></p>
                 </div>
               </div>
               <div class="repro-provenance" id="repro-provenance" aria-label="Reproduction provenance"></div>
+              <section id="repro-evidence" class="repro-evidence" aria-label="Evidence summary">
+                <h3 id="repro-evidence-heading">Original finding summary (historical)</h3>
+                <div id="repro-evidence-body"></div>
+              </section>
+              <div class="repro-view-controls" role="group" aria-label="Trace view controls">
+                <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-toggle-trace" aria-expanded="false">Show complete original trace</button>
+                <span id="repro-trace-mode" class="input-hint" role="status"></span>
+                <span id="repro-rerun-controls" class="hidden">
+                  <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-show-original">Show original recording</button>
+                  <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-show-rerun">Show fresh rerun trace</button>
+                </span>
+              </div>
               <p id="repro-invalid" class="note warn hidden"></p>
               <div id="repro-empty" class="empty-state">Select a finding or experiment to open its recorded reproduction.</div>
               <div id="repro-body" class="repro-body hidden">
@@ -318,10 +330,16 @@
                     <div id="repro-expected" class="repro-expected hidden"><h4 id="repro-expected-label"></h4><p id="repro-expected-text"></p></div>
                     <div id="repro-observed" class="repro-observed"><h4>Observed behaviour (from recorded trace)</h4><p id="repro-observed-text"></p></div>
                   </div>
+                  <div id="repro-generic-facts-wrap">
+                    <h4>Recorded facts for this entry</h4>
+                    <ul id="repro-generic-facts"></ul>
+                  </div>
+                  <div id="repro-credit-wrap">
                   <h4>Credit exposure after this step (recorded state)</h4>
                   <div id="repro-credit" class="repro-credit"></div>
                   <div id="repro-exposure-bar" class="repro-bar hidden" aria-hidden="true"><span id="repro-bar-used"></span><span id="repro-bar-reserved"></span></div>
                   <p id="repro-exposure-legend" class="muted"></p>
+                  </div>
                   <details class="contract-details"><summary>Recorded action, payload and state for this entry</summary>
                     <p><strong>Action:</strong> <span id="repro-action"></span></p>
                     <p><strong>Outcome:</strong> <span id="repro-outcome"></span></p>

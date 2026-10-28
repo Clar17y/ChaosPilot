@@ -2,6 +2,7 @@ import type {
   InvestigationRecord,
   ExperimentRecord,
   Finding,
+  Violation,
   TargetVariant,
   ProviderKind,
   SystemBrief,
@@ -13,6 +14,8 @@ import { clampSelectedIndex, tabIndexForKey } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
   buildReproductionModel,
+  buildRerunTrace,
+  classifyFreshReplay,
   creditBarLayout,
   describeFreshReplay,
   explainStep,
@@ -20,6 +23,7 @@ import {
   isCreditAdmissionViolation,
   PlaybackController,
   resolveExperimentPosition,
+  type PlaybackStep,
   type ReproductionModel,
 } from './reproduction-player.ts';
 import {
@@ -46,6 +50,7 @@ import {
   type WorkspaceView,
 } from './workspace.ts';
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
+import { activeUnattributedViolations, detailVisibility, evidenceHeading, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
@@ -108,6 +113,14 @@ let latestLiveRecord: InvestigationRecord | null = null;
 const reproSession = new ReproductionSession();
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
 let reproModel: ReproductionModel | null = null;
+let reproShowFull = false;
+let reproUseRerun = false;
+let reproRerunSteps: PlaybackStep[] = [];
+let reproRerunUnattributed: Violation[] = [];
+type ExperimentReplayReport = ReplayReport & { scope?: string; experimentPosition?: number };
+function effectiveSteps(): PlaybackStep[] { if (!reproModel) return []; if (reproUseRerun) return reproRerunSteps; return reproShowFull ? reproModel.allSteps : reproModel.steps; }
+function clearFreshView(): void { reproUseRerun = false; reproRerunSteps = []; reproRerunUnattributed = []; }
+function onReproRunChanged(): void { reproPlayback.stop(); selectedExperimentIndex = 0; clearFreshView(); reproShowFull = false; }
 
 // DOM Elements - Controls
 const targetSelect = document.getElementById('target-select') as HTMLSelectElement;
@@ -197,12 +210,9 @@ function announce(message: string): void {
 function showView(view: WorkspaceView, focusHeading = true): void {
   if (view !== 'investigations') {
     reproPlayback.stop();
-    if (reproSession.fresh.kind === 'pending') {
-      reproSession.invalidateFresh();
-      renderReproduction();
-    } else {
-      renderReproductionDetail();
-    }
+    reproSession.invalidateFresh();
+    clearFreshView();
+    renderReproduction();
   }
   // panel visibility + aria-current below reflect the current view
   document.querySelectorAll<HTMLElement>('[data-view-panel]').forEach(panel => {
@@ -388,7 +398,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable — not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id} — not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -544,7 +554,7 @@ function startPolling(): void {
   pollTimer = setInterval(fetchStatus, 800);
 }
 
-function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
+function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { onReproRunChanged(); } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
   dashRunId.textContent = `Run ID: ${rec.id}`;
 
   if (dashSystemBrief) {
@@ -810,6 +820,8 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     item.addEventListener('click', () => {
       reproPlayback.stop();
       reproSession.clearFinding();
+      reproSession.selectExperiment(i);
+      clearFreshView(); reproShowFull = false;
       selectedExperimentIndex = i;
       renderExperiments(experiments);
       renderSelectedExperimentTrace();
@@ -929,16 +941,18 @@ function renderSelectedExperimentTrace(): void {
 }
 
 function reproEl<T extends HTMLElement>(id: string): T | null { return document.getElementById(id) as T | null; }
+function clearReproductionDetail(): void { const facts = reproEl('repro-generic-facts'); if (facts) facts.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.add('hidden'); reproEl('repro-credit-wrap')?.classList.add('hidden'); const credit = reproEl('repro-credit'); if (credit) credit.textContent = NO_STEP_CREDIT_TEXT; reproEl('repro-exposure-bar')?.classList.add('hidden'); const legend = reproEl('repro-exposure-legend'); if (legend) legend.textContent = ''; const unattr = reproEl('repro-unattributed'); if (unattr) { unattr.classList.add('hidden'); unattr.textContent = ''; } }
 
 function resetReproductionSelection(): void {
   reproPlayback.stop();
   reproSession.clear();
+  clearFreshView(); reproShowFull = false;
   reproModel = null;
 }
 
 function renderReproduction(): void {
   const rec = currentInvestigationRecord;
-  if (rec && reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; }
+  if (rec && reproSession.syncToRun(rec.id)) { onReproRunChanged(); }
   if (reproSession.selectedFinding && rec && (resolveExperimentPosition(rec, reproSession.selectedFinding) !== selectedExperimentIndex || !rec.findings.some(f => f.id === reproSession.selectedFinding!.id))) reproSession.clearFinding();
   reproModel = rec ? buildReproductionModel(rec, selectedExperimentIndex, reproSession.selectedFinding) : null;
   const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
@@ -952,6 +966,35 @@ function renderReproduction(): void {
     : describeFreshReplay(reproSession.fresh);
   const rerunBtn = reproEl<HTMLButtonElement>('btn-repro-rerun');
   if (rerunBtn) rerunBtn.disabled = !rec || waitingForSave || reproSession.fresh.kind === 'pending';
+  // Evidence summary (pinned rule only; never fabricated)
+  const evHeading = reproEl('repro-evidence-heading');
+  if (evHeading) evHeading.textContent = evidenceHeading(reproUseRerun);
+  const evBody = reproEl('repro-evidence-body');
+  if (evBody) {
+    evBody.textContent = '';
+    if (reproModel) {
+      const ev = reproModel.evidence;
+      const lines: [string,string][] = [
+        ['Recorded invariant', ev.invariant ?? 'not recorded'],
+        ['Violation (recorded)', ev.violationMessage ?? 'No violation recorded for this experiment'],
+        [ev.ruleLabel, ev.ruleText ?? ''],
+        ['Expected invariant (experiment)', ev.expectedInvariant ?? 'not recorded'],
+        ['Hypothesis', ev.hypothesis],
+        ['Original reproduction (historical)', reproModel.replayLabel],
+        ['Clean comparison (historical, not a fresh rerun)', reproModel.cleanLabel],
+        ['Run / experiment identity', `Run ${ev.runId} · experiment position ${ev.experimentPosition+1}${ev.experimentIndex!==null?` · recorded experiment #${ev.experimentIndex}`:' · recorded index not recorded'} · source hash ${ev.sourceHash ?? 'not recorded'}`],
+        ['Trace', `${reproModel.traceCount} recorded trace entr${reproModel.traceCount===1?'y':'ies'}`],
+      ];
+      for (const [k,v] of lines) { const row=document.createElement('p'); const b=document.createElement('strong'); b.textContent=v ? k+': ' : k; row.append(b, document.createTextNode(v)); evBody.appendChild(row); }
+      if (ev.violations.length>1) { const extra=document.createElement('p'); extra.textContent=`All recorded violations: ${ev.violations.map(v=>`${v.invariant} at action #${v.step}: ${v.message}`).join(' · ')}`; evBody.appendChild(extra); }
+    }
+  }
+  const toggleBtn = reproEl<HTMLButtonElement>('btn-repro-toggle-trace');
+  if (toggleBtn) { const concise = reproModel && reproModel.sequence!=='trace'; toggleBtn.disabled = !reproModel || !concise || reproUseRerun; toggleBtn.setAttribute('aria-expanded', String(reproShowFull)); toggleBtn.textContent = reproShowFull ? 'Show concise view' : 'Show complete original trace'; }
+  const modeEl = reproEl('repro-trace-mode');
+  if (modeEl) modeEl.textContent = !reproModel ? '' : reproUseRerun ? 'Showing fresh rerun trace (labelled rerun) — original recording still available' : reproShowFull ? `Showing complete original trace (${reproModel.traceCount} entries)` : reproModel.sequence==='key-events' ? 'Showing concise key events — complete original trace available' : reproModel.sequence==='grouped' ? 'Showing concise grouped view — complete original trace available' : `Showing complete recorded trace (${reproModel.traceCount} entries)`;
+  const rerunControls = reproEl('repro-rerun-controls');
+  if (rerunControls) rerunControls.classList.toggle('hidden', !(reproSession.freshReport && reproRerunSteps.length>=0 && reproSession.fresh.kind!=='pending' && reproSession.fresh.kind!=='idle'));
   const prov = reproEl('repro-provenance');
   const empty = reproEl('repro-empty');
   const body = reproEl('repro-body');
@@ -964,7 +1007,7 @@ function renderReproduction(): void {
   }
   if (prov) {
     prov.textContent = '';
-    for (const text of [reproModel.modelLabel, `Run ID: ${reproModel.runId}`, reproModel.systemLabel, reproModel.briefLabel, reproModel.targetLabel, reproModel.sequence === 'key-events' ? 'Trace: key recorded events; full trace in Action trace & timeline' : 'Trace: complete recorded trace', reproModel.replayLabel, reproModel.cleanLabel, reproModel.experimentLabel]) {
+    for (const text of [reproModel.modelLabel, `Run ID: ${reproModel.runId}`, reproModel.systemLabel, reproModel.briefLabel, reproModel.targetLabel, reproUseRerun ? 'Trace: fresh rerun trace (not the original recording)' : reproShowFull ? 'Trace: complete original trace' : reproModel.sequence === 'key-events' ? 'Trace: key recorded events; full trace available via Show complete original trace' : reproModel.sequence === 'grouped' ? 'Trace: concise grouped view; full trace available via Show complete original trace' : 'Trace: complete recorded trace', reproModel.replayLabel, reproModel.cleanLabel, reproModel.experimentLabel]) {
       const s = document.createElement('span'); s.textContent = text; prov.appendChild(s);
     }
   }
@@ -972,23 +1015,24 @@ function renderReproduction(): void {
     invalid.classList.toggle('hidden', reproModel.invalidLabel === null);
     invalid.textContent = reproModel.invalidLabel ?? '';
   }
-  const key = `${reproModel.runId}|${selectedExperimentIndex}|${reproSession.selectedFinding?.id ?? ''}|${reproModel.sequence}|${reproModel.steps.length}`;
+  const effSteps = effectiveSteps();
+  const key = timelineRenderKey({ runId: reproModel.runId, experimentIndex: selectedExperimentIndex, findingId: reproSession.selectedFinding?.id ?? '', sequence: reproModel.sequence, showFull: reproShowFull, useRerun: reproUseRerun, freshKind: reproSession.fresh.kind, steps: effSteps });
   if (key !== reproSession.renderedKey) {
-    reproSession.renderedKey = key;
-    reproPlayback.setCount(reproModel.steps.length);
+    const prevKey = reproSession.renderedKey; reproSession.renderedKey = key; const sameSelection = prevKey !== '' && prevKey.split('|').slice(0, 4).join('|') === key.split('|').slice(0, 4).join('|');
+    if (sameSelection) reproPlayback.refreshCount(effSteps.length); else reproPlayback.setCount(effSteps.length);
     const timeline = reproEl<HTMLOListElement>('repro-timeline');
     if (timeline) {
       timeline.textContent = '';
-      reproModel.steps.forEach((step) => {
+      effSteps.forEach((step) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.dataset.reproPosition = String(step.position);
         if (step.isViolation) btn.classList.add('is-violation');
-        btn.setAttribute('aria-label', `Show ${reproModel!.sequence === 'key-events' ? 'key event' : 'recorded step'} ${step.position + 1} of ${reproModel!.steps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
+        btn.setAttribute('aria-label', `Show ${reproUseRerun ? 'fresh rerun step' : reproModel!.sequence === 'key-events' && !reproShowFull ? 'key event' : 'recorded step'} ${step.position + 1} of ${effSteps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
         const t = document.createElement('span'); t.className = 'repro-tl-title'; t.textContent = `${step.position + 1}. ${step.title}`;
         const sub = document.createElement('span'); sub.className = 'repro-tl-sub';
-        sub.textContent = step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
+        sub.textContent = step.isGroup ? `Grouped: ${step.groupCount} entries — expand full trace to inspect` : step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
         btn.append(t, sub);
         btn.addEventListener('click', () => { reproPlayback.select(step.position); });
         li.appendChild(btn);
@@ -997,18 +1041,21 @@ function renderReproduction(): void {
     }
   }
   if (empty) {
-    empty.classList.toggle('hidden', reproModel.hasTrace);
-    if (!reproModel.hasTrace) empty.textContent = 'No trace entries were recorded for this experiment. No playback state can be shown.';
+    const hasEff = effSteps.length>0;
+    empty.classList.toggle('hidden', hasEff);
+    if (!hasEff) empty.textContent = reproUseRerun ? `The fresh rerun returned no trace entries. The original recording is still available.${reproRerunUnattributed.length ? ` ${unattributedText(reproRerunUnattributed, true)}` : ''}` : 'No trace entries were recorded for this experiment. No playback state can be shown.';
   }
-  body?.classList.toggle('hidden', !reproModel.hasTrace);
+  body?.classList.toggle('hidden', !(effSteps.length>0));
   renderReproductionDetail();
 }
 
 function renderReproductionDetail(): void {
   const model = reproModel;
-  if (!model || !model.hasTrace) return;
+  if (!model) { clearReproductionDetail(); return; }
+  const eff = effectiveSteps();
+  if (eff.length===0) { clearReproductionDetail(); }
   const pos = reproPlayback.position;
-  const step = pos >= 0 ? model.steps[pos] : undefined;
+  const step = pos >= 0 ? eff[pos] : undefined;
   const set = (id: string, text: string) => { const el = reproEl(id); if (el) el.textContent = text; };
   let selectedButton: HTMLButtonElement | null = null;
   document.querySelectorAll<HTMLButtonElement>('[data-repro-position]').forEach(btn => {
@@ -1032,17 +1079,18 @@ function renderReproductionDetail(): void {
   const prevBtn = reproEl<HTMLButtonElement>('btn-repro-prev');
   if (prevBtn) prevBtn.disabled = pos < 0;
   const nextBtn = reproEl<HTMLButtonElement>('btn-repro-next');
-  if (nextBtn) nextBtn.disabled = pos >= model.steps.length - 1 && !reproPlayback.playing;
+  if (nextBtn) nextBtn.disabled = pos >= eff.length - 1 && !reproPlayback.playing;
   const unattributed = reproEl('repro-unattributed');
   if (unattributed) {
-    unattributed.classList.toggle('hidden', model.unattributedViolations.length === 0);
-    unattributed.textContent = model.unattributedViolations.length
-      ? `Some recorded violations could not be pinned to one processed trace entry. ${model.unattributedViolations.map(v => `Action #${v.step} (${v.invariant}): ${v.message}`).join(' · ')}`
+    const activeUnattributed = activeUnattributedViolations(reproUseRerun, model.unattributedViolations, reproRerunUnattributed);
+    unattributed.classList.toggle('hidden', activeUnattributed.length === 0);
+    unattributed.textContent = activeUnattributed.length
+      ? unattributedText(activeUnattributed, reproUseRerun)
       : '';
   }
   if (!step) {
     const keyEvents = model.sequence === 'key-events';
-    set('repro-step-count', `No ${keyEvents ? 'key event' : 'recorded step'} shown yet · ${model.steps.length} ${keyEvents ? 'key events' : 'recorded steps'}`);
+    set('repro-step-count', `No ${keyEvents ? 'key event' : 'recorded step'} shown yet · ${eff.length} ${keyEvents ? 'key events' : 'recorded steps'}${reproUseRerun ? ' (fresh rerun trace)' : ''}`);
     set('repro-step-title', keyEvents ? 'Before the first key event' : 'Before the first recorded step');
     set('repro-step-kind', 'No recorded state is selected yet.');
     set('repro-step-detail', keyEvents
@@ -1051,15 +1099,15 @@ function renderReproductionDetail(): void {
     set('repro-observed-text', 'Nothing has been played yet. No outcome is claimed.');
     reproEl('repro-expected')?.classList.add('hidden');
     reproEl('repro-observed')?.classList.remove('is-violation');
-    set('repro-credit', '');
-    const creditHost = reproEl('repro-credit'); if (creditHost) creditHost.textContent = 'not recorded — no step selected';
+    const noStepVis = detailVisibility(false, model.evidence.creditRelevant); const factsEl0 = reproEl('repro-generic-facts'); if (factsEl0) factsEl0.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !noStepVis.factsVisible); reproEl('repro-credit-wrap')?.classList.toggle('hidden', !noStepVis.creditVisible); set('repro-credit', '');
+    const creditHost = reproEl('repro-credit'); if (creditHost) creditHost.textContent = NO_STEP_CREDIT_TEXT;
     reproEl('repro-exposure-bar')?.classList.add('hidden');
     set('repro-exposure-legend', '');
     set('repro-action', 'not recorded'); set('repro-outcome', 'not recorded'); set('repro-payload', 'not recorded'); set('repro-state', 'not recorded');
     return;
   }
   const explanation = explainStep(step, step.violations);
-  set('repro-step-count', `${model.sequence === 'key-events' ? 'Key event' : 'Step'} ${step.position + 1} of ${model.steps.length} · trace entry ${step.tracePosition + 1} · recorded action #${step.actionIndex} · T=${step.time}`);
+  set('repro-step-count', step.isGroup ? `Grouped summary ${step.position + 1} of ${eff.length} · trace entries ${(step.groupTracePositions ?? []).map(p => p + 1).join(', ')} · not a single recorded entry` : `${reproUseRerun ? 'Fresh rerun step' : model.sequence === 'key-events' && !reproShowFull ? 'Key event' : 'Step'} ${step.position + 1} of ${eff.length} · trace entry ${step.tracePosition + 1} · recorded action #${step.actionIndex} · T=${step.time}`);
   set('repro-step-title', step.title);
   set('repro-step-kind', step.kindLabel);
   set('repro-step-detail', step.detail);
@@ -1073,8 +1121,13 @@ function renderReproductionDetail(): void {
   const observedBox = reproEl('repro-observed');
   observedBox?.classList.toggle('is-violation', explanation.observedIsViolation);
   set('repro-observed-text', explanation.observed);
+  const factsEl = reproEl('repro-generic-facts');
+  if (factsEl) { factsEl.textContent=''; const facts = step.isGroup ? step.facts : step.facts; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded trading facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
+  const creditWrap = reproEl('repro-credit-wrap');
+  if (creditWrap) creditWrap.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).creditVisible || !!step.isGroup);
+  reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).factsVisible);
   const creditHost = reproEl('repro-credit');
-  if (creditHost) {
+  if (creditHost && model.evidence.creditRelevant) {
     creditHost.textContent = '';
     const c = step.credit;
     const creditAdmissionViolated = step.violations.some(isCreditAdmissionViolation);
@@ -1122,8 +1175,9 @@ function openReproductionForFinding(finding: Finding, focusPlayer = true): void 
   const position = resolveExperimentPosition(rec, finding);
   if (position < 0) { showAlert('The experiment for this finding is not present in the opened run, so its recorded reproduction cannot be shown.'); return; }
   reproPlayback.stop();
+  clearFreshView(); reproShowFull=false;
   selectedExperimentIndex = position;
-  reproSession.selectFinding(finding);
+  reproSession.selectFinding(finding, position);
   renderExperiments(rec.experiments);
   renderSelectedExperimentTrace();
   renderReproduction();
@@ -1138,20 +1192,27 @@ async function rerunSavedInvestigation(): Promise<void> {
   const rec = currentInvestigationRecord;
   if (!rec || replayWaitsForSave(rec, isInvestigationActive, activeRecordId) || reproSession.fresh.kind === 'pending') return;
   const runId = rec.id;
-  const seq = reproSession.beginFresh(runId);
+  const position = selectedExperimentIndex;
+  const findingId = reproSession.selectedFinding?.id ?? null;
+  const seq = reproSession.beginFresh(runId, position, findingId);
+  clearFreshView();
   renderReproduction();
   const btn = reproEl<HTMLButtonElement>('btn-repro-rerun');
   const trigger = btn ?? undefined;
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/replay`, { method: 'POST' });
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/experiments/${encodeURIComponent(String(position))}/replay`, { method: 'POST' });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || `HTTP ${res.status}`); }
-    const report = (await res.json()) as ReplayReport;
-    if (!reproSession.settleFresh(seq, runId, report.reproduced ? { kind: 'success' } : { kind: 'mismatch' })) return;
+    const report = (await res.json()) as ExperimentReplayReport;
+    const kind = classifyFreshReplay(report);
+    const next = kind === 'success' ? { kind: 'success' as const } : kind === 'source-changed' ? { kind: 'source-changed' as const } : { kind: 'mismatch' as const };
+    if (!reproSession.settleFresh(seq, runId, next, report, position, findingId)) return;
+    const rerunTrace = buildRerunTrace(report); reproRerunSteps = rerunTrace.steps; reproRerunUnattributed = rerunTrace.unattributedViolations;
+    reproUseRerun = false;
     renderReproduction();
     lastFocusedElement = trigger ?? null;
     showReplayReport(report);
   } catch (e) {
-    if (!reproSession.settleFresh(seq, runId, { kind: 'error', message: e instanceof Error ? e.message : String(e) })) return;
+    if (!reproSession.settleFresh(seq, runId, { kind: 'error', message: e instanceof Error ? e.message : String(e) }, null, position, findingId)) return;
     renderReproduction();
   }
 }
@@ -1257,8 +1318,11 @@ function showReplayReport(report: ReplayReport): void {
   addLine('Current Source Hash:', report.currentSourceHash);
   addLine('Source Identical Match:', report.sourceIdentical ? 'YES' : 'NO (Source changed)');
   addLine('Exact Reproduction Claimed:', report.exactReproductionClaimed ? 'CONFIRMED' : 'CANNOT BE CLAIMED', !report.exactReproductionClaimed);
-  addLine('Experiments Matched:', `${report.experimentsReproduced} / ${report.experimentsTotal}`);
-  addLine('Deterministic Replay Result:', report.reproduced ? 'ALL EXPERIMENTS REPRODUCED' : 'MISMATCH DETECTED');
+  const scoped = (report as ExperimentReplayReport).scope === 'experiment';
+  const behaviour = scoped ? replayBehaviourStatus(report.outcomes[0]) : 'unavailable';
+  addLine(scoped ? 'Scope:' : 'Experiments Matched:', scoped ? `Selected experiment (position ${(report as ExperimentReplayReport).experimentPosition ?? '?'} ) only — no clean comparison or model call` : `${report.experimentsReproduced} / ${report.experimentsTotal}`);
+  if (scoped) addLine('Selected experiment behaviour (trace, snapshot, violations, rejections, validity):', behaviour.toUpperCase());
+  addLine('Deterministic Replay Result:', !report.sourceIdentical ? (scoped && behaviour === 'matched' ? 'BEHAVIOUR MATCHED — SOURCE CHANGED, exact reproduction cannot be claimed' : 'SOURCE CHANGED — exact reproduction cannot be claimed') : report.reproduced ? (scoped ? 'SELECTED EXPERIMENT REPRODUCED EXACTLY (verified: identical source and semantic match)' : 'ALL EXPERIMENTS REPRODUCED') : 'MISMATCH DETECTED');
   addLine('Replay Engine:', 'Local Deterministic Simulator (No model invocation)');
 
   const noteEl = document.createElement('div');
@@ -1803,6 +1867,9 @@ reproEl<HTMLButtonElement>('btn-repro-play')?.addEventListener('click', () => {
   renderReproductionDetail();
 });
 reproEl<HTMLButtonElement>('btn-repro-rerun')?.addEventListener('click', () => { void rerunSavedInvestigation(); });
+reproEl<HTMLButtonElement>('btn-repro-toggle-trace')?.addEventListener('click', () => { reproShowFull = !reproShowFull; reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-original')?.addEventListener('click', () => { reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-rerun')?.addEventListener('click', () => { if (!reproSession.freshReport) return; reproUseRerun = true; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { reproPlayback.stop(); renderReproductionDetail(); }
 });

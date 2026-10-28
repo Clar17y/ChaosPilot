@@ -17,6 +17,8 @@ import {
   listRuns,
   deleteRun,
   replayRun,
+  replaySelectedExperiment,
+  parseExperimentPosition,
   validateRunId,
   getSimulatorApi,
   isKnownTargetVariant,
@@ -793,6 +795,30 @@ export class ChaosPilotServer {
             return;
           }
           this.sendJson(res, 200, record);
+          return;
+        }
+
+        // POST /api/runs/:id/experiments/:position/replay - Replay one saved experiment by array position
+        const selectedReplayMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/experiments\/([^/]+)\/replay$/);
+        if (method === 'POST' && selectedReplayMatch && selectedReplayMatch[1]) {
+          const id = selectedReplayMatch[1];
+          if (!validateRunId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid run ID' });
+            return;
+          }
+          const position = parseExperimentPosition(selectedReplayMatch[2]);
+          if (position === null) {
+            this.sendJson(res, 400, { error: 'Invalid experiment position' });
+            return;
+          }
+          try {
+            const report = await replaySelectedExperiment(id, position, this.runsDir);
+            this.sendJson(res, 200, report);
+          } catch (err) {
+            this.sendJson(res, 400, {
+              error: err instanceof Error ? err.message : 'Replay failed',
+            });
+          }
           return;
         }
 

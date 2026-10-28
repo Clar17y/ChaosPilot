@@ -75,6 +75,10 @@ export interface ReplayReport {
   outcomes: ReplayExperimentOutcome[];
   timestamp: string;
   note?: string;
+  /** Present only on selected-experiment replay reports. */
+  scope?: 'experiment';
+  /** Zero-based array position of the selected experiment, when scoped. */
+  experimentPosition?: number;
 }
 
 export interface SimulatorApi {
@@ -323,6 +327,97 @@ export async function deleteRun(id: string, runsDir = 'runs'): Promise<boolean> 
 
 
 /**
+ * Parses a zero-based experiment array position.
+ * Accepts only a nonnegative safe integer or its canonical decimal string
+ * form ("0", "1", "12", ...). Rejects negatives, fractions, leading zeros,
+ * signs, whitespace, exponent/hex forms, empty/missing values and overflow.
+ */
+export function parseExperimentPosition(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value + 0 : null;
+  }
+  if (typeof value === 'string') {
+    if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+async function resolveReplayRecord(
+  target: string | InvestigationRecord,
+  runsDir: string
+): Promise<InvestigationRecord> {
+  if (typeof target === 'string') {
+    const record = await getRun(target, runsDir);
+    if (!record) {
+      throw new Error(`Cannot replay: Run "${target}" not found or malformed.`);
+    }
+    return record;
+  }
+  if (!target || typeof target !== 'object' || !Array.isArray(target.experiments)) {
+    throw new Error('Cannot replay: Run record is malformed.');
+  }
+  return target;
+}
+
+function currentSourceIdentity(
+  record: InvestigationRecord,
+  simulator: SimulatorApi
+): { currentSourceHash: string; sourceIdentical: boolean } {
+  let currentSourceHash = '';
+  try {
+    const currentBundle = simulator.getSourceBundle(record.variant);
+    currentSourceHash = currentBundle.hash;
+  } catch {
+    currentSourceHash = 'unavailable';
+  }
+  const sourceIdentical = Boolean(
+    currentSourceHash &&
+    currentSourceHash !== 'unavailable' &&
+    record.sourceHash &&
+    currentSourceHash === record.sourceHash
+  );
+  return { currentSourceHash, sourceIdentical };
+}
+
+function replayOneExperiment(
+  record: InvestigationRecord,
+  position: number,
+  simulator: SimulatorApi
+): { outcome: ReplayExperimentOutcome; exactMatched: boolean } {
+  const expRecord = record.experiments[position];
+  if (
+    !expRecord || typeof expRecord !== 'object' ||
+    !expRecord.experiment || typeof expRecord.experiment !== 'object' ||
+    !expRecord.result || typeof expRecord.result !== 'object'
+  ) {
+    throw new Error('Cannot replay: Selected experiment is malformed.');
+  }
+  const replayedResult = simulator.executeExperiment(expRecord.experiment, record.variant);
+  if (!replayedResult || typeof replayedResult !== 'object') {
+    throw new Error('Cannot replay: Selected experiment execution returned a malformed result.');
+  }
+  const origResult = expRecord.result;
+  const comparison = compareSemanticReplay(origResult, replayedResult);
+  const outcome: ReplayExperimentOutcome = {
+    index: expRecord.index ?? position,
+    originalViolationsCount: (origResult.violations || []).length,
+    replayedViolationsCount: (replayedResult.violations || []).length,
+    violationsMatched: comparison.violationsMatched,
+    traceMatched: comparison.traceMatched,
+    snapshotMatched: comparison.snapshotMatched,
+    rejectionsMatched: comparison.rejectionsMatched,
+    validityMatched: comparison.validityMatched,
+    exactMatched: comparison.matched,
+    mismatches: comparison.mismatches,
+    valid: replayedResult.valid,
+    replayedResult,
+  };
+  return { outcome, exactMatched: comparison.matched };
+}
+
+/**
  * Replays an investigation record deterministically using the simulator.
  * Requires source identity AND exact trace, snapshots, violations, rejections,
  * and validity comparison before claiming exact reproduction.
@@ -333,70 +428,20 @@ export async function replayRun(
   runsDir = 'runs',
   simulatorOverride?: SimulatorApi
 ): Promise<ReplayReport> {
-  let record: InvestigationRecord | null;
-  if (typeof target === 'string') {
-    record = await getRun(target, runsDir);
-    if (!record) {
-      throw new Error(`Cannot replay: Run "${target}" not found or malformed.`);
-    }
-  } else {
-    record = target;
-  }
-
+  const record = await resolveReplayRecord(target, runsDir);
   const simulator = simulatorOverride || (await getSimulatorApi());
+  const { currentSourceHash, sourceIdentical } = currentSourceIdentity(record, simulator);
 
-  // 1. Check current source bundle hash for the target variant
-  let currentSourceHash = '';
-  try {
-    const currentBundle = simulator.getSourceBundle(record.variant);
-    currentSourceHash = currentBundle.hash;
-  } catch {
-    currentSourceHash = 'unavailable';
-  }
-
-  const sourceIdentical = Boolean(
-    currentSourceHash &&
-    currentSourceHash !== 'unavailable' &&
-    record.sourceHash &&
-    currentSourceHash === record.sourceHash
-  );
-
-  // 2. Deterministically replay each experiment without model invocation
+  // Deterministically replay each experiment without model invocation
   const outcomes: ReplayExperimentOutcome[] = [];
   let experimentsReproduced = 0;
 
   for (let i = 0; i < record.experiments.length; i++) {
-    const expRecord = record.experiments[i]!;
-    const replayedResult = simulator.executeExperiment(expRecord.experiment, record.variant);
-    const origResult = expRecord.result;
-
-    const comparison = compareSemanticReplay(origResult, replayedResult);
-    const validityMatched = comparison.validityMatched;
-    const vComp = { matched: comparison.violationsMatched };
-    const rComp = { matched: comparison.rejectionsMatched };
-    const tComp = { matched: comparison.traceMatched };
-    const sComp = { matched: comparison.snapshotMatched };
-    const mismatches = comparison.mismatches;
-    const exactMatched = comparison.matched;
-
+    const { outcome, exactMatched } = replayOneExperiment(record, i, simulator);
     if (exactMatched) {
       experimentsReproduced++;
     }
-
-    outcomes.push({
-      index: expRecord.index ?? i,
-      originalViolationsCount: (origResult.violations || []).length,
-      replayedViolationsCount: (replayedResult.violations || []).length,
-      violationsMatched: vComp.matched,
-      traceMatched: tComp.matched,
-      snapshotMatched: sComp.matched,
-      rejectionsMatched: rComp.matched,
-      validityMatched,
-      exactMatched,
-      mismatches,
-      valid: replayedResult.valid,
-      replayedResult,
-    });
+    outcomes.push(outcome);
   }
 
   const allExactMatched =
@@ -431,6 +476,76 @@ export async function replayRun(
     note,
   };
 }
+
+/**
+ * Replays exactly one saved experiment, selected by its zero-based position
+ * in the saved experiments array (not the recorded experiment index, so
+ * legacy/missing/noncontiguous indices do not affect selection).
+ * Requires source identity AND the shared semantic comparison of the selected
+ * experiment before claiming exact reproduction. Does NOT invoke any model
+ * or provider, does not rerun any clean comparison, and does not mutate or
+ * persist saved evidence.
+ */
+export async function replaySelectedExperiment(
+  target: string | InvestigationRecord,
+  position: unknown,
+  runsDir = 'runs',
+  simulatorOverride?: SimulatorApi
+): Promise<ReplayReport> {
+  const experimentPosition = parseExperimentPosition(position);
+  if (experimentPosition === null) {
+    throw new Error('Invalid experiment position: expected a nonnegative integer position.');
+  }
+  const record = await resolveReplayRecord(target, runsDir);
+  if (experimentPosition >= record.experiments.length) {
+    throw new Error(
+      `Experiment position ${experimentPosition} is out of range for run "${record.id}".`
+    );
+  }
+  const simulator = simulatorOverride || (await getSimulatorApi());
+  const { currentSourceHash, sourceIdentical } = currentSourceIdentity(record, simulator);
+
+  const { outcome, exactMatched } = replayOneExperiment(record, experimentPosition, simulator);
+
+  const exactReproductionClaimed = sourceIdentical && exactMatched;
+  // Keep the existing run-wide count semantics: a counted result includes
+  // the recorded result's source hash as well as its trace and outcomes.
+  // Behaviour can still match when source identity differs; report that
+  // separately without treating it as an exact reproduction.
+  const semanticMatched = outcome.traceMatched && outcome.snapshotMatched && outcome.violationsMatched && outcome.rejectionsMatched && outcome.validityMatched;
+  const experimentsReproduced = exactMatched ? 1 : 0;
+
+  let note: string;
+  if (!sourceIdentical) {
+    note = semanticMatched
+      ? `Source changed or diverged: original source hash (${record.sourceHash}) does not match current runtime source hash (${currentSourceHash}). The selected experiment semantically matched (trace, snapshot, violations, rejections, validity), but exact reproduction cannot be claimed for the selected experiment. No clean comparison was rerun and no model was invoked.`
+      : `Source changed or diverged: original source hash (${record.sourceHash}) does not match current runtime source hash (${currentSourceHash}). The selected experiment did not semantically match, and exact reproduction cannot be claimed for the selected experiment. No clean comparison was rerun and no model was invoked.`;
+  } else if (!exactMatched) {
+    note = `Source identical, but the selected experiment's saved result and replay did not match exactly. See the mismatch details. No clean comparison was rerun and no model was invoked.`;
+  } else {
+    note = `Source identical: selected experiment reproduced exactly with no provider invocation (trace, snapshot, violations, rejections, validity all match). No clean comparison was rerun.`;
+  }
+
+  return {
+    runId: record.id,
+    variant: record.variant,
+    originalSourceHash: record.sourceHash,
+    currentSourceHash,
+    sourceIdentical,
+    exactReproductionClaimed,
+    reproduced: exactReproductionClaimed,
+    experimentsTotal: 1,
+    experimentsReproduced,
+    outcomes: [outcome],
+    timestamp: new Date().toISOString(),
+    note,
+    scope: 'experiment',
+    experimentPosition,
+  };
+}
+
+/** Alias for {@link replaySelectedExperiment}. */
+export const replayExperiment = replaySelectedExperiment;
 
 export interface BenchmarkReportSummary {
   id: string;

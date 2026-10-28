@@ -1,5 +1,5 @@
 import type { Finding, InvestigationRecord } from '../domain.ts';
-import type { FreshReplayState } from './reproduction-player.ts';
+import type { ExperimentReplayLike, FreshReplayState } from './reproduction-player.ts';
 
 /** A terminal result can be reported before the server has finished saving it. */
 export function replayWaitsForSave(
@@ -10,68 +10,89 @@ export function replayWaitsForSave(
   return record.status === 'running' || (isActive && record.id === activeRunId);
 }
 
-/**
- * Run-scoped reproduction selection. Every explicit open/launch resets it;
- * a same-run refresh (polling) preserves it. A fresh-replay result may only
- * settle when its token and run id are still current.
- */
+export interface FreshScope { runId: string; experimentPosition: number; findingId: string | null }
+
 export class ReproductionSession {
   runId: string | null = null;
   selectedFinding: Finding | null = null;
+  experimentPosition: number | null = null;
   fresh: FreshReplayState = { kind: 'idle' };
+  freshReport: ExperimentReplayLike | null = null;
+  freshScope: FreshScope | null = null;
   renderedKey = '';
   private freshSeq = 0;
 
-  /** Explicitly opening or launching a run: drop all prior-run state. */
   resetForRun(runId: string | null): void {
     this.runId = runId;
     this.selectedFinding = null;
+    this.experimentPosition = null;
     this.fresh = { kind: 'idle' };
+    this.freshReport = null;
+    this.freshScope = null;
     this.freshSeq++;
     this.renderedKey = '';
   }
 
-  clear(): void {
-    this.resetForRun(null);
-  }
+  clear(): void { this.resetForRun(null); }
 
-  /** Polling/render path: reset only when the run identity actually changes. */
   syncToRun(runId: string): boolean {
     if (this.runId === runId) return false;
     this.resetForRun(runId);
     return true;
   }
 
-  /** Changing experiment/finding drops any finding claim and pending replay. */
   clearFinding(): void {
     this.selectedFinding = null;
+    this.experimentPosition = null;
     this.invalidateFresh();
   }
 
-  selectFinding(finding: Finding): void {
+  /** Experiment (array position) changed without a finding selection. */
+  selectExperiment(position: number): void {
+    this.experimentPosition = position;
+    this.invalidateFresh();
+  }
+
+  selectFinding(finding: Finding, experimentPosition?: number): void {
     this.selectedFinding = finding;
+    if (experimentPosition !== undefined) this.experimentPosition = experimentPosition;
     this.invalidateFresh();
   }
 
-  /** Invalidate an in-flight replay; a pending state returns to idle. */
   invalidateFresh(): void {
     this.freshSeq++;
+    this.freshReport = null;
+    this.freshScope = null;
     if (this.fresh.kind === 'pending') this.fresh = { kind: 'idle' };
+    // A settled fresh result also belongs to the old selection.
+    else if (this.fresh.kind !== 'idle') this.fresh = { kind: 'idle' };
   }
 
-  beginFresh(runId: string): number {
+  beginFresh(runId: string, experimentPosition = -1, findingId: string | null = null): number {
     this.runId = runId;
+    this.experimentPosition = experimentPosition >= 0 ? experimentPosition : this.experimentPosition;
     this.fresh = { kind: 'pending' };
+    this.freshReport = null;
+    this.freshScope = { runId, experimentPosition, findingId };
     return ++this.freshSeq;
   }
 
-  isFreshCurrent(token: number, runId: string): boolean {
-    return token === this.freshSeq && this.runId === runId && this.fresh.kind === 'pending';
+  scopeKey(): string {
+    const s = this.freshScope;
+    return s ? `${s.runId}|${s.experimentPosition}|${s.findingId ?? ''}` : '';
   }
 
-  settleFresh(token: number, runId: string, next: FreshReplayState): boolean {
-    if (!this.isFreshCurrent(token, runId)) return false;
+  isFreshCurrent(token: number, runId: string, experimentPosition?: number, findingId?: string | null): boolean {
+    if (token !== this.freshSeq || this.runId !== runId || this.fresh.kind !== 'pending') return false;
+    if (experimentPosition !== undefined && this.freshScope?.experimentPosition !== experimentPosition) return false;
+    if (findingId !== undefined && (this.freshScope?.findingId ?? null) !== findingId) return false;
+    return true;
+  }
+
+  settleFresh(token: number, runId: string, next: FreshReplayState, report?: ExperimentReplayLike | null, experimentPosition?: number, findingId?: string | null): boolean {
+    if (!this.isFreshCurrent(token, runId, experimentPosition, findingId)) return false;
     this.fresh = next;
+    this.freshReport = report ?? null;
     return true;
   }
 }

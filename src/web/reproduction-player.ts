@@ -19,6 +19,13 @@ export interface PlaybackStep {
   position: number;
   /** Position of the underlying entry in the saved trace. */
   tracePosition: number;
+  /** Synthetic grouped step collapsing consecutive unimportant entries. */
+  isGroup?: boolean;
+  groupCount?: number;
+  groupTracePositions?: number[];
+  /** Recorded trading facts for this entry (payload/state), never inferred. */
+  facts: string[];
+  payloadType: string | null;
   /** Experiment action index recorded on the entry (`entry.step`). */
   actionIndex: number;
   time: number;
@@ -39,8 +46,29 @@ export interface PlaybackStep {
   isViolation: boolean;
 }
 
+export interface EvidenceSummary {
+  invariant: string | null;
+  violationMessage: string | null;
+  violations: Violation[];
+  /** Rule text from the run's pinned contract only. */
+  ruleText: string | null;
+  ruleLabel: string;
+  expectedInvariant: string | null;
+  hypothesis: string;
+  sourceHash: string | null;
+  experimentPosition: number;
+  experimentIndex: number | null;
+  runId: string;
+  /** Credit chart is relevant only when recorded credit evidence supports it. */
+  creditRelevant: boolean;
+}
+
 export interface ReproductionModel {
   runId: string;
+  evidence: EvidenceSummary;
+  /** Complete original trace steps, always accessible. */
+  allSteps: PlaybackStep[];
+  traceCount: number;
   modelLabel: string;
   targetLabel: string;
   systemLabel: string;
@@ -55,8 +83,8 @@ export interface ReproductionModel {
   steps: PlaybackStep[];
   /** Violations that share an action index but cannot be pinned to one processed entry. */
   unattributedViolations: Violation[];
-  /** A compact, evidence-backed credit-admission story, or the complete trace. */
-  sequence: 'key-events' | 'trace';
+  /** A compact, evidence-backed credit-admission story, grouped concise view, or the complete trace. */
+  sequence: 'key-events' | 'grouped' | 'trace';
   hasTrace: boolean;
 }
 
@@ -198,6 +226,7 @@ export interface StepExplanation {
 }
 
 export function explainStep(step: PlaybackStep, violationsHere: Violation[]): StepExplanation {
+  if (step.isGroup) return { expected: null, expectedLabel: null, observed: `Observed (recorded): ${step.groupCount ?? 0} grouped entries (trace entries ${(step.groupTracePositions ?? []).map(p => p + 1).join(', ')}). No violation is attributed to these entries. Show the complete original trace to inspect each one.`, observedIsViolation: false };
   const creditViolation = violationsHere.find(isCreditAdmissionViolation);
   if (creditViolation) {
     const e = creditViolation.evidence;
@@ -278,6 +307,127 @@ function creditAdmissionStory(trace: TraceEntry[], steps: PlaybackStep[], valid:
   return [setup, admitted, filled, failure].map((step, position) => ({ ...step, position, title: titles[position]! }));
 }
 
+export function stepFacts(entry: TraceEntry): string[] {
+  const facts: string[] = [];
+  const p = payloadRecord(entry);
+  if (p) {
+    if (typeof p.type === 'string') facts.push(`Type: ${p.type}`);
+    if (typeof p.orderId === 'string') facts.push(`Order: ${p.orderId}`);
+    if (num(p.quantity) !== null) facts.push(`Quantity: ${num(p.quantity)}`);
+    if (num(p.price) !== null) facts.push(`Price: ${num(p.price)}`);
+    if (typeof p.executionId === 'string') facts.push(`Execution: ${p.executionId}`);
+    if (num(p.limit) !== null) facts.push(`Credit limit (payload): ${num(p.limit)}`);
+    if (typeof p.quoteId === 'string') facts.push(`Quote: ${p.quoteId}`);
+  }
+  if (entry.messageId) facts.push(`Message: ${entry.messageId}`);
+  const credit = creditFromState(entry.state);
+  if (credit && (credit.limit !== null || credit.used !== null || credit.reserved !== null)) {
+    facts.push(`Recorded credit — limit ${fmtCredit(credit.limit)}, used ${fmtCredit(credit.used)}, reserved ${fmtCredit(credit.reserved)}, total ${fmtCredit(credit.total)}`);
+  }
+  if (isRecord(entry.state) && isRecord(entry.state.target) && isRecord(entry.state.target.orders)) {
+    facts.push(`Orders in recorded state: ${Object.keys(entry.state.target.orders).length}`);
+  } else if (isRecord(entry.state) && isRecord((entry.state as Record<string, unknown>).orders)) {
+    facts.push(`Orders in recorded state: ${Object.keys((entry.state as Record<string, unknown>).orders as Record<string, unknown>).length}`);
+  }
+  return facts;
+}
+
+/** Build steps for any trace/violation set; used for original and fresh rerun traces. */
+export function buildTraceSteps(trace: TraceEntry[], violations: Violation[]): { steps: PlaybackStep[]; unattributedViolations: Violation[] } {
+  const attributed = new Set<Violation>();
+  const byPos = new Map<number, Violation[]>();
+  for (const violation of violations ?? []) {
+    const matches: number[] = [];
+    trace.forEach((entry, position) => { if (violationMatchesEntry(violation, entry)) matches.push(position); });
+    if (matches.length !== 1) continue;
+    const position = matches[0]!;
+    byPos.set(position, [...(byPos.get(position) ?? []), violation]);
+    attributed.add(violation);
+  }
+  const steps: PlaybackStep[] = trace.map((entry, position) => {
+    const kind = classifyStep(entry);
+    const credit = creditFromState(entry.state);
+    const here = byPos.get(position) ?? [];
+    const p = payloadRecord(entry);
+    return {
+      position, tracePosition: position, actionIndex: entry.step, time: entry.time, action: entry.action,
+      kind, kindLabel: KIND_LABEL[kind], outcome: entry.outcome ?? '',
+      payloadText: entry.payload !== undefined ? safeText(entry.payload) : (entry.messageId ?? 'not recorded'),
+      messageId: entry.messageId ?? null, title: stepTitle(entry, credit), detail: stepDetail(kind), credit,
+      stateText: entry.state !== undefined && entry.state !== null ? safeText(entry.state) : 'not recorded',
+      violations: here, isViolation: here.length > 0, facts: stepFacts(entry),
+      payloadType: typeof p?.type === 'string' ? p.type : null,
+    };
+  });
+  return { steps, unattributedViolations: (violations ?? []).filter(v => !attributed.has(v)) };
+}
+
+/** Group only consecutive scheduled/other entries with no violation; processed/rejected/violation entries stay individual. */
+export function groupUnimportantSteps(steps: PlaybackStep[]): PlaybackStep[] | null {
+  const out: PlaybackStep[] = [];
+  let i = 0; let grouped = false;
+  while (i < steps.length) {
+    const s = steps[i]!;
+    const unimportant = (s.kind === 'scheduled' || s.kind === 'other') && !s.isViolation;
+    if (!unimportant) { out.push(s); i++; continue; }
+    let j = i;
+    while (j < steps.length && (steps[j]!.kind === 'scheduled' || steps[j]!.kind === 'other') && !steps[j]!.isViolation) j++;
+    const run = steps.slice(i, j);
+    if (run.length >= 3) {
+      grouped = true;
+      const first = run[0]!; const last = run[run.length - 1]!;
+      // A group is a summary only: never present the first member's action,
+      // payload, credit or state as a recorded state for the whole group.
+      out.push({ ...first, isGroup: true, groupCount: run.length, groupTracePositions: run.map(r => r.tracePosition),
+        action: 'grouped entries', outcome: `${run.length} grouped recorded entries`, messageId: null,
+        payloadType: null, payloadText: 'Grouped summary — no single payload is recorded for the group as a whole. Show the complete original trace to inspect each entry.',
+        stateText: 'not recorded for the group as a whole — show the complete original trace to inspect each entry',
+        credit: null, violations: [], isViolation: false,
+        kindLabel: 'Grouped summary — not a single recorded entry',
+        title: `${run.length} grouped recorded entries (trace entries ${first.tracePosition + 1}–${last.tracePosition + 1})`,
+        detail: 'Consecutive scheduled or other recorded entries with no attributed violation are grouped here. This row summarises them; it is not a recorded state for the group. Show the complete original trace to inspect each entry.',
+        facts: [`Grouped entries: ${run.length}`, `Trace entries ${first.tracePosition + 1}–${last.tracePosition + 1}`, 'No violation attributed to these entries'] });
+    } else out.push(...run);
+    i = j;
+  }
+  if (!grouped) return null;
+  return out.map((s, position) => ({ ...s, position }));
+}
+
+export function pinnedRuleText(record: InvestigationRecord, invariant: string | null): { ruleText: string | null; ruleLabel: string } {
+  if (!invariant) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable — no invariant was recorded for this selection.' };
+  const contract = record.systemBrief?.contract;
+  if (!contract) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable — no pinned contract was recorded for this run (legacy/missing data).' };
+  const inv = contract.invariants?.find(x => x.id === invariant);
+  if (!inv) return { ruleText: null, ruleLabel: `Pinned rule: unavailable — invariant "${invariant}" is not in the pinned contract for this run.` };
+  return { ruleText: inv.description, ruleLabel: `Pinned rule (${invariant}) from the run's saved contract:` };
+}
+
+export interface ExperimentReplayLike {
+  sourceIdentical: boolean; reproduced: boolean; exactReproductionClaimed: boolean;
+  scope?: string; experimentPosition?: number; experimentsTotal?: number;
+  outcomes?: { replayedResult: { trace?: TraceEntry[]; violations?: Violation[] } }[];
+}
+
+export type FreshKind = 'idle' | 'pending' | 'success' | 'mismatch' | 'source-changed' | 'error';
+export function classifyFreshReplay(report: ExperimentReplayLike): 'success' | 'mismatch' | 'source-changed' {
+  if (!report.sourceIdentical) return 'source-changed';
+  return report.reproduced && report.exactReproductionClaimed ? 'success' : 'mismatch';
+}
+export interface RerunTrace { steps: PlaybackStep[]; unattributedViolations: Violation[] }
+
+/** Build playback steps + attribution for the single rerun outcome, from its own trace/violations. */
+export function buildRerunTrace(report: ExperimentReplayLike): RerunTrace {
+  const result = report.outcomes?.[0]?.replayedResult;
+  if (!result) return { steps: [], unattributedViolations: [] };
+  return buildTraceSteps(result.trace ?? [], result.violations ?? []);
+}
+
+/** Build playback steps for the single rerun outcome, labelled as rerun by the caller. */
+export function buildRerunSteps(report: ExperimentReplayLike): PlaybackStep[] {
+  return buildRerunTrace(report).steps;
+}
+
 export function buildReproductionModel(
   record: InvestigationRecord,
   experimentPosition: number,
@@ -321,15 +471,34 @@ export function buildReproductionModel(
       stateText: entry.state !== undefined && entry.state !== null ? safeText(entry.state) : 'not recorded',
       violations: here,
       isViolation: here.length > 0,
+      facts: stepFacts(entry),
+      payloadType: typeof payloadRecord(entry)?.type === 'string' ? (payloadRecord(entry)!.type as string) : null,
     };
   });
   const unattributedViolations = violations.filter(v => !attributed.has(v));
   const story = unattributedViolations.length ? null : creditAdmissionStory(trace, steps, result.valid, finding);
-  const playbackSteps = story ?? steps;
+  const grouped = story ? null : groupUnimportantSteps(steps);
+  const playbackSteps = story ?? grouped ?? steps;
   const reproduced = finding ? finding.reproduced : expRec.replayVerified;
   const cleanPassed = finding ? finding.cleanControlPassed : expRec.cleanControlPassed;
+  const primaryViolation = finding?.violation ?? violations[0] ?? null;
+  const invariant = primaryViolation?.invariant ?? expRec.experiment.expectedInvariant ?? null;
+  const rule = pinnedRuleText(record, invariant);
+  const creditRelevant = violations.some(isCreditAdmissionViolation)
+    || (invariant !== null && invariant.includes('credit') && steps.some(s => s.credit !== null))
+    || steps.some(s => s.payloadType === 'credit_limit' && violations.some(v => v.invariant.includes('credit')));
+  const evidence: EvidenceSummary = {
+    invariant, violationMessage: primaryViolation?.message ?? null,
+    violations, ruleText: rule.ruleText, ruleLabel: rule.ruleLabel,
+    expectedInvariant: expRec.experiment.expectedInvariant ?? null,
+    hypothesis: expRec.experiment.hypothesis || 'not recorded',
+    sourceHash: finding?.sourceHash ?? result.sourceHash ?? record.sourceHash ?? null,
+    experimentPosition, experimentIndex: (expRec as { index?: number }).index ?? null,
+    runId: record.id, creditRelevant,
+  };
   return {
     runId: record.id,
+    evidence, allSteps: steps, traceCount: trace.length,
     modelLabel: record.model ? `Model: ${record.model}` : 'Model: not recorded',
     targetLabel: `Synthetic target: ${record.variant} (synthetic simulator — not an arbitrary application)`,
     systemLabel: record.systemBrief ? `System: ${record.systemBrief.brief.name}` : 'System: legacy / unavailable',
@@ -353,8 +522,8 @@ export function buildReproductionModel(
     findingTitle: finding ? finding.title : null,
     steps: playbackSteps,
     unattributedViolations,
-    sequence: story ? 'key-events' : 'trace',
-    hasTrace: playbackSteps.length > 0,
+    sequence: story ? 'key-events' : grouped ? 'grouped' : 'trace',
+    hasTrace: trace.length > 0,
   };
 }
 
@@ -373,15 +542,17 @@ export type FreshReplayState =
   | { kind: 'pending' }
   | { kind: 'success' }
   | { kind: 'mismatch' }
+  | { kind: 'source-changed' }
   | { kind: 'error'; message: string };
 
 export function describeFreshReplay(state: FreshReplayState): string {
   switch (state.kind) {
     case 'idle': return 'No rerun has been started from this player. The historical result above is not a new replay.';
-    case 'pending': return 'Rerunning the saved investigation through the deterministic replay path… This does not contact the model and does not rerun the clean comparison.';
-    case 'success': return 'Fresh replay finished: the saved experiments reproduced exactly. Historical results have not been overwritten.';
-    case 'mismatch': return 'Fresh replay finished with a mismatch: the saved experiments did not reproduce exactly. Historical results have not been overwritten.';
-    case 'error': return `Fresh replay failed: ${state.message} Historical results have not been overwritten.`;
+    case 'pending': return 'Rerunning this experiment through the deterministic replay path… This does not contact the model and does not rerun the clean comparison.';
+    case 'success': return 'Fresh rerun finished: matched — this selected experiment reproduced exactly. Historical results have not been overwritten.';
+    case 'mismatch': return 'Fresh rerun finished with a mismatch: this selected experiment did not reproduce exactly. Historical results have not been overwritten.';
+    case 'source-changed': return 'Fresh rerun finished: source changed — the current source differs from the saved source, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
+    case 'error': return `Fresh rerun failed: ${state.message} Historical results have not been overwritten.`;
   }
 }
 
@@ -412,6 +583,13 @@ export class PlaybackController {
     this.pause();
     this.count = Math.max(0, count);
     this.position = -1;
+    this.onChange();
+  }
+  /** Refresh the step list (e.g. labels changed on polling) without losing a still-valid cursor. */
+  refreshCount(count: number): void {
+    this.pause();
+    this.count = Math.max(0, count);
+    this.position = this.count === 0 ? -1 : Math.min(Math.max(this.position, -1), this.count - 1);
     this.onChange();
   }
   select(position: number): void {
