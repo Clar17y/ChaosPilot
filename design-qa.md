@@ -1,6 +1,31 @@
-# Live market background — 28 October 2026
+# Homepage review and PR validation — 28 October 2026
 
-This is the latest homepage acceptance record. The requested change is a continuously updating order book with coherent charts, retaining the selected option 1 layout and chart footprint.
+This is the latest homepage acceptance record. It supersedes the historical candidate, branch and validation status below. The complete homepage is integrated with the current main branch and ready for the requested PR.
+
+## Review and simplification
+
+- Muse Full reviewed the complete homepage candidate (`493a19ced2785663169e55ea4de3c6bf4f78799994918a7df3b68dda0f241881`). Muse also contributed to the original implementation; this provider choice was explicitly requested. The primary's integration was included in the reviewed candidate. The full response is retained locally at `.llm-output/homepage-muse-review.md`.
+- Fixed both supported findings: the copy mask now follows the fixed desktop canvas correctly when scrolling or resizing while scrolled; manual Next/Pause/Play actions now provide polite screen-reader feedback. Decorative packet labels are hidden from the accessibility tree. Automatic event changes stay quiet.
+- Mask bounds are cached in document coordinates and mapped into the canvas coordinate space without layout reads on scroll. Invalidation redraws a paused scene without advancing either timeline. Regression tests cover desktop scroll/resize/return-to-top and mobile/breakpoint transitions. Browser evidence: `docs/design/homepage/review-scroll-resize.jpg`.
+- The simplify pass consolidated duplicate rectangle shapes, corrected an obsolete crystal comment and replaced per-frame lane-schedule regeneration with a bounded cache of the current and preceding cycle. Geometry still responds to viewport changes. All **3,150** before/after packet samples were identical across 42 events, five sizes, phase boundaries, cycle joins and backward seeks; a retained regression covers seeking combined with resizing.
+- A native refactor audit could not access source files, and the Claude retry failed because its saved OAuth authorization was revoked. Neither is counted as successful review evidence. The primary completed the reuse, quality and efficiency passes directly after the completed Muse review; details and differential evidence are retained in `.llm-output/homepage-simplify.md`.
+
+## Final candidate and validation
+
+- Branch/worktree: `codex/homepage`, `C:/dev/ChaosPilot-worktrees/homepage`. Code checkpoint: `4d3fac968c8ea8d38781259643173cf6c09040ad`, including main at `05695ea76933fe118bfcf0ae57d72cb191434e0c`. Primary main was clean and matched `origin/main`; the walkthrough task was preserved.
+- `npm run typecheck` passed. `npm test`, including the production build, passed with **569 tests in 32 files** against that integrated checkpoint. Logs: `.llm-output/homepage-pr-typecheck.log` and `.llm-output/homepage-pr-full-tests.log`. Focused homepage/scene/market validation before integration passed **77 tests in 3 files**.
+- Final browser checks covered desktop/mobile layout, paused event continuity, scroll followed by resize, manual announcements with quiet automatic cycling, and Unleash Chaos → updated workspace → browser Back. The browser console had no warnings or errors. The original footprint comparisons below remain applicable.
+- Real screen-reader audio, an OS reduced-motion setting change and hidden-tab emulation were not exercised. Source inspection and timeline tests cover those lifecycle gates; this is not a comprehensive accessibility or browser-lifecycle certification.
+- The final code/asset diff is bound by `.llm-output/homepage-pr-candidate.json`, SHA-256 `d64bd3dab8352e9f153661ef8d3291f6c45a17b5c4380c84267edb9796a36910`. Final Jev review remains **partial** because an oversized hunk was omitted. Its route-compatibility signal was inspected: `/` intentionally serves the homepage, while `/workspace` and `/index.html` retain the application; route tests and real navigation passed. No Jev all-clear is claimed.
+- The final acceptance-record update is documentation-only; the tested code and asset hashes are unchanged. Historical unused concepts and captures remain local and are excluded from the PR.
+
+final result: passed
+
+---
+
+# Live market background — historical pre-review record, 28 October 2026
+
+This records the accepted live-market refinement before the later Muse review and integration above. The requested change is a continuously updating order book with coherent charts, retaining the selected option 1 layout and chart footprint.
 
 ## Visual comparison
 
