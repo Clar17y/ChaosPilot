@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChaosPilot — Find your breaking point</title>
+  <link rel="stylesheet" href="/homepage.css">
+</head>
+<body>
+  <canvas id="scene-market" class="market-canvas" aria-hidden="true"></canvas>
+  <header class="site-header">
+    <a class="wordmark" href="/">Chaos<span>Pilot</span></a>
+    <nav class="site-nav" aria-label="Homepage">
+      <a href="#how-it-works">How it works</a>
+      <a class="btn-workspace" href="/workspace">Open workspace <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="scene" id="scene">
+        <canvas id="scene-back" class="scene-canvas" aria-hidden="true"></canvas>
+        <canvas id="scene-front" class="scene-canvas" aria-hidden="true"></canvas>
+        <p class="visually-hidden">Animated illustration: cyan order packets stream continuously from left to right along distributed lanes across a market backdrop. Coral and amber injected messages join a blue lane locally at one of several small junctions spread along the lanes, and the changed packets continue rightward — forming a pair, holding and releasing, reordering, changing path or appearance, or slowing and fading locally depending on the current illustrative event. Switching events injects a new message into the ongoing stream without resetting it.</p>
+        <span class="tag tag-injected" aria-hidden="true">Injected message</span>
+        <span class="tag tag-incoming" id="incoming-label" aria-hidden="true">order.created</span>
+        <span class="tag tag-outgoing" id="outgoing-label" aria-hidden="true">awaiting outcome</span>
+      </div>
+
+      <div class="hero-copy">
+        <p class="eyebrow">SOURCE-AWARE CHAOS INVESTIGATION</p>
+        <h1 id="hero-heading">Every system has<br>a breaking point.</h1>
+        <p class="subtitle">Find yours before the real world does.</p>
+        <p class="hero-body">Inject the unexpected. Reorder the stream. Replay what breaks.</p>
+        <p class="cta-row"><a class="btn-primary" href="/workspace">Unleash Chaos <span aria-hidden="true">→</span></a></p>
+        <p class="helper">Explore your system workspace</p>
+      </div>
+
+      <div class="scene-bar">
+        <div class="event-caption">
+          <p class="event-counter" id="event-counter">Event 1 of 42</p>
+          <p class="event-title" id="event-title">Injection entering the stream</p>
+          <p class="event-explanation" id="event-explanation">Unexpected input joins the running system. Follow the messages to see how it responds.</p>
+        </div>
+        <div class="scene-bar-side">
+          <p class="illustrative">Illustrative simulation</p>
+          <div class="control-buttons">
+            <button type="button" id="btn-pause" class="btn-control">Pause</button>
+            <button type="button" id="btn-next" class="btn-control">Next event</button>
+          </div>
+        </div>
+      </div>
+      <p id="event-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+    </section>
+
+    <section class="steps" id="how-it-works" aria-label="How it works">
+      <article class="step"><p class="step-num">01</p><div><h2>Understand the rules</h2><p>Capture the real behaviour of your system in a reusable brief.</p></div></article>
+      <article class="step"><p class="step-num">02</p><div><h2>Challenge the sequence</h2><p>Inject, delay and reorder messages to explore edge cases.</p></div></article>
+      <article class="step"><p class="step-num">03</p><div><h2>Replay the evidence</h2><p>See what breaks, why it happened, and what to do next.</p></div></article>
+    </section>
+
+    <details class="catalog">
+      <summary>Browse all illustrative example events</summary>
+      <p>These illustrative scenarios show the breadth of checks. They are examples, not verified discoveries.</p>
+      <ul id="event-catalog"></ul>
+    </details>
+  </main>
+  <script type="module" src="/homepage.js"></script>
+</body>
+</html>

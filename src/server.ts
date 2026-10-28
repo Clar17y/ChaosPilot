@@ -243,46 +243,45 @@ export class ChaosPilotServer {
     res.end(payload);
   }
 
+  private async serveFile(res: http.ServerResponse, filePath: string, contentType: string): Promise<boolean> {
+    try {
+      const content = await fs.readFile(filePath);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': content.length,
+        'Cache-Control': 'no-cache',
+      });
+      res.end(content);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+    }
+    return true;
+  }
+
   private async serveStatic(
     _req: http.IncomingMessage,
     res: http.ServerResponse,
     pathname: string
   ): Promise<boolean> {
     // Explicit allowlist of static files only - strictly no path traversal
-    if (pathname === '/' || pathname === '/index.html') {
-      const htmlPath = path.join(this.publicDir, 'index.html');
-      try {
-        const content = await fs.readFile(htmlPath, 'utf8');
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Content-Length': Buffer.byteLength(content),
-          'Cache-Control': 'no-cache',
-        });
-        res.end(content);
-        return true;
-      } catch {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-        return true;
-      }
+    if (pathname === '/') {
+      return this.serveFile(res, path.join(this.publicDir, 'homepage.html'), 'text/html; charset=utf-8');
     }
-
+    if (pathname === '/homepage.css') {
+      return this.serveFile(res, path.join(this.publicDir, 'homepage.css'), 'text/css; charset=utf-8');
+    }
+    if (pathname === '/assets/homepage/market-fabric.png') {
+      return this.serveFile(res, path.join(this.publicDir, 'assets', 'homepage', 'market-fabric.png'), 'image/png');
+    }
+    if (pathname === '/assets/homepage/market-grid.png') {
+      return this.serveFile(res, path.join(this.publicDir, 'assets', 'homepage', 'market-grid.png'), 'image/png');
+    }
+    if (pathname === '/workspace' || pathname === '/index.html') {
+      return this.serveFile(res, path.join(this.publicDir, 'index.html'), 'text/html; charset=utf-8');
+    }
     if (pathname === '/styles.css') {
-      const cssPath = path.join(this.publicDir, 'styles.css');
-      try {
-        const content = await fs.readFile(cssPath, 'utf8');
-        res.writeHead(200, {
-          'Content-Type': 'text/css; charset=utf-8',
-          'Content-Length': Buffer.byteLength(content),
-          'Cache-Control': 'no-cache',
-        });
-        res.end(content);
-        return true;
-      } catch {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-        return true;
-      }
+      return this.serveFile(res, path.join(this.publicDir, 'styles.css'), 'text/css; charset=utf-8');
     }
 
     const jsMatch = pathname.match(/^\/([a-zA-Z0-9_-]+\.(?:js|js\.map))$/);
