@@ -29,6 +29,15 @@ describe('workspace launch guards', () => {
     expect(launchBlockedReason({ ...ready, hasSelectedSystem: false, selectedAdapterId: null })).toMatch(/SELECT/);
   });
 
+  it('blocks launch while per-adapter targets are loading, failed or unloaded', () => {
+    const withTargets = { ...ready, snapshotState: 'ready' as const, allowedVariants: ['clean', 'candidate-a'], selectedVariant: 'candidate-a' };
+    expect(launchBlockedReason({ ...withTargets, targetState: 'loading' })).toMatch(/LOADING TARGETS/);
+    expect(launchBlockedReason({ ...withTargets, targetState: 'error' })).toMatch(/TARGET LIST UNAVAILABLE/);
+    expect(launchBlockedReason({ ...withTargets, targetState: 'idle' })).toMatch(/TARGET LIST NOT LOADED/);
+    expect(launchBlockedReason({ ...withTargets, targetState: 'ready', allowedVariants: [], selectedVariant: null })).toMatch(/NO TARGET AVAILABLE/);
+    expect(launchBlockedReason({ ...withTargets, targetState: 'ready' })).toBeNull();
+  });
+
   it('exposes the six real workspace views', () => {
     expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings']);
   });

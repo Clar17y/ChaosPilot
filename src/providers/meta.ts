@@ -17,8 +17,7 @@ import {
   calculateWorstCaseCost
 } from './budget.ts';
 import {
-  PROMPT_VERSION,
-  PROMPT_TEMPLATE_HASH,
+  getPromptIdentity,
   buildInvestigationPrompt,
   computePromptHash
 } from '../investigation/prompt.ts';
@@ -178,8 +177,8 @@ export class MetaProvider implements ExperimentProvider {
     const requestHash = crypto.createHash('sha256').update(serializedPayload, 'utf-8').digest('hex');
 
     const requestAudit: ProviderRequestAudit = {
-      promptVersion: PROMPT_VERSION,
-      promptTemplateHash: PROMPT_TEMPLATE_HASH,
+      promptVersion: getPromptIdentity(context.systemBrief?.brief.adapterId).promptVersion,
+      promptTemplateHash: getPromptIdentity(context.systemBrief?.brief.adapterId).promptTemplateHash,
       promptHash,
       requestHash,
       systemMessage,

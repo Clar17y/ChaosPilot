@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runInvestigation, type SimulatorApi } from '../src/investigation/index.ts';
 import { MockProvider } from '../src/providers/mock.ts';
+import { computeContractHash } from '../src/evidence.ts';
 import type {
   Experiment,
   ExperimentProvider,
@@ -751,6 +752,7 @@ describe('Investigation Test Suite', () => {
       expect(record.contextAudit).toBeDefined();
       expect(record.contextAudit.sourcePaths).toEqual(['engine.ts']);
       expect(record.contextAudit.contractHash).toHaveLength(64);
+      expect(record.contextAudit.contractHash).toBe(computeContractHash(sim.getContract()));
       expect(record.contextAudit.promptVersion).toBe('3.0');
       expect(record.contextAudit.promptTemplateHash).toBeDefined();
     });

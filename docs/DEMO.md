@@ -10,6 +10,7 @@ Use evidence from an actual live Meta investigation. If only offline scripted ru
 | 1:15–1:50 | Show a generated hypothesis, concrete message plan and observed results. Explain any adaptation from an earlier experiment. Do not invent an adaptation if the first experiment found the bug. |
 | 1:50–2:20 | Inspect the deterministic invariant violation and order/credit evidence. Distinguish business occurrence from report delivery. |
 | 2:20–2:45 | Replay without another model call and inspect the clean-control result. The same experiment should reproduce the candidate failure without the same failure on clean. |
+| Optional second system | Switch to the seeded **Inventory reservation service** profile (`inventory-reservation` adapter, target `inventory-candidate-a`) and run the labelled offline mock sequence. Open the finding in the reproduction timeline: stock receipts and competing reservations show recorded SKU stock/on-hand/reserved values, and rerunning the selected experiment replays exactly that experiment with no model or clean-comparison call. Describe this as offline validation of the second synthetic system, not a live discovery. |
 | 2:45–3:00 | Give the actual evaluation outcome and limits: synthetic target, source-aware access, measured results and work remaining. |
 
 Model inference may take longer than the recording. Cuts and recorded runs are acceptable when labelled. Replaying a genuine run does not become a fresh discovery. A scripted mock never becomes a live model demonstration.

@@ -1,5 +1,5 @@
 import type { SystemBrief, SystemBriefSnapshot } from '../domain.ts';
-import { classifyDeferredStop, normalizeExpectedIdentity, validateSystemSnapshot, type DeferredStopOutcome, type ExpectedSystemIdentity, type InvestigationLifecycle, type RequestSequencer } from './workspace.ts';
+import { classifyDeferredStop, normalizeExpectedIdentity, validateSystemSnapshot, validateTargetVariantsResponse, type DeferredStopOutcome, type ExpectedSystemIdentity, type InvestigationLifecycle, type RequestSequencer } from './workspace.ts';
 
 export type { ExpectedSystemIdentity } from './workspace.ts';
 
@@ -162,6 +162,60 @@ export async function fetchSystemSnapshot(
   const v = validateSystemSnapshot(data, want);
   if (!v.ok) throw new Error(`Invalid snapshot response: ${v.reason}.`);
   return data as SystemBriefSnapshot;
+}
+
+/** Fetches the authoritative per-adapter target list; throws displayable errors for transport, HTTP and malformed payloads. */
+export async function fetchAdapterTargets(fetchFn: SystemsFetch, adapterId: string): Promise<string[]> {
+  let res: ApiResponseLike;
+  try {
+    res = await fetchFn(`/api/targets?adapterId=${encodeURIComponent(adapterId)}`);
+  } catch (err) {
+    throw new Error(`Could not reach the server to load targets for adapter "${adapterId}": ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!res.ok) throw new Error(await parseApiErrorResponse(res));
+  let data: unknown;
+  try { data = await res.json(); } catch { throw new Error(`Invalid target response (HTTP ${res.status}).`); }
+  const validated = validateTargetVariantsResponse(data);
+  if (!validated.ok) throw new Error(`Invalid target response: ${validated.reason}.`);
+  return validated.variants;
+}
+
+export type AdapterTargetsLoadOutcome = 'ready' | 'empty' | 'error' | 'stale';
+
+export interface AdapterTargetsLoadDeps {
+  fetchFn: SystemsFetch;
+  adapterId: string;
+  sequencer: RequestSequencer;
+  /** True only while the captured system identity is still the clean selected profile. */
+  isCurrentSelection: () => boolean;
+  onLoading?: () => void;
+  onReady?: (variants: string[]) => void;
+  onEmpty?: () => void;
+  onError?: (err: unknown) => void;
+}
+
+/**
+ * Production per-adapter target load path. A delayed or superseded success or
+ * error is stale and has no side effects. Empty is a distinct terminal outcome
+ * (valid list, no launchable target), never a fallback.
+ */
+export async function loadAdapterTargets(deps: AdapterTargetsLoadDeps): Promise<AdapterTargetsLoadOutcome> {
+  const token = deps.sequencer.next();
+  deps.onLoading?.();
+  try {
+    const variants = await fetchAdapterTargets(deps.fetchFn, deps.adapterId);
+    if (!deps.sequencer.isCurrent(token) || !deps.isCurrentSelection()) return 'stale';
+    if (!variants.length) {
+      if (deps.onEmpty) deps.onEmpty(); else deps.onReady?.(variants);
+      return 'empty';
+    }
+    deps.onReady?.(variants);
+    return 'ready';
+  } catch (err) {
+    if (!deps.sequencer.isCurrent(token) || !deps.isCurrentSelection()) return 'stale';
+    deps.onError?.(err);
+    return 'error';
+  }
 }
 
 export type SystemContractLoadOutcome = 'ready' | 'incompatible' | 'error' | 'stale';

@@ -1,7 +1,11 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { assertAdapterVariant } from './adapters/index.ts';
+import { SEEDED_INVENTORY_BRIEF } from './systems/index.ts';
+import { replayOutcome } from './web/presentation.ts';
 import {
   TARGET_VARIANTS,
+  ALL_TARGET_VARIANTS,
   type TargetVariant,
   type ProviderKind,
   type InvestigationOptions,
@@ -29,7 +33,7 @@ const SUPPORTED_PROVIDERS: ProviderKind[] = ['mock', 'meta'];
 interface ParsedArgs {
   command?: string;
   provider: ProviderKind;
-  target: TargetVariant;
+  target?: TargetVariant;
   targets?: TargetVariant[];
   models?: string[];
   phase?: 'calibration' | 'heldout';
@@ -39,6 +43,8 @@ interface ParsedArgs {
   seeds?: number[];
   id?: string;
   systemId?: string;
+  runsDir?: string;
+  systemsDir?: string;
   help?: boolean;
 }
 
@@ -100,7 +106,7 @@ function parseCliArgs(args: string[]): ParsedArgs {
   const result: ParsedArgs = {
     command: undefined,
     provider: 'mock',
-    target: 'candidate-a',
+    // No target default here: the default depends on the resolved system adapter (see handleInvestigate).
   };
 
   const positional: string[] = [];
@@ -118,8 +124,8 @@ function parseCliArgs(args: string[]): ParsedArgs {
     } else if (arg === '--target' || arg.startsWith('--target=') || arg === '--variant' || arg.startsWith('--variant=')) {
       const prefix = arg.startsWith('--target=') ? '--target=' : (arg.startsWith('--variant=') ? '--variant=' : null);
       const val = prefix ? arg.slice(prefix.length) : args[++i];
-      if (!val || !(TARGET_VARIANTS as readonly string[]).includes(val)) {
-        throw new Error(`Invalid target variant: "${val}". Supported variants: ${TARGET_VARIANTS.join(', ')}.`);
+      if (!val || !(ALL_TARGET_VARIANTS as readonly string[]).includes(val)) {
+        throw new Error(`Invalid target variant: "${val}". Supported variants: ${ALL_TARGET_VARIANTS.join(', ')}.`);
       }
       result.target = val as TargetVariant;
     } else if (arg === '--targets' || arg.startsWith('--targets=')) {
@@ -161,6 +167,11 @@ function parseCliArgs(args: string[]): ParsedArgs {
       const val = prefix ? arg.slice(prefix.length) : args[++i];
       if (!val) throw new Error(`Missing value for --system-id.`);
       result.systemId = val;
+    } else if (arg === '--runs-dir' || arg.startsWith('--runs-dir=') || arg === '--systems-dir' || arg.startsWith('--systems-dir=')) {
+      const isRuns = arg.startsWith('--runs-dir');
+      const val = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : args[++i];
+      if (!val || val.startsWith('--')) throw new Error(`Missing directory for ${arg}`);
+      if (isRuns) result.runsDir = val; else result.systemsDir = val;
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: "${arg}". Use --help to view supported options.`);
     } else {
@@ -186,6 +197,7 @@ Usage:
   node src/cli.ts <command> [options]
 
 Commands:
+  inventory-init    Save the default inventory profile (create only)
   investigate       Launch an investigation against a target variant
   evaluate          Compare baseline conventional generator vs provider
   benchmark         Run controlled 3-way benchmarking (Baseline vs Wonder vs Spark)
@@ -195,7 +207,7 @@ Commands:
 
 Options:
   --provider        Provider kind: 'mock' | 'meta' (default: mock)
-  --target          Target variant: ${TARGET_VARIANTS.join(' | ')} (default: candidate-a)
+  --target          Target variant: ${ALL_TARGET_VARIANTS.join(' | ')} (investigate default: candidate-a for trading, inventory-candidate-a for inventory; evaluate/benchmark default: candidate-a)
   --targets         Comma-separated targets for benchmark (e.g. clean,candidate-a,candidate-b)
   --models          Comma-separated models for benchmark (e.g. muse-wonder-1.0,muse-spark-1.3)
   --phase           Benchmark phase: 'calibration' | 'heldout' (default: calibration)
@@ -205,17 +217,22 @@ Options:
   --seeds           Comma-separated seeds (e.g. 1001,1002,1003)
   --id              Run artifact ID for replay command or benchmark ID
   --system-id       System brief ID to investigate (default: trading-gateway)
+  --runs-dir        Isolated run store (default: runs)
+  --systems-dir     System store (default: <runs-dir>/systems)
+  Inventory target: clean | inventory-candidate-a; evaluate/benchmark remain trading-only
   --help, -h        Show this help message
 `);
 }
 
+function defaultTargetForAdapter(adapterId: string): TargetVariant { return adapterId === 'inventory-reservation' ? 'inventory-candidate-a' : 'candidate-a'; }
+
 async function handleInvestigate(args: ParsedArgs): Promise<void> {
   const providerKind = args.provider;
-  const target = args.target;
   const maxExperiments = args.maxExperiments ?? 5;
 
   const systemId = args.systemId || 'trading-gateway';
-  const systemsDir = path.join('runs', 'systems');
+  const runsDir = args.runsDir ?? 'runs';
+  const systemsDir = args.systemsDir ?? path.join(runsDir, 'systems');
   const brief = await getSystemBrief(systemId, systemsDir);
   if (!brief) {
     console.error(`\n[Error] System brief "${systemId}" not found in ${systemsDir}.\n`);
@@ -224,6 +241,14 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
   if (brief.adapterId === 'unconfigured') {
     console.error(`\n[Error] Cannot launch investigation: System brief "${brief.name}" has unconfigured adapter.\n`);
     process.exit(1);
+  }
+  const target: TargetVariant = args.target ?? defaultTargetForAdapter(brief.adapterId);
+  try {
+    assertAdapterVariant(brief.adapterId, target);
+  } catch (err) {
+    console.error(`\n[Error] ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+    return;
   }
   const snapshot = await createSystemSnapshot(brief);
 
@@ -275,7 +300,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       latestRecord.stopReason = 'Interrupted by SIGINT';
       latestRecord.finishedAt = new Date().toISOString();
       try {
-        await saveRun(latestRecord);
+        await saveRun(latestRecord, runsDir);
         console.log(`Saved partial investigation artifact to runs/${latestRecord.id}.json`);
       } catch (err) {
         console.error('Failed to save partial run on SIGINT:', err);
@@ -299,7 +324,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       onUpdate: async (rec) => {
         latestRecord = rec;
         try {
-          await saveRun(rec);
+          await saveRun(rec, runsDir);
         } catch {
           // Ignore transient save errors during active streaming
         }
@@ -313,7 +338,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
   }
 
   console.log(`\n[3/3] Saving final investigation artifact...`);
-  const savedPath = await saveRun(record);
+  const savedPath = await saveRun(record, runsDir);
 
   console.log(`\n============================================================`);
   console.log(` Investigation Summary`);
@@ -361,8 +386,10 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
 }
 
 async function handleEvaluate(args: ParsedArgs): Promise<void> {
+  if (args.systemId && args.systemId !== 'trading-gateway') throw new Error('Comparative evaluation is trading-only');
   const providerKind = args.provider;
-  const target = args.target;
+  const target: TargetVariant = args.target ?? 'candidate-a';
+  assertAdapterVariant('synthetic-trading', target);
   const maxExperiments = args.maxExperiments ?? 5;
   const trials = args.trials ?? 3;
 
@@ -413,9 +440,10 @@ async function handleEvaluate(args: ParsedArgs): Promise<void> {
 }
 
 async function handleReplay(args: ParsedArgs): Promise<void> {
+  const runsDir = args.runsDir ?? 'runs';
   let rawTarget = args.id;
   if (!rawTarget) {
-    const runs = await listRuns();
+    const runs = await listRuns(runsDir);
     if (runs.length === 0) {
       console.log('No saved runs found in runs/ directory to replay.');
       return;
@@ -424,7 +452,7 @@ async function handleReplay(args: ParsedArgs): Promise<void> {
     console.log(`No run ID specified; defaulting to latest run: ${rawTarget}`);
   }
 
-  const runId = normalizeRunInput(rawTarget);
+  const runId = normalizeRunInput(rawTarget, runsDir);
   if (!runId || !validateRunId(runId)) {
     console.error(`[Error] Invalid run ID or path: "${rawTarget}"`);
     process.exit(1);
@@ -437,7 +465,7 @@ async function handleReplay(args: ParsedArgs): Promise<void> {
   console.log(`============================================================\n`);
 
   try {
-    const report = await replayRun(runId);
+    const report = await replayRun(runId, runsDir);
     console.log(`Replay Report:`);
     console.log(`  Variant:                    ${report.variant}`);
     console.log(`  Original Source Hash:       ${report.originalSourceHash}`);
@@ -445,7 +473,11 @@ async function handleReplay(args: ParsedArgs): Promise<void> {
     console.log(`  Source Identical:           ${report.sourceIdentical ? 'YES' : 'NO (Source diverged!)'}`);
     console.log(`  Exact Reproduction Claimed: ${report.exactReproductionClaimed ? 'YES' : 'NO'}`);
     console.log(`  Experiments Reproduced:     ${report.experimentsReproduced}/${report.experimentsTotal}`);
-    console.log(`  Replay Status:              ${report.reproduced ? 'REPRODUCED' : 'MISMATCH'}`);
+    const outcome = replayOutcome(report);
+    const status = outcome === 'reproduced' ? 'REPRODUCED'
+      : outcome === 'unconfirmed' ? 'EXPERIMENTS MATCHED; EXACT REPLAY UNCONFIRMED'
+      : outcome === 'empty' ? 'NO EXPERIMENTS REPLAYED' : 'MISMATCH';
+    console.log(`  Replay Status:              ${status}`);
     console.log(`  Note:                       ${report.note}`);
     console.log(`============================================================\n`);
 
@@ -459,6 +491,9 @@ async function handleReplay(args: ParsedArgs): Promise<void> {
 }
 
 async function handleBenchmark(args: ParsedArgs): Promise<void> {
+  if (args.systemId && args.systemId !== 'trading-gateway') throw new Error('Benchmark is trading-only');
+  if (args.target !== undefined) assertAdapterVariant('synthetic-trading', args.target);
+  if (args.targets !== undefined) for (const t of args.targets) assertAdapterVariant('synthetic-trading', t);
   const providerKind = args.provider;
   const phase = args.phase || 'calibration';
 
@@ -593,7 +628,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
 
+  try {
   switch (args.command.toLowerCase()) {
+    case 'inventory-init': {
+      const systemsDir = args.systemsDir ?? path.join(args.runsDir ?? 'runs', 'systems');
+      const saved = await getSystemBrief(SEEDED_INVENTORY_BRIEF.id, systemsDir);
+      if (!saved) throw new Error('Failed to seed inventory system');
+      console.log(`Saved inventory system ${saved.id} in ${systemsDir}`);
+      break;
+    }
     case 'investigate':
     case 'demo':
       await handleInvestigate(args);
@@ -614,6 +657,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       console.error(`Unknown command: ${args.command}`);
       printUsage();
       process.exitCode = 1;
+  }
+  } catch (err) {
+    console.error(`\n[CLI Error] ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
   }
 }
 

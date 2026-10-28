@@ -2,17 +2,19 @@ import type {
   InvestigationRecord,
   ExperimentRecord,
   Finding,
+  Violation,
   TargetVariant,
   ProviderKind,
   SystemBrief,
   SystemContract,
 } from '../domain.ts';
 import type { RunSummary, ReplayReport } from '../storage.ts';
-import { extractSnapshotDisplay } from './snapshot.ts';
-import { clampSelectedIndex, tabIndexForKey } from './presentation.ts';
+import { extractInventorySnapshotDisplay, extractSnapshotDisplay, stateKindForRecord, statePresentationFor } from './snapshot.ts';
+import { clampSelectedIndex, formatContractEntry, replayOutcome, tabIndexForKey } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
   buildReproductionModel,
+  buildRerunTrace,
   creditBarLayout,
   describeFreshReplay,
   explainStep,
@@ -20,6 +22,7 @@ import {
   isCreditAdmissionViolation,
   PlaybackController,
   resolveExperimentPosition,
+  type PlaybackStep,
   type ReproductionModel,
 } from './reproduction-player.ts';
 import {
@@ -37,19 +40,22 @@ import {
 
   adapterLabel,
   contractChecksVisible,
-  defaultTargetVariant,
-  isExecutableAdapter,
-  shouldClearInspectionOnSelection,
-  stopControlState,
-  targetVariantsForAdapter,
-  type SnapshotLoadState,
+    contractListsVisible,
+    isExecutableAdapter,
+    shouldClearInspectionOnSelection,
+    stopControlState,
+    TargetSelectionSession,
+    type SnapshotLoadState,
+    type TargetLoadState,
   type WorkspaceView,
 } from './workspace.ts';
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
+import { activeUnattributedViolations, detailVisibility, evidenceHeading, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
   fetchSystemBriefs,
+  loadAdapterTargets,
   loadSystemContract,
   parseApiErrorResponse,
   requestInvestigationStop,
@@ -65,6 +71,7 @@ interface ServerStatusResponse {
   currentRecord?: InvestigationRecord | null;
   metaKeyConfigured: boolean;
   targetVariants?: string[];
+  targetVariantsByAdapter?: Record<string, string[]>;
 }
 
 // State
@@ -100,7 +107,8 @@ const snapshotSequencer = new RequestSequencer();
 let snapshotState: SnapshotLoadState = 'none';
 let snapshotSystemId: string | null = null;
 let snapshotIdentity: { id: string; revision: number; adapterId: string } | null = null;
-let serverTargetVariants: string[] = [];
+const targetSequencer = new RequestSequencer();
+const targetSelection = new TargetSelectionSession();
 const lifecycle = new InvestigationLifecycle();
 let latestLiveRecord: InvestigationRecord | null = null;
 // Reproduction player state (recorded playback only; fresh replay is separate).
@@ -108,6 +116,14 @@ let latestLiveRecord: InvestigationRecord | null = null;
 const reproSession = new ReproductionSession();
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
 let reproModel: ReproductionModel | null = null;
+let reproShowFull = false;
+let reproUseRerun = false;
+let reproRerunSteps: PlaybackStep[] = [];
+let reproRerunUnattributed: Violation[] = [];
+type ExperimentReplayReport = ReplayReport & { scope?: string; experimentPosition?: number };
+function effectiveSteps(): PlaybackStep[] { if (!reproModel) return []; if (reproUseRerun) return reproRerunSteps; return reproShowFull ? reproModel.allSteps : reproModel.steps; }
+function clearFreshView(): void { reproUseRerun = false; reproRerunSteps = []; reproRerunUnattributed = []; }
+function onReproRunChanged(rec?: InvestigationRecord | null): void { reproPlayback.stop(); clearFreshView(); reproShowFull = false; selectedExperimentIndex = reproSession.applyDefaultFindingSelection(rec ?? currentInvestigationRecord); }
 
 // DOM Elements - Controls
 const targetSelect = document.getElementById('target-select') as HTMLSelectElement;
@@ -197,12 +213,9 @@ function announce(message: string): void {
 function showView(view: WorkspaceView, focusHeading = true): void {
   if (view !== 'investigations') {
     reproPlayback.stop();
-    if (reproSession.fresh.kind === 'pending') {
-      reproSession.invalidateFresh();
-      renderReproduction();
-    } else {
-      renderReproductionDetail();
-    }
+    reproSession.invalidateFresh();
+    clearFreshView();
+    renderReproduction();
   }
   // panel visibility + aria-current below reflect the current view
   document.querySelectorAll<HTMLElement>('[data-view-panel]').forEach(panel => {
@@ -219,9 +232,23 @@ function showView(view: WorkspaceView, focusHeading = true): void {
   if (view === 'overview' || view === 'prepare') renderWorkspaceSummaries();
 }
 
+function selectedTargetIdentity(): { id: string; revision: number; adapterId: string } | null {
+  return selectedSystem
+    ? { id: selectedSystem.id, revision: selectedSystem.revision, adapterId: selectedSystem.adapterId }
+    : null;
+}
+function effectiveTargetState(): TargetLoadState {
+  return targetSelection.effectiveStateFor(selectedTargetIdentity(), !isDraftMode && !hasUnsavedSystemEdits);
+}
 function scopedVariants(): string[] {
-  if (isDraftMode || !selectedSystem) return [];
-  return targetVariantsForAdapter(selectedSystem.adapterId, serverTargetVariants);
+  return targetSelection.scopedVariantsFor(selectedTargetIdentity(), !isDraftMode && !hasUnsavedSystemEdits);
+}
+function resetTargetChoices(state: TargetLoadState = 'idle'): void {
+  targetSequencer.invalidate();
+  // Capture the displayed choice before the select is emptied below; a later
+  // empty display must not overwrite it (TargetSelectionSession guards that).
+  targetSelection.reset(state, targetSelect?.value || null);
+  refreshTargetChoices();
 }
 function snapshotReadyForSelected(): boolean {
   return Boolean(selectedSystem) && snapshotState === 'ready' && snapshotSystemId === selectedSystem?.id
@@ -388,7 +415,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable — not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id} — not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -424,6 +451,9 @@ function updateStatusPill(status: string): void {
 
 function updateTargetChoices(variants: string[]): void {
   if (!targetSelect) return;
+  // Capture before clearing: after a reset/loading clear this is empty and
+  // must not erase the choice captured earlier (session ignores empties).
+  targetSelection.captureDisplayedSelection(targetSelect.value || null);
   const currentVal = targetSelect.value;
   const existingOptions = Array.from(targetSelect.options).map(o => o.value);
   const isSame = existingOptions.length === variants.length &&
@@ -440,6 +470,8 @@ function updateTargetChoices(variants: string[]): void {
     opt.value = v;
     if (v === 'clean') {
       opt.textContent = 'Clean control';
+    } else if (v === 'inventory-candidate-a') {
+      opt.textContent = 'Inventory Candidate A';
     } else if (v.startsWith('candidate-')) {
       const letter = v.slice('candidate-'.length).toUpperCase();
       opt.textContent = `Candidate ${letter}`;
@@ -449,12 +481,13 @@ function updateTargetChoices(variants: string[]): void {
     targetSelect.appendChild(opt);
   }
 
-  if (variants.includes(currentVal)) {
-    targetSelect.value = currentVal;
-  } else {
-    const d = defaultTargetVariant(variants);
-    if (d) targetSelect.value = d;
-  }
+  // The confirmed session selection (resolved against the newly fetched list
+  // for its adapter) wins; the just-cleared DOM value is not a fallback.
+  const resolved = targetSelection.selection && variants.includes(targetSelection.selection)
+    ? targetSelection.selection
+    : null;
+  if (resolved) targetSelect.value = resolved;
+  else if (currentVal && variants.includes(currentVal)) targetSelect.value = currentVal;
 }
 
 async function fetchStatus(): Promise<void> {
@@ -491,11 +524,9 @@ function applyStatusResponse(data: ServerStatusResponse): void {
     }
     updateActiveOtherSystemNotice();
 
-    // Store global variants only; choices stay scoped to the selected system.
-    if (data.targetVariants && Array.isArray(data.targetVariants)) {
-      serverTargetVariants = [...data.targetVariants];
-      refreshTargetChoices();
-    }
+    // Status target fields are discovery/compat data only. They must not
+    // replace the selected system's scoped choices from /api/targets, even
+    // while a target request is pending or a run is active for another system.
 
     // Update launch and stop controls
     if (data.active) {
@@ -544,7 +575,7 @@ function startPolling(): void {
   pollTimer = setInterval(fetchStatus, 800);
 }
 
-function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
+function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { onReproRunChanged(rec); } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
   dashRunId.textContent = `Run ID: ${rec.id}`;
 
   if (dashSystemBrief) {
@@ -810,6 +841,8 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     item.addEventListener('click', () => {
       reproPlayback.stop();
       reproSession.clearFinding();
+      reproSession.selectExperiment(i);
+      clearFreshView(); reproShowFull = false;
       selectedExperimentIndex = i;
       renderExperiments(experiments);
       renderSelectedExperimentTrace();
@@ -826,16 +859,50 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
   }
 }
 
+/** State tab domain follows the inspected run's pinned adapter, never the selected profile. Returns the active presentation. */
+function applyStatePresentation() {
+  const presentation = statePresentationFor(stateKindForRecord(currentInvestigationRecord));
+  const tabBtn = document.getElementById('tab-btn-state');
+  if (tabBtn) tabBtn.textContent = presentation.tabTitle;
+  const primary = document.getElementById('state-primary-title');
+  if (primary) primary.textContent = presentation.primaryTitle;
+  const secondary = document.getElementById('state-secondary-title');
+  if (secondary) secondary.textContent = presentation.secondaryTitle;
+  return presentation;
+}
+
+function appendStateRow(host: HTMLElement, key: string, text: string): void {
+  const row = document.createElement('div');
+  row.className = 'kv-row';
+  const keySpan = document.createElement('span');
+  keySpan.textContent = key;
+  const valSpan = document.createElement('span');
+  valSpan.textContent = text;
+  row.appendChild(keySpan);
+  row.appendChild(valSpan);
+  host.appendChild(row);
+}
+
+function appendStateEmpty(host: HTMLElement, text: string): void {
+  const empty = document.createElement('div');
+  empty.className = 'empty-state';
+  empty.textContent = text;
+  host.appendChild(empty);
+}
+
 function renderSelectedExperimentTrace(): void {
   traceContainer.textContent = '';
   creditStateTable.textContent = '';
   ordersStateTable.textContent = '';
+  const statePresentation = applyStatePresentation();
 
   if (!currentInvestigationRecord || !currentInvestigationRecord.experiments[selectedExperimentIndex]) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No experiment selected.';
     traceContainer.appendChild(empty);
+    appendStateEmpty(creditStateTable, statePresentation.primaryEmpty);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
     return;
   }
 
@@ -884,7 +951,28 @@ function renderSelectedExperimentTrace(): void {
     }
   }
 
-  // Render snapshot state using pure display model
+  // Render snapshot state using the pure display model for the inspected run's domain.
+  // All target-derived strings are assigned via textContent (never HTML).
+  if (statePresentation.kind === 'inventory') {
+    const inventoryModel = extractInventorySnapshotDisplay(expRec.result.snapshot);
+    if (!inventoryModel.hasStock) {
+      appendStateEmpty(creditStateTable, inventoryModel.stockAvailable ? statePresentation.primaryEmpty : 'Stock state unavailable in snapshot.');
+    } else {
+      for (const stock of inventoryModel.stock) appendStateRow(creditStateTable, stock.sku, stock.displayText);
+    }
+    if (!inventoryModel.hasReservations) {
+      appendStateEmpty(ordersStateTable, inventoryModel.reservationsAvailable ? statePresentation.secondaryEmpty : 'Reservation state unavailable in snapshot.');
+    } else {
+      for (const reservation of inventoryModel.reservations) appendStateRow(ordersStateTable, reservation.reservationId, reservation.displayText);
+    }
+    return;
+  }
+  if (statePresentation.kind === 'unknown') {
+    appendStateEmpty(creditStateTable, statePresentation.primaryEmpty);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
+    return;
+  }
+
   const displayModel = extractSnapshotDisplay(expRec.result.snapshot);
 
   const creditEntries: [string, string][] = [
@@ -895,64 +983,85 @@ function renderSelectedExperimentTrace(): void {
     ['availableCredit', displayModel.credit.availableCredit],
   ];
 
-  for (const [k, val] of creditEntries) {
-    const row = document.createElement('div');
-    row.className = 'kv-row';
-    const keySpan = document.createElement('span');
-    keySpan.textContent = k;
-    const valSpan = document.createElement('span');
-    valSpan.textContent = val;
-    row.appendChild(keySpan);
-    row.appendChild(valSpan);
-    creditStateTable.appendChild(row);
-  }
+  for (const [k, val] of creditEntries) appendStateRow(creditStateTable, k, val);
 
-  // Orders
   if (!displayModel.hasOrders) {
-    const emptyOrders = document.createElement('div');
-    emptyOrders.className = 'empty-state';
-    emptyOrders.textContent = 'No orders active in snapshot.';
-    ordersStateTable.appendChild(emptyOrders);
+    appendStateEmpty(ordersStateTable, statePresentation.secondaryEmpty);
   } else {
-    for (const ord of displayModel.orders) {
-      const row = document.createElement('div');
-      row.className = 'kv-row';
-      const keySpan = document.createElement('span');
-      keySpan.textContent = ord.orderId;
-      const valSpan = document.createElement('span');
-      valSpan.textContent = ord.displayText;
-      row.appendChild(keySpan);
-      row.appendChild(valSpan);
-      ordersStateTable.appendChild(row);
-    }
+    for (const ord of displayModel.orders) appendStateRow(ordersStateTable, ord.orderId, ord.displayText);
   }
 }
 
 function reproEl<T extends HTMLElement>(id: string): T | null { return document.getElementById(id) as T | null; }
+function clearReproductionDetail(): void { const facts = reproEl('repro-generic-facts'); if (facts) facts.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.add('hidden'); reproEl('repro-credit-wrap')?.classList.add('hidden'); const credit = reproEl('repro-credit'); if (credit) credit.textContent = NO_STEP_CREDIT_TEXT; reproEl('repro-exposure-bar')?.classList.add('hidden'); const legend = reproEl('repro-exposure-legend'); if (legend) legend.textContent = ''; const unattr = reproEl('repro-unattributed'); if (unattr) { unattr.classList.add('hidden'); unattr.textContent = ''; } }
 
 function resetReproductionSelection(): void {
   reproPlayback.stop();
   reproSession.clear();
+  clearFreshView(); reproShowFull = false;
   reproModel = null;
 }
 
 function renderReproduction(): void {
   const rec = currentInvestigationRecord;
-  if (rec && reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; }
+  if (rec && reproSession.syncToRun(rec.id)) { onReproRunChanged(rec); }
   if (reproSession.selectedFinding && rec && (resolveExperimentPosition(rec, reproSession.selectedFinding) !== selectedExperimentIndex || !rec.findings.some(f => f.id === reproSession.selectedFinding!.id))) reproSession.clearFinding();
   reproModel = rec ? buildReproductionModel(rec, selectedExperimentIndex, reproSession.selectedFinding) : null;
   const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
   const reproEyebrow = reproEl('repro-eyebrow');
-  if (reproEyebrow) reproEyebrow.textContent = waitingForSave ? 'Investigation in progress or saving · recorded playback only' : 'Recorded evidence · recorded playback only';
+  if (reproEyebrow) reproEyebrow.textContent = reproUseRerun ? 'Fresh rerun evidence · playback of the completed rerun' : waitingForSave ? 'Investigation in progress or saving · recorded playback only' : 'Recorded evidence · recorded playback only';
   const reproDescription = reproEl('repro-description');
-  if (reproDescription) reproDescription.textContent = waitingForSave ? 'Step through the trace recorded so far. This investigation may not have been saved yet. Playing recorded steps does not execute the target or contact a model.' : 'Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.';
+  if (reproDescription) reproDescription.textContent = reproUseRerun ? 'Step through the trace recorded by the just-completed rerun of this experiment. Playing these rerun steps does not execute the target or contact a model. The original recording is still available.' : waitingForSave ? 'Step through the trace recorded so far. This investigation may not have been saved yet. Playing recorded steps does not execute the target or contact a model.' : 'Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.';
   const freshEl = reproEl('repro-fresh-status');
   if (freshEl) freshEl.textContent = waitingForSave
     ? 'Wait for this investigation to finish and be saved before rerunning it.'
     : describeFreshReplay(reproSession.fresh);
   const rerunBtn = reproEl<HTMLButtonElement>('btn-repro-rerun');
   if (rerunBtn) rerunBtn.disabled = !rec || waitingForSave || reproSession.fresh.kind === 'pending';
-  const prov = reproEl('repro-provenance');
+  // Evidence summary (pinned rule only; never fabricated)
+  const evHeading = reproEl('repro-evidence-heading');
+  if (evHeading) evHeading.textContent = evidenceHeading(reproUseRerun);
+  const evBody = reproEl('repro-evidence-body');
+  if (evBody) {
+    evBody.textContent = '';
+    if (reproModel) {
+      const ev = reproModel.evidence;
+      // Prominent: the rule, the observed failure and replay status.
+      const prominent: [string,string][] = [
+        ['Recorded invariant', ev.invariant ?? 'not recorded'],
+        ['Violation (recorded)', ev.violationMessage ?? 'No violation recorded for this experiment'],
+        [ev.ruleLabel, ev.ruleText ?? ''],
+        ['Original reproduction (historical)', reproModel.replayLabel],
+      ];
+      // Verbose provenance stays available in expandable detail so the
+      // timeline and controls remain easy to reach.
+      const detailLines: [string,string][] = [
+        ['Expected invariant (experiment)', ev.expectedInvariant ?? 'not recorded'],
+        ['Hypothesis', ev.hypothesis],
+        ['Clean comparison (historical, not a fresh rerun)', reproModel.cleanLabel],
+        ['Run / experiment identity', `Run ${ev.runId} · experiment position ${ev.experimentPosition+1}${ev.experimentIndex!==null?` · recorded experiment #${ev.experimentIndex}`:' · recorded index not recorded'} · source hash ${ev.sourceHash ?? 'not recorded'}`],
+        ['Trace', `${reproModel.traceCount} recorded trace entr${reproModel.traceCount===1?'y':'ies'}`],
+      ];
+      const appendLine = (host: HTMLElement, k: string, v: string) => { const row=document.createElement('p'); const b=document.createElement('strong'); b.textContent=v ? k+': ' : k; row.append(b, document.createTextNode(v)); host.appendChild(row); };
+      for (const [k,v] of prominent) appendLine(evBody, k, v);
+      const details = document.createElement('details');
+      details.className = 'repro-evidence-details';
+      const summary = document.createElement('summary');
+      summary.textContent = 'More evidence and provenance (hypothesis, clean comparison, identity and hashes)';
+      details.appendChild(summary);
+      for (const [k,v] of detailLines) appendLine(details, k, v);
+      if (ev.violations.length>1) { const extra=document.createElement('p'); extra.textContent=`All recorded violations: ${ev.violations.map(v=>`${v.invariant} at action #${v.step}: ${v.message}`).join(' · ')}`; details.appendChild(extra); }
+      evBody.appendChild(details);
+    }
+  }
+  const toggleBtn = reproEl<HTMLButtonElement>('btn-repro-toggle-trace');
+  if (toggleBtn) { const concise = reproModel && reproModel.sequence!=='trace'; toggleBtn.disabled = !reproModel || !concise || reproUseRerun; toggleBtn.setAttribute('aria-expanded', String(reproShowFull)); toggleBtn.textContent = reproShowFull ? 'Show concise view' : 'Show complete original trace'; }
+  const modeEl = reproEl('repro-trace-mode');
+  if (modeEl) modeEl.textContent = !reproModel ? '' : reproUseRerun ? 'Showing fresh rerun trace (labelled rerun) — original recording still available' : reproShowFull ? `Showing complete original trace (${reproModel.traceCount} entries)` : reproModel.sequence==='key-events' ? 'Showing concise key events — complete original trace available' : reproModel.sequence==='grouped' ? 'Showing concise grouped view — complete original trace available' : `Showing complete recorded trace (${reproModel.traceCount} entries)`;
+  const rerunControls = reproEl('repro-rerun-controls');
+  if (rerunControls) rerunControls.classList.toggle('hidden', !(reproSession.freshReport && reproRerunSteps.length>=0 && reproSession.fresh.kind!=='pending' && reproSession.fresh.kind!=='idle'));
+  const prov = reproEl('repro-provenance-items') ?? reproEl('repro-provenance');
+  reproEl('repro-provenance')?.classList.toggle('hidden', !reproModel);
   const empty = reproEl('repro-empty');
   const body = reproEl('repro-body');
   const invalid = reproEl('repro-invalid');
@@ -964,7 +1073,7 @@ function renderReproduction(): void {
   }
   if (prov) {
     prov.textContent = '';
-    for (const text of [reproModel.modelLabel, `Run ID: ${reproModel.runId}`, reproModel.systemLabel, reproModel.briefLabel, reproModel.targetLabel, reproModel.sequence === 'key-events' ? 'Trace: key recorded events; full trace in Action trace & timeline' : 'Trace: complete recorded trace', reproModel.replayLabel, reproModel.cleanLabel, reproModel.experimentLabel]) {
+    for (const text of [reproModel.modelLabel, `Run ID: ${reproModel.runId}`, reproModel.systemLabel, reproModel.briefLabel, reproModel.targetLabel, reproUseRerun ? 'Trace: fresh rerun trace (not the original recording)' : reproShowFull ? 'Trace: complete original trace' : reproModel.sequence === 'key-events' ? 'Trace: key recorded events; full trace available via Show complete original trace' : reproModel.sequence === 'grouped' ? 'Trace: concise grouped view; full trace available via Show complete original trace' : 'Trace: complete recorded trace', reproModel.replayLabel, reproModel.cleanLabel, reproModel.experimentLabel]) {
       const s = document.createElement('span'); s.textContent = text; prov.appendChild(s);
     }
   }
@@ -972,23 +1081,25 @@ function renderReproduction(): void {
     invalid.classList.toggle('hidden', reproModel.invalidLabel === null);
     invalid.textContent = reproModel.invalidLabel ?? '';
   }
-  const key = `${reproModel.runId}|${selectedExperimentIndex}|${reproSession.selectedFinding?.id ?? ''}|${reproModel.sequence}|${reproModel.steps.length}`;
+  const effSteps = effectiveSteps();
+  const key = timelineRenderKey({ runId: reproModel.runId, experimentIndex: selectedExperimentIndex, findingId: reproSession.selectedFinding?.id ?? '', sequence: reproModel.sequence, showFull: reproShowFull, useRerun: reproUseRerun, freshKind: reproSession.fresh.kind, steps: effSteps });
   if (key !== reproSession.renderedKey) {
-    reproSession.renderedKey = key;
-    reproPlayback.setCount(reproModel.steps.length);
+    const prevKey = reproSession.renderedKey; reproSession.renderedKey = key; const sameSelection = prevKey !== '' && prevKey.split('|').slice(0, 4).join('|') === key.split('|').slice(0, 4).join('|');
+    if (sameSelection) reproPlayback.refreshCount(effSteps.length); else reproPlayback.setCount(effSteps.length);
     const timeline = reproEl<HTMLOListElement>('repro-timeline');
     if (timeline) {
+      timeline.setAttribute('aria-label', reproUseRerun ? 'Fresh rerun steps (playback of the completed rerun)' : 'Recorded steps');
       timeline.textContent = '';
-      reproModel.steps.forEach((step) => {
+      effSteps.forEach((step) => {
         const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.dataset.reproPosition = String(step.position);
         if (step.isViolation) btn.classList.add('is-violation');
-        btn.setAttribute('aria-label', `Show ${reproModel!.sequence === 'key-events' ? 'key event' : 'recorded step'} ${step.position + 1} of ${reproModel!.steps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
+        btn.setAttribute('aria-label', `Show ${reproUseRerun ? 'fresh rerun step' : reproModel!.sequence === 'key-events' && !reproShowFull ? 'key event' : 'recorded step'} ${step.position + 1} of ${effSteps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
         const t = document.createElement('span'); t.className = 'repro-tl-title'; t.textContent = `${step.position + 1}. ${step.title}`;
         const sub = document.createElement('span'); sub.className = 'repro-tl-sub';
-        sub.textContent = step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
+        sub.textContent = step.isGroup ? `Grouped: ${step.groupCount} entries — expand full trace to inspect` : step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
         btn.append(t, sub);
         btn.addEventListener('click', () => { reproPlayback.select(step.position); });
         li.appendChild(btn);
@@ -997,18 +1108,21 @@ function renderReproduction(): void {
     }
   }
   if (empty) {
-    empty.classList.toggle('hidden', reproModel.hasTrace);
-    if (!reproModel.hasTrace) empty.textContent = 'No trace entries were recorded for this experiment. No playback state can be shown.';
+    const hasEff = effSteps.length>0;
+    empty.classList.toggle('hidden', hasEff);
+    if (!hasEff) empty.textContent = reproUseRerun ? `The fresh rerun returned no trace entries. The original recording is still available.${reproRerunUnattributed.length ? ` ${unattributedText(reproRerunUnattributed, true)}` : ''}` : 'No trace entries were recorded for this experiment. No playback state can be shown.';
   }
-  body?.classList.toggle('hidden', !reproModel.hasTrace);
+  body?.classList.toggle('hidden', !(effSteps.length>0));
   renderReproductionDetail();
 }
 
 function renderReproductionDetail(): void {
   const model = reproModel;
-  if (!model || !model.hasTrace) return;
+  if (!model) { clearReproductionDetail(); return; }
+  const eff = effectiveSteps();
+  if (eff.length===0) { clearReproductionDetail(); }
   const pos = reproPlayback.position;
-  const step = pos >= 0 ? model.steps[pos] : undefined;
+  const step = pos >= 0 ? eff[pos] : undefined;
   const set = (id: string, text: string) => { const el = reproEl(id); if (el) el.textContent = text; };
   let selectedButton: HTMLButtonElement | null = null;
   document.querySelectorAll<HTMLButtonElement>('[data-repro-position]').forEach(btn => {
@@ -1032,17 +1146,18 @@ function renderReproductionDetail(): void {
   const prevBtn = reproEl<HTMLButtonElement>('btn-repro-prev');
   if (prevBtn) prevBtn.disabled = pos < 0;
   const nextBtn = reproEl<HTMLButtonElement>('btn-repro-next');
-  if (nextBtn) nextBtn.disabled = pos >= model.steps.length - 1 && !reproPlayback.playing;
+  if (nextBtn) nextBtn.disabled = pos >= eff.length - 1 && !reproPlayback.playing;
   const unattributed = reproEl('repro-unattributed');
   if (unattributed) {
-    unattributed.classList.toggle('hidden', model.unattributedViolations.length === 0);
-    unattributed.textContent = model.unattributedViolations.length
-      ? `Some recorded violations could not be pinned to one processed trace entry. ${model.unattributedViolations.map(v => `Action #${v.step} (${v.invariant}): ${v.message}`).join(' · ')}`
+    const activeUnattributed = activeUnattributedViolations(reproUseRerun, model.unattributedViolations, reproRerunUnattributed);
+    unattributed.classList.toggle('hidden', activeUnattributed.length === 0);
+    unattributed.textContent = activeUnattributed.length
+      ? unattributedText(activeUnattributed, reproUseRerun)
       : '';
   }
   if (!step) {
     const keyEvents = model.sequence === 'key-events';
-    set('repro-step-count', `No ${keyEvents ? 'key event' : 'recorded step'} shown yet · ${model.steps.length} ${keyEvents ? 'key events' : 'recorded steps'}`);
+    set('repro-step-count', `No ${keyEvents ? 'key event' : 'recorded step'} shown yet · ${eff.length} ${keyEvents ? 'key events' : 'recorded steps'}${reproUseRerun ? ' (fresh rerun trace)' : ''}`);
     set('repro-step-title', keyEvents ? 'Before the first key event' : 'Before the first recorded step');
     set('repro-step-kind', 'No recorded state is selected yet.');
     set('repro-step-detail', keyEvents
@@ -1051,15 +1166,15 @@ function renderReproductionDetail(): void {
     set('repro-observed-text', 'Nothing has been played yet. No outcome is claimed.');
     reproEl('repro-expected')?.classList.add('hidden');
     reproEl('repro-observed')?.classList.remove('is-violation');
-    set('repro-credit', '');
-    const creditHost = reproEl('repro-credit'); if (creditHost) creditHost.textContent = 'not recorded — no step selected';
+    const noStepVis = detailVisibility(false, model.evidence.creditRelevant); const factsEl0 = reproEl('repro-generic-facts'); if (factsEl0) factsEl0.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !noStepVis.factsVisible); reproEl('repro-credit-wrap')?.classList.toggle('hidden', !noStepVis.creditVisible); set('repro-credit', '');
+    const creditHost = reproEl('repro-credit'); if (creditHost) creditHost.textContent = NO_STEP_CREDIT_TEXT;
     reproEl('repro-exposure-bar')?.classList.add('hidden');
     set('repro-exposure-legend', '');
     set('repro-action', 'not recorded'); set('repro-outcome', 'not recorded'); set('repro-payload', 'not recorded'); set('repro-state', 'not recorded');
     return;
   }
   const explanation = explainStep(step, step.violations);
-  set('repro-step-count', `${model.sequence === 'key-events' ? 'Key event' : 'Step'} ${step.position + 1} of ${model.steps.length} · trace entry ${step.tracePosition + 1} · recorded action #${step.actionIndex} · T=${step.time}`);
+  set('repro-step-count', step.isGroup ? `Grouped summary ${step.position + 1} of ${eff.length} · trace entries ${(step.groupTracePositions ?? []).map(p => p + 1).join(', ')} · not a single recorded entry` : `${reproUseRerun ? 'Fresh rerun step' : model.sequence === 'key-events' && !reproShowFull ? 'Key event' : 'Step'} ${step.position + 1} of ${eff.length} · trace entry ${step.tracePosition + 1} · recorded action #${step.actionIndex} · T=${step.time}`);
   set('repro-step-title', step.title);
   set('repro-step-kind', step.kindLabel);
   set('repro-step-detail', step.detail);
@@ -1073,8 +1188,13 @@ function renderReproductionDetail(): void {
   const observedBox = reproEl('repro-observed');
   observedBox?.classList.toggle('is-violation', explanation.observedIsViolation);
   set('repro-observed-text', explanation.observed);
+  const factsEl = reproEl('repro-generic-facts');
+  if (factsEl) { factsEl.textContent=''; const facts = step.isGroup ? step.facts : step.facts; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
+  const creditWrap = reproEl('repro-credit-wrap');
+  if (creditWrap) creditWrap.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).creditVisible || !!step.isGroup);
+  reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).factsVisible);
   const creditHost = reproEl('repro-credit');
-  if (creditHost) {
+  if (creditHost && model.evidence.creditRelevant) {
     creditHost.textContent = '';
     const c = step.credit;
     const creditAdmissionViolated = step.violations.some(isCreditAdmissionViolation);
@@ -1122,8 +1242,9 @@ function openReproductionForFinding(finding: Finding, focusPlayer = true): void 
   const position = resolveExperimentPosition(rec, finding);
   if (position < 0) { showAlert('The experiment for this finding is not present in the opened run, so its recorded reproduction cannot be shown.'); return; }
   reproPlayback.stop();
+  clearFreshView(); reproShowFull=false;
   selectedExperimentIndex = position;
-  reproSession.selectFinding(finding);
+  reproSession.selectFinding(finding, position);
   renderExperiments(rec.experiments);
   renderSelectedExperimentTrace();
   renderReproduction();
@@ -1138,20 +1259,25 @@ async function rerunSavedInvestigation(): Promise<void> {
   const rec = currentInvestigationRecord;
   if (!rec || replayWaitsForSave(rec, isInvestigationActive, activeRecordId) || reproSession.fresh.kind === 'pending') return;
   const runId = rec.id;
-  const seq = reproSession.beginFresh(runId);
+  const position = selectedExperimentIndex;
+  const findingId = reproSession.selectedFinding?.id ?? null;
+  const seq = reproSession.beginFresh(runId, position, findingId);
+  clearFreshView();
   renderReproduction();
   const btn = reproEl<HTMLButtonElement>('btn-repro-rerun');
   const trigger = btn ?? undefined;
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/replay`, { method: 'POST' });
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/experiments/${encodeURIComponent(String(position))}/replay`, { method: 'POST' });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || `HTTP ${res.status}`); }
-    const report = (await res.json()) as ReplayReport;
-    if (!reproSession.settleFresh(seq, runId, report.reproduced ? { kind: 'success' } : { kind: 'mismatch' })) return;
+    const report = (await res.json()) as ExperimentReplayReport;
+    if (!reproSession.settleFreshReport(seq, runId, report, position, findingId)) return;
+    const rerunTrace = buildRerunTrace(report); reproRerunSteps = rerunTrace.steps; reproRerunUnattributed = rerunTrace.unattributedViolations;
+    reproUseRerun = false;
     renderReproduction();
     lastFocusedElement = trigger ?? null;
     showReplayReport(report);
   } catch (e) {
-    if (!reproSession.settleFresh(seq, runId, { kind: 'error', message: e instanceof Error ? e.message : String(e) })) return;
+    if (!reproSession.settleFreshError(seq, runId, e instanceof Error ? e.message : String(e), position, findingId)) return;
     renderReproduction();
   }
 }
@@ -1257,8 +1383,16 @@ function showReplayReport(report: ReplayReport): void {
   addLine('Current Source Hash:', report.currentSourceHash);
   addLine('Source Identical Match:', report.sourceIdentical ? 'YES' : 'NO (Source changed)');
   addLine('Exact Reproduction Claimed:', report.exactReproductionClaimed ? 'CONFIRMED' : 'CANNOT BE CLAIMED', !report.exactReproductionClaimed);
-  addLine('Experiments Matched:', `${report.experimentsReproduced} / ${report.experimentsTotal}`);
-  addLine('Deterministic Replay Result:', report.reproduced ? 'ALL EXPERIMENTS REPRODUCED' : 'MISMATCH DETECTED');
+  const scoped = (report as ExperimentReplayReport).scope === 'experiment';
+  const behaviour = scoped ? replayBehaviourStatus(report.outcomes[0]) : 'unavailable';
+  const behaviourMatchedCount = report.outcomes.filter(o => replayBehaviourStatus(o) === 'matched').length;
+  const allBehaviourMatched = report.outcomes.length > 0 && behaviourMatchedCount === report.outcomes.length;
+  addLine(scoped ? 'Scope:' : 'Experiments Matched:', scoped ? `Selected experiment (position ${(report as ExperimentReplayReport).experimentPosition ?? '?'} ) only — no clean comparison or model call` : `${report.experimentsReproduced} / ${report.experimentsTotal}`);
+  if (scoped) addLine('Selected experiment behaviour (trace, snapshot, violations, rejections, validity):', behaviour.toUpperCase());
+  else if (report.outcomes.length) addLine('Behaviour matched (trace, snapshot, violations, rejections, validity — regardless of source/context):', `${behaviourMatchedCount} / ${report.outcomes.length}`);
+  if (report.contextStatus) addLine('Replay Context:', report.contextStatus === 'verified' ? 'VERIFIED' : report.contextStatus === 'drifted' ? 'DRIFTED — exact reproduction cannot be claimed' : report.contextStatus === 'legacy-unknown' ? 'LEGACY — pinned context was not recorded' : 'UNVERIFIED — exact reproduction cannot be claimed', report.contextStatus !== 'verified');
+  const outcome = replayOutcome(report);
+  addLine('Deterministic Replay Result:', !report.sourceIdentical ? ((scoped ? behaviour === 'matched' : allBehaviourMatched) ? 'BEHAVIOUR MATCHED — SOURCE CHANGED, exact reproduction cannot be claimed' : (scoped ? behaviour === 'different' : report.outcomes.some(o => replayBehaviourStatus(o) === 'different')) ? 'BEHAVIOUR MISMATCH AND SOURCE CHANGED — exact reproduction cannot be claimed' : 'SOURCE CHANGED — exact reproduction cannot be claimed') : outcome === 'reproduced' ? (scoped ? 'SELECTED EXPERIMENT REPRODUCED EXACTLY (verified: identical source and semantic match)' : 'ALL EXPERIMENTS REPRODUCED') : outcome === 'unconfirmed' ? 'EXPERIMENTS MATCHED; EXACT REPLAY UNCONFIRMED' : outcome === 'empty' ? 'NO EXPERIMENTS REPLAYED' : 'MISMATCH DETECTED');
   addLine('Replay Engine:', 'Local Deterministic Simulator (No model invocation)');
 
   const noteEl = document.createElement('div');
@@ -1284,10 +1418,11 @@ function updateAdapterBadge(adapterId: string): void {
   systemAdapterBadge.textContent = adapterId;
   systemAdapterBadge.className = isExecutableAdapter(adapterId) ? 'system-badge badge-adapter-exec' : 'system-badge badge-adapter-unconfigured';
   const visible = contractChecksVisible({ effectiveAdapterId: adapterId, snapshotState: effectiveSnapshotState(), isDraftMode, hasUnsavedSystemEdits });
+  const listsVisible = visible && contractListsVisible(adapterId);
   document.getElementById('invariants-list')?.classList.toggle('hidden', !visible);
   document.getElementById('raw-contract-view')?.closest('details')?.classList.toggle('hidden', !visible);
-  document.getElementById('contract-lists')?.classList.toggle('hidden', !visible);
-  document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', visible);
+  document.getElementById('contract-lists')?.classList.toggle('hidden', !listsVisible);
+  document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', listsVisible);
   const heading = document.getElementById('contract-availability-title');
   const description = document.getElementById('contract-availability-description');
   const note = document.getElementById('capabilities-scope-note');
@@ -1296,7 +1431,7 @@ function updateAdapterBadge(adapterId: string): void {
     if (description) description.textContent = snapshotState === 'error' ? 'The system contract could not be loaded. Checks are unavailable until it loads successfully.' : 'Loading the selected system contract… Checks are unavailable until it is confirmed.';
     if (note) note.textContent = 'The selected system contract is not confirmed yet, so no operations, messages or checks are shown.';
   } else if (isExecutableAdapter(adapterId)) {
-    if (heading) heading.textContent = 'Synthetic Trading Rules & Available Checks';
+    if (heading) heading.textContent = adapterId === 'inventory-reservation' ? 'Synthetic Inventory Reservation Rules & Available Checks' : 'Synthetic Trading Rules & Available Checks';
     if (description) description.textContent = 'These checks are available to the deterministic verifier for the selected system. Their presence is not evidence that an investigation exercised them. Supplementary prose does not alter these checks.';
   } else {
     if (heading) heading.textContent = 'No Executable Contract Configured';
@@ -1315,6 +1450,7 @@ function updateRunReadiness(): void {
     launchReadiness.classList.toggle('hidden', reason === null);
   }
   syncStopControls();
+  if (targetSelect) targetSelect.disabled = effectiveTargetState() !== 'ready' || scopedVariants().length === 0;
   if (systemSelect) systemSelect.disabled = isLaunchRequestPending || isSystemSavePending;
   if (btnNewSystem) btnNewSystem.disabled = isLaunchRequestPending || isSystemSavePending;
   renderWorkspaceSummaries();
@@ -1335,6 +1471,7 @@ function launchBlockedReason(): string | null {
     snapshotState: effectiveSnapshotState(),
     selectedVariant: targetSelect?.value || null,
     allowedVariants: scopedVariants(),
+    targetState: effectiveTargetState(),
   });
 }
 
@@ -1353,7 +1490,7 @@ function markUnsavedEdits(): void {
   setSaveStatus('draft', isDraftMode ? 'New Profile (Draft)' : 'Unsaved Edits (Draft)');
   clearContractDisplay();
   updateAdapterBadge(systemAdapterSelect.value);
-  refreshTargetChoices();
+  resetTargetChoices();
   updateRunReadiness();
 }
 function clearContractDisplay(): void {
@@ -1389,11 +1526,11 @@ function selectSystem(system: SystemBrief): void { recordSequencer.invalidate();
   snapshotIdentity = null;
   snapshotState = isExecutableAdapter(system.adapterId) ? 'loading' : 'none';
   clearContractDisplay();
-  refreshTargetChoices();
+  resetTargetChoices(isExecutableAdapter(system.adapterId) ? 'loading' : 'idle');
   updateAdapterBadge(system.adapterId);
   setSaveStatus('saved', 'Saved');
   updateRunReadiness();
-  if (isExecutableAdapter(system.adapterId)) void fetchSystemContract(system.id);
+  if (isExecutableAdapter(system.adapterId)) { void fetchSystemContract(system.id); void fetchAdapterTargetsForSelected(system); }
   if (systemFeedback) systemFeedback.textContent = ''; updateInspectionNotice(); syncStopControls(); renderFindingsView();
 }
 
@@ -1442,6 +1579,37 @@ async function loadSystems(): Promise<void> {
     showAlert(loadedSystems.length ? `${message} The previously loaded profiles and any unsaved edits have been kept.` : `${message} No system profiles could be loaded.`);
     if (systemFeedback) { systemFeedback.textContent = message; systemFeedback.className = 'action-feedback error'; }
   }
+}
+
+async function fetchAdapterTargetsForSelected(system: SystemBrief): Promise<void> {
+  const expected = { id: system.id, revision: system.revision, adapterId: system.adapterId };
+  await loadAdapterTargets({
+    fetchFn: (url) => fetch(url),
+    adapterId: system.adapterId,
+    sequencer: targetSequencer,
+    isCurrentSelection: () => Boolean(
+      selectedSystem && selectedSystem.id === expected.id
+      && selectedSystem.revision === expected.revision
+      && selectedSystem.adapterId === expected.adapterId
+      && !isDraftMode && !hasUnsavedSystemEdits,
+    ),
+    onLoading: () => {
+      targetSelection.beginLoad(expected, targetSelect?.value || null);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onReady: (variants) => {
+      targetSelection.applyReady(expected, variants);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onEmpty: () => {
+      targetSelection.applyEmpty(expected);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+    onError: () => {
+      targetSelection.applyError(expected);
+      refreshTargetChoices(); updateRunReadiness();
+    },
+  });
 }
 
 async function fetchSystemContract(systemId: string): Promise<void> {
@@ -1505,8 +1673,8 @@ function renderKeyedList(id: string, items: Record<string, unknown>[] | undefine
 
 function renderContract(contract: SystemContract): void {
   contractCheckCount = Array.isArray(contract.invariants) ? contract.invariants.length : 0;
-  renderKeyedList('operations-list', contract.operations, item => `${String(item.op ?? 'operation')}: ${String(item.description ?? '')}`);
-  renderKeyedList('messages-list', contract.messages, item => `${String(item.channel ?? '')}/${String(item.type ?? '')}: ${String(item.description ?? '')}`); updateAdapterBadge(effectiveAdapter() ?? 'unconfigured');
+  renderKeyedList('operations-list', contract.operations, item => formatContractEntry(item));
+  renderKeyedList('messages-list', contract.messages, item => formatContractEntry(item)); updateAdapterBadge(effectiveAdapter() ?? 'unconfigured');
   renderWorkspaceSummaries();
   if (rawContractView) {
     rawContractView.textContent = JSON.stringify(contract, null, 2);
@@ -1623,6 +1791,13 @@ providerSelect.addEventListener('change', () => {
   fetchStatus();
 });
 
+if (targetSelect) {
+  targetSelect.addEventListener('change', () => {
+    // Explicit choice wins over any earlier captured preference for the next refresh.
+    targetSelection.select(targetSelect.value || null);
+  });
+}
+
 // System Profile selection & editing events
 if (systemSelect) {
   systemSelect.addEventListener('change', () => {
@@ -1646,7 +1821,7 @@ if (btnNewSystem) {
     }
     isDraftMode = true;
     hasUnsavedSystemEdits = true;
-    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; clearContractDisplay(); refreshTargetChoices();
+    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; clearContractDisplay(); resetTargetChoices();
     const newId = `profile-${Date.now().toString(36)}`;
     systemIdInput.value = newId;
     systemIdInput.readOnly = false;
@@ -1803,9 +1978,13 @@ reproEl<HTMLButtonElement>('btn-repro-play')?.addEventListener('click', () => {
   renderReproductionDetail();
 });
 reproEl<HTMLButtonElement>('btn-repro-rerun')?.addEventListener('click', () => { void rerunSavedInvestigation(); });
+reproEl<HTMLButtonElement>('btn-repro-toggle-trace')?.addEventListener('click', () => { reproShowFull = !reproShowFull; reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-original')?.addEventListener('click', () => { reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-rerun')?.addEventListener('click', () => { if (!reproSession.freshReport) return; reproUseRerun = true; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { reproPlayback.stop(); renderReproductionDetail(); }
 });
+activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
 // Initialization - showView('overview', false) below

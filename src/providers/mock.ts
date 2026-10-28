@@ -9,8 +9,7 @@ import type {
   RequestAuditCallback
 } from '../domain.ts';
 import {
-  PROMPT_VERSION,
-  PROMPT_TEMPLATE_HASH,
+  getPromptIdentity,
   buildInvestigationPrompt,
   computePromptHash
 } from '../investigation/prompt.ts';
@@ -45,8 +44,8 @@ export class MockProvider implements ExperimentProvider {
     const requestHash = crypto.createHash('sha256').update(canonicalJson(mockPayload), 'utf-8').digest('hex');
 
     const requestAudit: ProviderRequestAudit = {
-      promptVersion: PROMPT_VERSION,
-      promptTemplateHash: PROMPT_TEMPLATE_HASH,
+      promptVersion: getPromptIdentity(context.systemBrief?.brief.adapterId).promptVersion,
+      promptTemplateHash: getPromptIdentity(context.systemBrief?.brief.adapterId).promptTemplateHash,
       promptHash,
       requestHash,
       systemMessage,
@@ -67,6 +66,16 @@ export class MockProvider implements ExperimentProvider {
       outputTokens: 0,
       estimatedCostUsd: 0
     };
+
+    if (context.systemBrief?.brief.adapterId === 'inventory-reservation') {
+      const { inventoryProposal } = await import('./inventory-mock.ts');
+      const experiment = inventoryProposal(context.history.length);
+      return {
+        experiment, usage, requestAudit, requestSent: false,
+        summary: 'Scripted offline inventory sequence; no autonomous discovery claimed',
+        responseAudit: { content: JSON.stringify(experiment ?? { done: true, summary: 'Scripted offline sequence exhausted' }), finishReason: 'stop' },
+      };
+    }
 
     const experimentIndex = context.history.length;
 

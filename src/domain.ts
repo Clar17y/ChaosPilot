@@ -1,8 +1,10 @@
 // Integration contracts. Target implementation and hidden evaluation metadata live elsewhere.
 export const TARGET_VARIANTS = ['clean', 'candidate-a', 'candidate-b', 'candidate-c', 'candidate-d', 'candidate-e', 'candidate-f', 'candidate-g', 'candidate-h', 'candidate-i'] as const;
-export type TargetVariant = typeof TARGET_VARIANTS[number];
+export const INVENTORY_TARGET_VARIANTS = ['clean', 'inventory-candidate-a'] as const;
+export const ALL_TARGET_VARIANTS = [...TARGET_VARIANTS, 'inventory-candidate-a'] as const;
+export type TargetVariant = typeof ALL_TARGET_VARIANTS[number];
 export type ProviderKind = 'mock' | 'meta';
-export type Channel = 'market' | 'credit' | 'client' | 'reports';
+export type Channel = 'market' | 'credit' | 'client' | 'reports' | 'stock' | 'reservations' | 'shipments';
 
 export type Action =
   | { op: 'send'; id: string; to: Channel; payload: unknown; delay?: number }
@@ -41,7 +43,7 @@ export interface SystemBrief {
   overview: string;
   // Additional human requirements are context until a deterministic check is configured.
   requirements: string[];
-  adapterId: 'synthetic-trading' | 'unconfigured';
+  adapterId: 'synthetic-trading' | 'inventory-reservation' | 'unconfigured';
   updatedAt: string;
 }
 
@@ -205,7 +207,11 @@ export interface InvestigationRecord {
   usage: Usage;
   errors: string[];
   contextAudit: {
+    adapterId?: string;
+    variant?: TargetVariant;
+    cleanSourceHash?: string;
     sourcePaths: string[];
+    /** SHA-256 of executing contract: canonical JSON for new records; historical records may carry a legacy raw JSON.stringify hash. */
     contractHash: string;
     promptVersion: string;
     promptTemplateHash?: string;

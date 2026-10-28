@@ -23,9 +23,9 @@ The application runs locally. No database, containers, authentication service or
 
 ## Define a system before investigating
 
-The application opens as a system workspace. Select or create a profile, then use **Brief & requirements** to save its business overview and additional requirements. **Capabilities & checks** shows the adapter's public trading contract and ten deterministic checks. Save or discard edits before launching so the run uses the requirements shown on screen.
+The application opens as a system workspace. Select or create a profile, then use **Brief & requirements** to save its business overview and additional requirements. **Capabilities & checks** shows the selected adapter's public contract and deterministic checks. Save or discard edits before launching so the run uses the requirements shown on screen.
 
-Additional prose gives the investigator context. It does **not** create an executable check. Only the synthetic trading adapter currently runs experiments; profiles for other systems can be saved with an unconfigured adapter and remain drafts. Selecting the trading adapter for a profile still executes this synthetic trading system, not an arbitrary external application.
+Additional prose gives the investigator context. It does **not** create an executable check. Two synthetic adapters run experiments: `synthetic-trading` and the deterministic [inventory reservation service](docs/SECOND_SYSTEM.md) (`inventory-reservation`, variants `clean` and `inventory-candidate-a`). Profiles for other systems can be saved with an unconfigured adapter and remain drafts. Selecting an adapter for a profile still executes that synthetic system, not an arbitrary external application. See the [adapter guide](docs/ADAPTER_GUIDE.md) for the minimum integration contract for a future adapter.
 
 New browser and CLI investigations save an immutable brief, revision, contract and content hash. Editing a profile later leaves earlier run evidence intact. Older artifacts explicitly show that no system brief was recorded. CLI selection uses `--system-id <saved-profile-id>`; the default is `trading-gateway`.
 

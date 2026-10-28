@@ -24,6 +24,7 @@ import {
 import { main as cliMain } from '../src/cli.ts';
 import { BudgetLedger, calculateCost, calculateWorstCaseCost } from '../src/providers/budget.ts';
 import { PROMPT_VERSION, PROMPT_TEMPLATE_HASH } from '../src/investigation/prompt.ts';
+import { computeContractHash } from '../src/evidence.ts';
 import type {
   TargetVariant,
   InvestigationRecord,
@@ -112,12 +113,7 @@ function createFakeRecord(
   const status = options.status || 'completed';
   const hasFinding = options.finding ?? (variant === 'candidate-a');
   const hasViolations = options.hasViolations ?? hasFinding;
-  const contractHash =
-    options.contractHash ||
-    crypto
-      .createHash('sha256')
-      .update(JSON.stringify(createFakeSimulator().getContract()), 'utf8')
-      .digest('hex');
+  const contractHash = options.contractHash || computeContractHash(createFakeSimulator().getContract());
   const sourceHash = options.sourceHash || `source-hash-${variant}`;
 
   const defaultAttempts: ProposalAttempt[] = [
@@ -1260,6 +1256,8 @@ describe('CLI Integration for benchmark and benchmark-freeze', () => {
     console.error = (...args) => errors.push(args.join(' '));
 
     const origExit = process.exit;
+    const origExitCode = process.exitCode;
+    process.exitCode = undefined;
     let exitCode: number | undefined;
     process.exit = ((code?: number) => {
       exitCode = code;
@@ -1267,14 +1265,14 @@ describe('CLI Integration for benchmark and benchmark-freeze', () => {
     }) as any;
 
     try {
-      await expect(
-        cliMain(['benchmark', '--provider=meta'])
-      ).rejects.toThrow(/process\.exit/);
+      await cliMain(['benchmark', '--provider=meta']);
       expect(exitCode).toBe(1);
+      expect(process.exitCode).toBe(1);
       expect(errors.some((e) => e.includes('Missing required environment variable MODEL_API_KEY'))).toBe(true);
     } finally {
       console.error = origErr;
       process.exit = origExit;
+      process.exitCode = origExitCode;
       if (origKey !== undefined) process.env.MODEL_API_KEY = origKey;
     }
   });
@@ -1360,6 +1358,21 @@ describe('Complete freeze and observed request identity', () => {
     });
     expect(report.comparability.status).toBe('violated');
     expect(report.comparability.notes.join(' ')).toContain('changed during the trial');
+  });
+
+  it('keeps comparable results when contract keys are reordered during a trial', async () => {
+    const sim = createFakeSimulator();
+    const report = await runBenchmark({ provider: 'meta', models: ['muse-wonder-1.0'], targets: ['candidate-a'], trials: 1,
+      simulator: sim, benchmarksDir: testBenchmarksDir, budgetLedger: new BudgetLedger(path.join(testRunsDir, 'ledger.json'), 50),
+      providerFactory: (_kind, model) => ({ kind: 'meta', model, propose: async () => ({ experiment: null }) }),
+      runner: async opts => {
+        const rec = createFakeRecord(opts.variant, opts.provider.model);
+        const { name, description, operations, messages, invariants, limits } = sim.getContract();
+        sim.getContract = () => ({ limits, invariants, messages, operations, description, name });
+        return rec;
+      },
+    });
+    expect(report.comparability.status).toBe('comparable');
   });
 
   it('preserves comparability of unchanged input identity after an ordinary provider failure', async () => {

@@ -1,4 +1,5 @@
 import * as http from 'node:http';
+import { resolveAdapter, assertAdapterVariant, listRegisteredAdapters } from './adapters/index.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,8 @@ import {
   listRuns,
   deleteRun,
   replayRun,
+  replaySelectedExperiment,
+  parseExperimentPosition,
   validateRunId,
   getSimulatorApi,
   isKnownTargetVariant,
@@ -284,7 +287,11 @@ export class ChaosPilotServer {
     const jsMatch = pathname.match(/^\/([a-zA-Z0-9_-]+\.(?:js|js\.map))$/);
     if (jsMatch) {
       const fileName = jsMatch[1]!;
-      const primaryPath = path.join(this.distDir, 'web', fileName);
+      // This pure identity helper is shared by the replay engine and browser.
+      // Expose only that shared module, not arbitrary server-side output.
+      const primaryPath = fileName === 'experiment-identity.js'
+        ? path.join(this.distDir, fileName)
+        : path.join(this.distDir, 'web', fileName);
       const fallbackPath = path.join(this.publicDir, fileName);
       try {
         let content: string;
@@ -354,6 +361,7 @@ export class ChaosPilotServer {
             currentRecord: active ? active.record : this.startingController ? null : this.latestRecord,
             metaKeyConfigured: Boolean(process.env.MODEL_API_KEY && process.env.MODEL_API_KEY.trim().length > 0),
             targetVariants: TARGET_VARIANTS,
+            targetVariantsByAdapter: Object.fromEntries(listRegisteredAdapters().map((adapterId) => [adapterId, [...resolveAdapter(adapterId).variants]])),
           });
           return;
         }
@@ -361,7 +369,8 @@ export class ChaosPilotServer {
         // GET /api/contract - Public system contract (never exposes secrets or hidden keys)
         if (method === 'GET' && pathname === '/api/contract') {
           try {
-            const sim = await getSimulatorApi();
+            const adapterId = new URL(req.url || '/', 'http://localhost').searchParams.get('adapterId') ?? 'synthetic-trading';
+            const sim = adapterId === 'synthetic-trading' ? await getSimulatorApi() : resolveAdapter(adapterId);
             // In simulator/contract.ts or index.ts
             const contract = sim.getContract ? sim.getContract() : { name: 'ChaosPilot Gateway' };
             this.sendJson(res, 200, contract);
@@ -373,7 +382,9 @@ export class ChaosPilotServer {
 
         // GET /api/targets - Supported public target variants
         if (method === 'GET' && pathname === '/api/targets') {
-          this.sendJson(res, 200, TARGET_VARIANTS);
+          const adapterId = new URL(req.url || '/', 'http://localhost').searchParams.get('adapterId') ?? 'synthetic-trading';
+          try { this.sendJson(res, 200, resolveAdapter(adapterId).variants); }
+          catch (error) { this.sendJson(res, 400, { error: String(error) }); }
           return;
         }
 
@@ -444,9 +455,7 @@ export class ChaosPilotServer {
               this.sendJson(res, 404, { error: 'System brief not found' });
               return;
             }
-            const sim = await getSimulatorApi();
-            const contract = sim.getContract ? sim.getContract() : null;
-            const snapshot = await createSystemSnapshot(brief, contract);
+            const snapshot = await createSystemSnapshot(brief);
             this.sendJson(res, 200, snapshot);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -623,9 +632,9 @@ export class ChaosPilotServer {
               return;
             }
 
-            const sim = await getSimulatorApi();
-            const executingContract = sim.getContract ? sim.getContract() : null;
-            const systemSnapshot = await createSystemSnapshot(brief, executingContract);
+            try { assertAdapterVariant(brief.adapterId, variant); }
+            catch (error) { this.sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) }); return; }
+            const systemSnapshot = await createSystemSnapshot(brief);
 
             // Never accept API keys or custom endpoints from the browser
             if (providerKind === 'meta' && (!process.env.MODEL_API_KEY || !process.env.MODEL_API_KEY.trim())) {
@@ -792,6 +801,30 @@ export class ChaosPilotServer {
             return;
           }
           this.sendJson(res, 200, record);
+          return;
+        }
+
+        // POST /api/runs/:id/experiments/:position/replay - Replay one saved experiment by array position
+        const selectedReplayMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/experiments\/([^/]+)\/replay$/);
+        if (method === 'POST' && selectedReplayMatch && selectedReplayMatch[1]) {
+          const id = selectedReplayMatch[1];
+          if (!validateRunId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid run ID' });
+            return;
+          }
+          const position = parseExperimentPosition(selectedReplayMatch[2]);
+          if (position === null) {
+            this.sendJson(res, 400, { error: 'Invalid experiment position' });
+            return;
+          }
+          try {
+            const report = await replaySelectedExperiment(id, position, this.runsDir);
+            this.sendJson(res, 200, report);
+          } catch (err) {
+            this.sendJson(res, 400, {
+              error: err instanceof Error ? err.message : 'Replay failed',
+            });
+          }
           return;
         }
 
