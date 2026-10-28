@@ -107,7 +107,7 @@ export async function executeDeferredStop(
 /**
  * Ordered status application within a generation. A response is dropped only
  * once a newer response has actually been applied (or the generation was
- * invalidated by an explicit launch/stop) — never merely because a newer
+ * invalidated by an explicit launch/stop), never merely because a newer
  * request was issued, so slow requests still make progress instead of starving.
  * Stale successes and stale errors are both dropped.
  */

@@ -155,9 +155,9 @@ export function classifyStep(entry: TraceEntry): StepKind {
 }
 
 const KIND_LABEL: Record<StepKind, string> = {
-  scheduled: 'Scheduled — not yet processed (recorded state is unchanged by this event)',
-  processed: 'Processed — recorded state after this transition',
-  rejected: 'Recorded rejection — not by itself a target defect or a recorded pass',
+  scheduled: 'Scheduled: not yet processed (recorded state is unchanged by this event)',
+  processed: 'Processed: recorded state after this transition',
+  rejected: 'Recorded rejection: not by itself a target defect or a recorded pass',
   other: 'Recorded entry',
 };
 
@@ -210,7 +210,7 @@ function inventoryStepTitle(entry: TraceEntry, p: Record<string, unknown> | null
   const reservationId = typeof p.reservationId === 'string' ? p.reservationId : null;
   const qty = num(p.quantity);
   const outcome = entry.outcome ?? '';
-  const suffix = DELIVERY_OUTCOMES.has(outcome) ? ` — ${outcome} (recorded)` : kind === 'scheduled' ? ' scheduled' : '';
+  const suffix = DELIVERY_OUTCOMES.has(outcome) ? `: ${outcome} (recorded)` : kind === 'scheduled' ? ' scheduled' : '';
   if (type === 'stock') return `Stock receipt${sku ? ` for SKU ${sku}` : ''}${qty !== null ? `: quantity ${qty}` : ''}${suffix}`;
   if (type === 'reserve') return `Reservation${reservationId ? ` ${reservationId}` : ''}${sku ? ` for SKU ${sku}` : ''}${qty !== null ? `: quantity ${qty}` : ''}${suffix}`;
   if (type === 'cancel') return `Cancel reservation${reservationId ? ` ${reservationId}` : ''}${suffix}`;
@@ -285,8 +285,8 @@ function explainInventoryViolations(violationsHere: Violation[]): StepExplanatio
       // Expected side: the rule/reference constraint only. Actual recorded
       // figures belong on the observed side.
       expected: `For SKU ${String(e.sku)}, reserved remaining must not exceed on-hand stock, and received must equal on-hand plus shipped.`,
-      expectedLabel: 'Expected (hypothetical, based on the rule) — would satisfy the rule',
-      observed: `Error: rule violation recorded at this action — ${violationsHere.map(v => v.message).join('; ')} Recorded evidence: received ${num(e.received)}, on hand ${num(e.onHand)}, reserved (remaining) ${num(e.reserved)}, shipped ${num(e.shipped)}.`,
+      expectedLabel: 'Expected (hypothetical, based on the rule): would satisfy the rule',
+      observed: `Error: rule violation recorded at this action: ${violationsHere.map(v => v.message).join('; ')} Recorded evidence: received ${num(e.received)}, on hand ${num(e.onHand)}, reserved (remaining) ${num(e.reserved)}, shipped ${num(e.shipped)}.`,
       observedIsViolation: true,
     };
   }
@@ -302,7 +302,7 @@ function explainInventoryViolations(violationsHere: Violation[]): StepExplanatio
     return {
       expected,
       expectedLabel: 'Expected (from the independent reference recorded in the violation evidence)',
-      observed: `Error: rule violation recorded at this action — ${violationsHere.map(v => v.message).join('; ')} Recorded target delivery outcome: ${String(e.outcome)}.`,
+      observed: `Error: rule violation recorded at this action: ${violationsHere.map(v => v.message).join('; ')} Recorded target delivery outcome: ${String(e.outcome)}.`,
       observedIsViolation: true,
     };
   }
@@ -317,8 +317,8 @@ export function explainStep(step: PlaybackStep, violationsHere: Violation[]): St
     const limit = num(e.limit); const total = num(e.totalRequired);
     return {
       expected: `Rejecting this order would satisfy the rule: recorded limit ${fmtCredit(limit)}, required total exposure ${fmtCredit(total)}.`,
-      expectedLabel: 'Expected (hypothetical, based on the rule) — would satisfy the rule',
-      observed: `Error: rule violation recorded at this action — ${creditViolation.message}`,
+      expectedLabel: 'Expected (hypothetical, based on the rule): would satisfy the rule',
+      observed: `Error: rule violation recorded at this action: ${creditViolation.message}`,
       observedIsViolation: true,
     };
   }
@@ -327,7 +327,7 @@ export function explainStep(step: PlaybackStep, violationsHere: Violation[]): St
   if (violationsHere.length > 0) {
     return {
       expected: null, expectedLabel: null,
-      observed: `Error: rule violation recorded at this action — ${violationsHere.map(v => v.message).join('; ')}`,
+      observed: `Error: rule violation recorded at this action: ${violationsHere.map(v => v.message).join('; ')}`,
       observedIsViolation: true,
     };
   }
@@ -416,14 +416,14 @@ export function stepFacts(entry: TraceEntry): string[] {
   if (entry.messageId) facts.push(`Message: ${entry.messageId}`);
   const credit = creditFromState(entry.state);
   if (credit && (credit.limit !== null || credit.used !== null || credit.reserved !== null)) {
-    facts.push(`Recorded credit — limit ${fmtCredit(credit.limit)}, used ${fmtCredit(credit.used)}, reserved ${fmtCredit(credit.reserved)}, total ${fmtCredit(credit.total)}`);
+    facts.push(`Recorded credit: limit ${fmtCredit(credit.limit)}, used ${fmtCredit(credit.used)}, reserved ${fmtCredit(credit.reserved)}, total ${fmtCredit(credit.total)}`);
   }
   const inventory = extractInventorySnapshotDisplay(entry.state);
   for (const stock of inventory.stock) {
-    facts.push(`Recorded stock for SKU ${stock.sku} — received ${stock.received}, on hand ${stock.onHand}, reserved (remaining) ${stock.reservedRemaining}, available ${stock.available}${stock.overReserved ? ' (over-reserved)' : ''}`);
+    facts.push(`Recorded stock for SKU ${stock.sku}: received ${stock.received}, on hand ${stock.onHand}, reserved (remaining) ${stock.reservedRemaining}, available ${stock.available}${stock.overReserved ? ' (over-reserved)' : ''}`);
   }
   for (const reservation of inventory.reservations) {
-    facts.push(`Recorded reservation ${reservation.reservationId} — SKU ${reservation.sku}, quantity ${reservation.quantity}, remaining ${reservation.remaining}, shipped ${reservation.shipped}, cancelled ${reservation.cancelled}`);
+    facts.push(`Recorded reservation ${reservation.reservationId}: SKU ${reservation.sku}, quantity ${reservation.quantity}, remaining ${reservation.remaining}, shipped ${reservation.shipped}, cancelled ${reservation.cancelled}`);
   }
   if (isRecord(entry.state) && isRecord(entry.state.target) && isRecord(entry.state.target.orders)) {
     facts.push(`Orders in recorded state: ${Object.keys(entry.state.target.orders).length}`);
@@ -481,10 +481,10 @@ export function groupUnimportantSteps(steps: PlaybackStep[]): PlaybackStep[] | n
       // payload, credit or state as a recorded state for the whole group.
       out.push({ ...first, isGroup: true, groupCount: run.length, groupTracePositions: run.map(r => r.tracePosition),
         action: 'grouped entries', outcome: `${run.length} grouped recorded entries`, messageId: null,
-        payloadType: null, payloadText: 'Grouped summary — no single payload is recorded for the group as a whole. Show the complete original trace to inspect each entry.',
-        stateText: 'not recorded for the group as a whole — show the complete original trace to inspect each entry',
+        payloadType: null, payloadText: 'Grouped summary: no single payload is recorded for the group as a whole. Show the complete original trace to inspect each entry.',
+        stateText: 'not recorded for the group as a whole; show the complete original trace to inspect each entry',
         credit: null, violations: [], isViolation: false,
-        kindLabel: 'Grouped summary — not a single recorded entry',
+        kindLabel: 'Grouped summary: not a single recorded entry',
         title: `${run.length} grouped recorded entries (trace entries ${first.tracePosition + 1}–${last.tracePosition + 1})`,
         detail: 'Consecutive scheduled or other recorded entries with no attributed violation are grouped here. This row summarises them; it is not a recorded state for the group. Show the complete original trace to inspect each entry.',
         facts: [`Grouped entries: ${run.length}`, `Trace entries ${first.tracePosition + 1}–${last.tracePosition + 1}`, 'No violation attributed to these entries'] });
@@ -496,11 +496,11 @@ export function groupUnimportantSteps(steps: PlaybackStep[]): PlaybackStep[] | n
 }
 
 export function pinnedRuleText(record: InvestigationRecord, invariant: string | null): { ruleText: string | null; ruleLabel: string } {
-  if (!invariant) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable — no invariant was recorded for this selection.' };
+  if (!invariant) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable. No invariant was recorded for this selection.' };
   const contract = record.systemBrief?.contract;
-  if (!contract) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable — no pinned contract was recorded for this run (legacy/missing data).' };
+  if (!contract) return { ruleText: null, ruleLabel: 'Pinned rule: unavailable. No pinned contract was recorded for this run (legacy/missing data).' };
   const inv = contract.invariants?.find(x => x.id === invariant);
-  if (!inv) return { ruleText: null, ruleLabel: `Pinned rule: unavailable — invariant "${invariant}" is not in the pinned contract for this run.` };
+  if (!inv) return { ruleText: null, ruleLabel: `Pinned rule: unavailable. Invariant "${invariant}" is not in the pinned contract for this run.` };
   return { ruleText: inv.description, ruleLabel: `Pinned rule (${invariant}) from the run's saved contract` };
 }
 
@@ -636,24 +636,24 @@ export function buildReproductionModel(
     runId: record.id,
     evidence, allSteps: steps, traceCount: trace.length,
     modelLabel: record.model ? `Model: ${record.model}` : 'Model: not recorded',
-    targetLabel: `Synthetic target: ${record.variant} (synthetic simulator — not an arbitrary application)`,
+    targetLabel: `Synthetic target: ${record.variant} (synthetic simulator, not an arbitrary application)`,
     systemLabel: record.systemBrief ? `System: ${record.systemBrief.brief.name}` : 'System: legacy / unavailable',
     briefLabel: record.systemBrief
       ? `Saved brief: revision ${record.systemBrief.brief.revision}`
-      : 'Legacy brief unavailable — no system brief snapshot was recorded for this run',
+      : 'Legacy brief unavailable: no system brief snapshot was recorded for this run',
     experimentLabel: (expRec as { index?: number }).index === undefined
       ? `Experiment (recorded index not recorded; position ${experimentPosition + 1} of ${record.experiments.length})`
       : `Experiment #${expRec.index} (position ${experimentPosition + 1} of ${record.experiments.length})`,
     hypothesis: expRec.experiment.hypothesis || 'not recorded',
     valid: result.valid,
-    invalidLabel: result.valid ? null : 'Invalid or rejected experiment plan — this is not, by itself, a target defect.',
+    invalidLabel: result.valid ? null : 'Invalid or rejected experiment plan: this is not, by itself, a target defect.',
     replayLabel: reproduced
       ? 'Original replay: verified during the investigation'
       : 'Original replay: not verified during the investigation',
     cleanLabel: cleanPassed
       ? finding
-        ? 'Clean comparison: passed for the recorded finding/check — not a claim of complete correctness'
-        : 'Clean comparison: passed for at least one recorded violation — not a claim of complete correctness'
+        ? 'Clean comparison: passed for the recorded finding/check, not a claim of complete correctness'
+        : 'Clean comparison: passed for at least one recorded violation, not a claim of complete correctness'
       : 'Clean comparison: not confirmed for this selection',
     findingTitle: finding ? finding.title : null,
     steps: playbackSteps,
@@ -687,11 +687,11 @@ export function describeFreshReplay(state: FreshReplayState): string {
   switch (state.kind) {
     case 'idle': return 'No rerun has been started from this player. The historical result above is not a new replay.';
     case 'pending': return 'Rerunning this experiment through the deterministic replay path… This does not contact the model and does not rerun the clean comparison.';
-    case 'success': return 'Fresh rerun finished: matched — this selected experiment reproduced exactly. Historical results have not been overwritten.';
+    case 'success': return 'Fresh rerun finished: matched. This selected experiment reproduced exactly. Historical results have not been overwritten.';
     case 'mismatch': return 'Fresh rerun finished with a mismatch: this selected experiment did not reproduce exactly. Historical results have not been overwritten.';
-    case 'source-changed': return 'Fresh rerun finished: source changed — the current source differs from the saved source, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
+    case 'source-changed': return 'Fresh rerun finished: source changed. The current source differs from the saved source, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
     case 'source-changed-mismatch': return 'Fresh rerun finished with a mismatch and source changed: this selected experiment did not reproduce exactly, and the current source differs from the saved source, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
-    case 'context-unverified': return 'Fresh rerun finished: behaviour matched, but replay context is unverified — saved prompt, contract or clean-control context differs from or cannot be proved against the current context, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
+    case 'context-unverified': return 'Fresh rerun finished: behaviour matched, but replay context is unverified. Saved prompt, contract or clean-control context differs from or cannot be proved against the current context, so exact reproduction cannot be claimed for this selected experiment. Historical results have not been overwritten.';
     case 'error': return `Fresh rerun failed: ${state.message} Historical results have not been overwritten.`;
   }
 }

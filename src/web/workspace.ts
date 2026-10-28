@@ -88,7 +88,7 @@ export function validateTargetVariantsResponse(data: unknown): TargetVariantsVal
 /**
  * Target choices for an executable adapter are exactly the validated list
  * returned by that adapter's dedicated targets endpoint. The second argument
- * is that scoped response — never a global status list. Non-executable
+ * is that scoped response, never a global status list. Non-executable
  * adapters and malformed payloads offer nothing.
  */
 export function targetVariantsForAdapter(adapterId: string | null | undefined, adapterTargets: readonly string[] = []): string[] {
@@ -155,7 +155,7 @@ export class TargetSelectionSession {
   /**
    * Captures the selection currently displayed in the select before it is
    * cleared. The displayed options belong to this session's current identity,
-   * so a value captured here is attributed to that identity's adapter — never
+   * so a value captured here is attributed to that identity's adapter, never
    * to a newer system the caller may already have selected. An empty display
    * (already cleared) never overwrites a captured preference.
    */
@@ -362,8 +362,8 @@ export function contractChecksVisible(state: {
 export function runOutcomeLabel(status: RunSummary['status']): string {
   switch (status) {
     case 'completed': return 'Completed';
-    case 'cancelled': return 'Stopped — not a clean pass';
-    case 'failed': return 'Failed — not a clean pass';
+    case 'cancelled': return 'Stopped: not a clean pass';
+    case 'failed': return 'Failed: not a clean pass';
     case 'running': return 'Running';
     default: return String(status);
   }

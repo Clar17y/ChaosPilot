@@ -491,7 +491,7 @@ describe('inspected-run state presentation (pinned adapter, not selected profile
     });
     expect(stateKindForRecord(pinned('inventory-reservation', 'synthetic-trading'))).toBe('inventory');
     expect(stateKindForRecord(pinned('synthetic-trading', 'inventory-reservation'))).toBe('trading');
-    // Missing/malformed pinned identity is unknown — never repaired from the audit.
+    // Missing/malformed pinned identity is unknown, never repaired from the audit.
     expect(stateKindForRecord(pinned(undefined, 'inventory-reservation'))).toBe('unknown');
     expect(stateKindForRecord(pinned(42, 'inventory-reservation'))).toBe('unknown');
     expect(stateKindForRecord({ systemBrief: { brief: null, contract: null, hash: 'h' }, contextAudit: { adapterId: 'inventory-reservation' } })).toBe('unknown');

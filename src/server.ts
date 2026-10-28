@@ -271,6 +271,12 @@ export class ChaosPilotServer {
     if (pathname === '/homepage.css') {
       return this.serveFile(res, path.join(this.publicDir, 'homepage.css'), 'text/css; charset=utf-8');
     }
+    if (pathname === '/how-it-works') {
+      return this.serveFile(res, path.join(this.publicDir, 'how-it-works.html'), 'text/html; charset=utf-8');
+    }
+    if (pathname === '/how-it-works.css') {
+      return this.serveFile(res, path.join(this.publicDir, 'how-it-works.css'), 'text/css; charset=utf-8');
+    }
     if (pathname === '/assets/homepage/market-fabric.png') {
       return this.serveFile(res, path.join(this.publicDir, 'assets', 'homepage', 'market-fabric.png'), 'image/png');
     }

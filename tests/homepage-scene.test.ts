@@ -26,6 +26,23 @@ describe('homepage event catalog', () => {
 });
 
 describe('timeline', () => {
+  it('starts the selected event consistently and continues through the catalog', () => {
+    for (const eventIndex of [0, 17, HOMEPAGE_EVENTS.length - 1]) {
+      for (const reducedMotion of [false, true]) {
+        const start = createTimeline({ initialEventIndex: eventIndex, reducedMotion });
+        expect(start.eventIndex).toBe(eventIndex);
+        expect(start.instances[0]!.eventIndex).toBe(eventIndex);
+        expect(presentationFor(start).event).toBe(HOMEPAGE_EVENTS[eventIndex]);
+        expect(presentationFor(start).counter).toBe(`Event ${eventIndex + 1} of ${HOMEPAGE_EVENTS.length}`);
+        expect(presentationFor(nextEvent(start)).event).toBe(HOMEPAGE_EVENTS[(eventIndex + 1) % HOMEPAGE_EVENTS.length]);
+        if (!reducedMotion) {
+          expect(advanceTimeline(start, EVENT_CYCLE_MS).eventIndex).toBe((eventIndex + 1) % HOMEPAGE_EVENTS.length);
+        } else {
+          expect(presentationFor(start).title).toBe(HOMEPAGE_EVENTS[eventIndex]!.title);
+        }
+      }
+    }
+  });
   it('caption changes only on outcome, not before impact', () => {
     let s = createTimeline();
     s = advanceTimeline(s, IMPACT_MS - 1);

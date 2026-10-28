@@ -225,7 +225,7 @@ export function inspectedRunAdapterId(
 }
 
 /**
- * State domain for an inspected run, from its pinned brief — never from the
+ * State domain for an inspected run, from its pinned brief, never from the
  * currently selected profile. Legacy records with no brief snapshot are the
  * original trading runs and stay trading; a pinned brief with an unrecognised
  * or missing adapter is unknown, never mislabeled as trading.
