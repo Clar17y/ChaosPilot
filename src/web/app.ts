@@ -10,7 +10,7 @@ import type {
 } from '../domain.ts';
 import type { RunSummary, ReplayReport } from '../storage.ts';
 import { extractInventorySnapshotDisplay, extractSnapshotDisplay, stateKindForRecord, statePresentationFor } from './snapshot.ts';
-import { clampSelectedIndex, formatContractEntry, replayOutcome, tabIndexForKey } from './presentation.ts';
+import { clampSelectedIndex, continuationSettingLabel, findingCategoryLabel, formatContractEntry, replayOutcome, tabIndexForKey, targetVariantLabel } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
   buildReproductionModel,
@@ -129,6 +129,7 @@ function onReproRunChanged(rec?: InvestigationRecord | null): void { reproPlayba
 const targetSelect = document.getElementById('target-select') as HTMLSelectElement;
 const providerSelect = document.getElementById('provider-select') as HTMLSelectElement;
 const maxExperimentsInput = document.getElementById('max-experiments-input') as HTMLInputElement;
+const continueAfterFindingsInput = document.getElementById('continue-after-findings-input') as HTMLInputElement | null;
 const btnLaunch = document.getElementById('btn-launch') as HTMLButtonElement;
 const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
 const btnStopGlobal = document.getElementById('btn-stop-global') as HTMLButtonElement | null;
@@ -391,7 +392,7 @@ function renderFindingsView(): void {
     } else {
       const idp = document.createElement('p'); idp.className = 'muted'; idp.textContent = `Opened run ${rec.id} · system ${rec.systemBrief?.brief.id ?? 'unavailable'} · brief revision ${rec.systemBrief?.brief.revision ?? 'unavailable'}`; opened.appendChild(idp); for (const f of rec.findings) {
         const p = document.createElement('p');
-        p.textContent = `${f.title} — ${f.violation.invariant} · replay ${f.reproduced ? 'verified' : 'not verified'} · clean comparison ${f.cleanControlPassed ? 'passed' : 'not passed'}`;
+        p.textContent = `${f.title} — ${f.violation.invariant} · observed category: ${findingCategoryLabel(f)} · replay ${f.reproduced ? 'verified' : 'not verified'} · clean comparison ${f.cleanControlPassed ? 'passed' : 'not passed'}`;
         opened.appendChild(p);
       }
     }
@@ -468,16 +469,7 @@ function updateTargetChoices(variants: string[]): void {
   for (const v of variants) {
     const opt = document.createElement('option');
     opt.value = v;
-    if (v === 'clean') {
-      opt.textContent = 'Clean control';
-    } else if (v === 'inventory-candidate-a') {
-      opt.textContent = 'Inventory Candidate A';
-    } else if (v.startsWith('candidate-')) {
-      const letter = v.slice('candidate-'.length).toUpperCase();
-      opt.textContent = `Candidate ${letter}`;
-    } else {
-      opt.textContent = v;
-    }
+    opt.textContent = targetVariantLabel(v);
     targetSelect.appendChild(opt);
   }
 
@@ -608,7 +600,7 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
     if (contract) contract.textContent = `${rec.systemBrief.contract?.invariants.length ?? 0} available deterministic checks in the pinned contract. Snapshot hash: ${rec.systemBrief.hash}`;
   }
 
-  dashTarget.textContent = `Variant: ${rec.variant}`;
+  dashTarget.textContent = `Variant: ${rec.variant} · ${continuationSettingLabel(rec.continueAfterFindings)}`;
   dashTime.textContent = `Started: ${new Date(rec.startedAt).toLocaleTimeString()}`;
   dashModel.textContent = `Model: ${rec.model}`;
 
@@ -755,12 +747,20 @@ function renderFindings(findings: Finding[]): void {
     pMsg.appendChild(strongMsg);
     pMsg.appendChild(document.createTextNode(f.violation.message));
 
+    const pCategory = document.createElement('p');
+    const strongCategory = document.createElement('strong');
+    strongCategory.textContent = 'Observed category: ';
+    pCategory.appendChild(strongCategory);
+    pCategory.appendChild(document.createTextNode(findingCategoryLabel(f)));
+    pCategory.appendChild(document.createTextNode(' — what the oracle observed at this step, not a claimed root cause.'));
+
     const pStep = document.createElement('p');
     pStep.className = 'finding-meta';
     pStep.textContent = `Discovered at Experiment #${f.experimentIndex}, Step #${f.violation.step}. Source Hash: ${f.sourceHash}`;
 
     body.appendChild(pHypo);
     body.appendChild(pMsg);
+    body.appendChild(pCategory);
     body.appendChild(pStep);
 
     const openBtn = document.createElement('button');
@@ -1029,6 +1029,7 @@ function renderReproduction(): void {
       // Prominent: the rule, the observed failure and replay status.
       const prominent: [string,string][] = [
         ['Recorded invariant', ev.invariant ?? 'not recorded'],
+        ['Observed category (not a claimed root cause)', ev.observedCategory],
         ['Violation (recorded)', ev.violationMessage ?? 'No violation recorded for this experiment'],
         [ev.ruleLabel, ev.ruleText ?? ''],
         ['Original reproduction (historical)', reproModel.replayLabel],
@@ -1731,6 +1732,7 @@ btnLaunch.addEventListener('click', async () => {
         variant,
         provider,
         maxExperiments,
+        continueAfterFindings: continueAfterFindingsInput?.checked === true,
         systemId: systemToRun.id,
         expectedRevision: systemToRun.revision,
       }),

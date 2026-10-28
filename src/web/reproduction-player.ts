@@ -4,6 +4,7 @@
 import type { ExperimentRecord, Finding, InvestigationRecord, TraceEntry, Violation } from '../domain.ts';
 import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { extractInventorySnapshotDisplay } from './snapshot.ts';
+import { findingCategoryLabel } from './presentation.ts';
 
 export type StepKind = 'scheduled' | 'processed' | 'rejected' | 'other';
 
@@ -50,6 +51,8 @@ export interface PlaybackStep {
 
 export interface EvidenceSummary {
   invariant: string | null;
+  /** Observed oracle category for the selected finding/violation, as a readable label. */
+  observedCategory: string;
   violationMessage: string | null;
   violations: Violation[];
   /** Rule text from the run's pinned contract only. */
@@ -620,7 +623,8 @@ export function buildReproductionModel(
     || (invariant !== null && invariant.includes('credit') && steps.some(s => s.credit !== null))
     || steps.some(s => s.payloadType === 'credit_limit' && violations.some(v => v.invariant.includes('credit')));
   const evidence: EvidenceSummary = {
-    invariant, violationMessage: primaryViolation?.message ?? null,
+    invariant, observedCategory: findingCategoryLabel(finding ?? (primaryViolation ? { violation: primaryViolation } : {})),
+    violationMessage: primaryViolation?.message ?? null,
     violations, ruleText: rule.ruleText, ruleLabel: rule.ruleLabel,
     expectedInvariant: expRec.experiment.expectedInvariant ?? null,
     hypothesis: expRec.experiment.hypothesis || 'not recorded',

@@ -77,8 +77,22 @@ export function compareSemanticReplay(
     );
   }
 
-  const violationsMatched =
-    canonicalJson(original.violations || []) === canonicalJson(replayed.violations || []);
+  // Legacy records may lack the oracle category added later; ignore that
+  // field only for genuine legacy evidence: no category on any violation
+  // AND no categoryAware marker. A category-aware result whose categories
+  // were removed or changed is not legacy and must not replay as exact.
+  const categoryAwareMismatch = original.categoryAware === true && replayed.categoryAware !== true;
+  if (categoryAwareMismatch) {
+    mismatches.push('Category-aware evidence mismatch: original result records violation categories but replayed result does not');
+  }
+  const legacyWithoutCategory = original.categoryAware !== true
+    && (original.violations || []).length > 0
+    && (original.violations || []).every(v => !('category' in v));
+  const normalizeViolations = (vs: typeof original.violations) => legacyWithoutCategory
+    ? (vs || []).map(v => { const { category: _category, ...rest } = v as typeof v & { category?: string }; return rest; })
+    : (vs || []);
+  const violationsMatched = !categoryAwareMismatch
+    && canonicalJson(normalizeViolations(original.violations)) === canonicalJson(normalizeViolations(replayed.violations));
   if (!violationsMatched) {
     const stripIds = (vs: typeof original.violations) =>
       (vs || []).map((v) => { const { id: _id, ...rest } = v; return rest; });

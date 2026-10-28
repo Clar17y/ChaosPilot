@@ -75,7 +75,7 @@ describe('Inventory HTTP API', () => {
   });
 
   it('returns adapter-specific targets and contract, rejecting unknown adapters', async () => {
-    expect((await call('GET', '/api/targets?adapterId=inventory-reservation')).json).toEqual(['clean', 'inventory-candidate-a']);
+    expect((await call('GET', '/api/targets?adapterId=inventory-reservation')).json).toEqual(['clean', 'inventory-candidate-a', 'inventory-candidate-b', 'inventory-candidate-c', 'inventory-candidate-d']);
     expect((await call('GET', '/api/targets')).json).toContain('candidate-a');
     expect((await call('GET', '/api/targets?adapterId=nope')).status).toBe(400);
     const contract = await call('GET', '/api/contract?adapterId=inventory-reservation');
@@ -91,7 +91,7 @@ describe('Inventory HTTP API', () => {
     expect(json.targetVariants).not.toContain('inventory-candidate-a');
     expect(json.targetVariantsByAdapter).toEqual({
       'synthetic-trading': json.targetVariants,
-      'inventory-reservation': ['clean', 'inventory-candidate-a'],
+      'inventory-reservation': ['clean', 'inventory-candidate-a', 'inventory-candidate-b', 'inventory-candidate-c', 'inventory-candidate-d'],
     });
     // Dedicated endpoint remains authoritative and agrees with the mapping.
     expect((await call('GET', '/api/targets?adapterId=synthetic-trading')).json).toEqual(json.targetVariants);
@@ -130,6 +130,27 @@ describe('Inventory HTTP API', () => {
     const replay = await call('POST', `/api/runs/${runId}/replay`);
     expect(replay.status).toBe(200);
     expect(replay.json.exactReproductionClaimed).toBe(true);
+  });
+
+  it('runs a combined inventory investigation with continuation opt-in', async () => {
+    const started = await call('POST', '/api/investigation/start', {
+      systemId: 'inventory-reservation', variant: 'inventory-candidate-d', provider: 'mock', expectedRevision: 1, continueAfterFindings: true,
+    });
+    expect(started.status).toBe(202);
+    expect(started.json.continueAfterFindings).toBe(true);
+    const runId = started.json.id as string;
+    await vi.waitFor(async () => {
+      expect(instance.getActiveInvestigation()).toBeNull();
+      expect(await listRuns(runsDir)).toHaveLength(1);
+    }, { timeout: 15000 });
+    const record = await call('GET', `/api/runs/${runId}`);
+    expect(record.json.continueAfterFindings).toBe(true);
+    expect(record.json.findings.map((f: any) => f.category)).toEqual(['cancellation_release', 'duplicate_shipment']);
+    expect(record.json.findings.every((f: any) => f.reproduced && f.cleanControlPassed)).toBe(true);
+    const bad = await call('POST', '/api/investigation/start', {
+      systemId: 'inventory-reservation', variant: 'inventory-candidate-d', provider: 'mock', continueAfterFindings: 'yes',
+    });
+    expect(bad.status).toBe(400);
   });
 
   it('rejects an unconfigured system before constructing a provider', async () => {

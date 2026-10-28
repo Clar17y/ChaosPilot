@@ -582,6 +582,11 @@ export class ChaosPilotServer {
               Math.max(Number(body.maxExperiments) || 5, 1),
               20
             );
+            if (body.continueAfterFindings !== undefined && typeof body.continueAfterFindings !== 'boolean') {
+              this.sendJson(res, 400, { error: 'continueAfterFindings must be a boolean' });
+              return;
+            }
+            const continueAfterFindings = body.continueAfterFindings === true;
 
             if (!isKnownTargetVariant(variant)) {
               this.sendJson(res, 400, { error: `Invalid target variant: "${String(variant)}"` });
@@ -695,6 +700,7 @@ export class ChaosPilotServer {
                   id: runId,
                   variant,
                   maxExperiments,
+                  continueAfterFindings,
                   provider,
                   signal: abortController.signal,
                   systemBrief: structuredClone(systemSnapshot),
@@ -735,6 +741,7 @@ export class ChaosPilotServer {
               variant,
               provider: providerKind,
               maxExperiments,
+              continueAfterFindings,
               systemBrief: {
                 id: systemSnapshot.brief.id,
                 name: systemSnapshot.brief.name,

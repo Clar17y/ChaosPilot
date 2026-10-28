@@ -1,5 +1,7 @@
 # ChaosPilot: system workspace and investigation UX brief
 
+This is the original design brief. The application has since added an inventory-reservation adapter; see [SECOND_SYSTEM.md](../SECOND_SYSTEM.md) for its current scope.
+
 ## Requested outcome
 
 Design a credible product workflow for an automation engineer to describe a system, inspect its business requirements, launch bounded negative investigations and understand reproducible findings. The current runner proves plumbing but does not expose the knowledge being investigated. The participant specifically requested Astra for this design work.

@@ -1,7 +1,8 @@
 // Integration contracts. Target implementation and hidden evaluation metadata live elsewhere.
 export const TARGET_VARIANTS = ['clean', 'candidate-a', 'candidate-b', 'candidate-c', 'candidate-d', 'candidate-e', 'candidate-f', 'candidate-g', 'candidate-h', 'candidate-i'] as const;
-export const INVENTORY_TARGET_VARIANTS = ['clean', 'inventory-candidate-a'] as const;
-export const ALL_TARGET_VARIANTS = [...TARGET_VARIANTS, 'inventory-candidate-a'] as const;
+const INVENTORY_FAULT_VARIANTS = ['inventory-candidate-a', 'inventory-candidate-b', 'inventory-candidate-c', 'inventory-candidate-d'] as const;
+export const INVENTORY_TARGET_VARIANTS = ['clean', ...INVENTORY_FAULT_VARIANTS] as const;
+export const ALL_TARGET_VARIANTS = [...TARGET_VARIANTS, ...INVENTORY_FAULT_VARIANTS] as const;
 export type TargetVariant = typeof ALL_TARGET_VARIANTS[number];
 export type ProviderKind = 'mock' | 'meta';
 export type Channel = 'market' | 'credit' | 'client' | 'reports' | 'stock' | 'reservations' | 'shipments';
@@ -56,6 +57,8 @@ export interface SystemBriefSnapshot {
 export interface Violation {
   id: string;
   invariant: string;
+  /** Deterministic category from the independent oracle, when available. Groups repeats of the same observable failure. */
+  category?: string;
   message: string;
   step: number;
   orderId?: string;
@@ -75,6 +78,11 @@ export interface TraceEntry {
 
 export interface ExperimentResult {
   schemaVersion: 1;
+  /** True when produced by an oracle that records violation categories.
+   * Absent on genuine legacy results; stripped categories on a
+   * category-aware result must not be treated as legacy during replay.
+   * This is a consistency marker, not tamper resistance. */
+  categoryAware?: boolean;
   experiment: Experiment;
   sourceHash: string;
   trace: TraceEntry[];
@@ -183,6 +191,8 @@ export interface Finding {
   title: string;
   hypothesis: string;
   experimentIndex: number;
+  /** Oracle category used to group repeats; falls back to the invariant for legacy/generic findings. */
+  category?: string;
   violation: Violation;
   sourceHash: string;
   reproduced: boolean;
@@ -197,6 +207,8 @@ export interface InvestigationRecord {
   model: string;
   mode: 'live' | 'mock';
   variant: TargetVariant;
+  /** Opt-in continuation after verified findings. Absent on legacy records (treated as false). */
+  continueAfterFindings?: boolean;
   status: 'running' | 'completed' | 'cancelled' | 'failed';
   startedAt: string;
   finishedAt?: string;
@@ -225,6 +237,7 @@ export interface InvestigationRecord {
 export interface InvestigationOptions {
   id?: string;
   variant: TargetVariant;
+  continueAfterFindings?: boolean;
   maxExperiments?: number;
   maxProposalAttempts?: number;
   provider: ExperimentProvider;

@@ -1,6 +1,18 @@
 import type { Experiment, ExperimentResult, TargetVariant, TraceEntry, Violation } from '../domain.ts';
 import { InventoryService as Clean } from './variants/clean/service.ts';
 import { InventoryService as Candidate } from './variants/candidate-a/service.ts';
+import { InventoryService as CandidateB } from './variants/candidate-b/service.ts';
+import { InventoryService as CandidateC } from './variants/candidate-c/service.ts';
+import { InventoryService as CandidateD } from './variants/candidate-d/service.ts';
+
+interface InventoryLike { receive(channel: string, input: unknown): 'accepted' | 'duplicate' | 'rejected'; snapshot(): import('./variants/clean/service.ts').InventoryState }
+const SERVICES: Partial<Record<TargetVariant, new () => InventoryLike>> = {
+  clean: Clean,
+  'inventory-candidate-a': Candidate,
+  'inventory-candidate-b': CandidateB,
+  'inventory-candidate-c': CandidateC,
+  'inventory-candidate-d': CandidateD,
+};
 import { InventoryOracle } from './oracle.ts';
 import { getSourceBundle } from './bundle.ts';
 import { parseExperiment } from './parser.ts';
@@ -13,7 +25,9 @@ interface Message { id: string; channel: string; payload: unknown; due: number; 
 export function executeExperiment(input: Experiment, variant: TargetVariant): ExperimentResult {
   const source = getSourceBundle(variant);
   const experiment = parseExperiment(input);
-  const target = variant === 'clean' ? new Clean() : new Candidate();
+  const ServiceClass = SERVICES[variant];
+  if (!ServiceClass) throw new Error(`Unsupported inventory variant: ${variant}`);
+  const target = new ServiceClass();
   const oracle = new InventoryOracle();
   const messages = new Map<string, Message>();
   const trace: TraceEntry[] = [];
@@ -64,5 +78,5 @@ export function executeExperiment(input: Experiment, variant: TargetVariant): Ex
       break;
     }
   }
-  return { schemaVersion: 1, experiment, sourceHash: source.hash, trace, snapshot: { target: target.snapshot(), logicalTime: time, messages: [...messages.values()] }, violations, rejections, valid };
+  return { schemaVersion: 1, categoryAware: true, experiment, sourceHash: source.hash, trace, snapshot: { target: target.snapshot(), logicalTime: time, messages: [...messages.values()] }, violations, rejections, valid };
 }

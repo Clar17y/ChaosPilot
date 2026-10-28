@@ -2,6 +2,8 @@
 
 Snapshot: 27 October 2026. This note assesses the merged product at `4844d48` against the original hackathon goal. A separate desktop UI/UX pass has finished locally in the shared checkout; its uncommitted changes and verification are not included in the merged-product claims below.
 
+This is a historical snapshot. The inventory-reservation system described as planned below was subsequently implemented; see [SECOND_SYSTEM.md](SECOND_SYSTEM.md) for its current scope and limitations.
+
 ## Original goal
 
 Build a credible end-to-end negative-testing investigator for automation engineers. Given a system's source, capabilities and business rules, it should form hypotheses, choose and execute experiments, check outcomes independently and produce reproducible evidence. The hackathon slice uses a synthetic event-driven trading system and Meta models. The proposed longer-term value is reducing the effort needed to design and prove useful negative scenarios; the longer-term vision includes other systems and transports.

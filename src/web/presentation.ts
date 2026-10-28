@@ -24,6 +24,48 @@ export function tabIndexForKey(currentIndex: number, key: string, tabCount: numb
   }
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  cancellation_release: 'Cancellation release',
+  duplicate_shipment: 'Duplicate shipment',
+  duplicate_event: 'Duplicate event',
+  shipment_quantity: 'Shipment quantity',
+  reservation_availability: 'Reservation availability',
+  stock_receipt: 'Stock receipt',
+  inventory_transition: 'Inventory transition',
+};
+
+/**
+ * Human-readable label for the observed oracle category on a finding.
+ * Known categories get a readable name plus the raw value; unknown values are
+ * returned verbatim (callers render as text, never HTML). Legacy findings
+ * without category metadata get an explicit fallback.
+ */
+export function findingCategoryLabel(finding: { category?: unknown; violation?: { category?: unknown } | null }): string {
+  const raw = typeof finding.category === 'string' && finding.category.trim() ? finding.category
+    : typeof finding.violation?.category === 'string' && finding.violation.category.trim() ? finding.violation.category
+    : null;
+  if (!raw) return 'Not recorded (legacy finding without category metadata)';
+  const known = CATEGORY_LABELS[raw];
+  return known ? `${known} (${raw})` : raw;
+}
+
+/** Persisted continuation setting for saved run details. Absent means off (legacy default). */
+export function continuationSettingLabel(continueAfterFindings: unknown): string {
+  return continueAfterFindings === true
+    ? 'Continue after findings: on (bounded continuation after verified findings)'
+    : 'Continue after findings: off (stop after the first verified finding)';
+}
+
+/** Readable label for a target variant choice. Unknown values are returned verbatim as text. */
+export function targetVariantLabel(variant: string): string {
+  if (variant === 'clean') return 'Clean control';
+  const inventory = /^inventory-candidate-([a-z])$/.exec(variant);
+  if (inventory) return `Inventory Candidate ${inventory[1]!.toUpperCase()}`;
+  const candidate = /^candidate-([a-z])$/.exec(variant);
+  if (candidate) return `Candidate ${candidate[1]!.toUpperCase()}`;
+  return variant;
+}
+
 /** Keeps a selection valid after a record refresh adds/removes experiments. */
 export function clampSelectedIndex(selected: number, count: number): number {
   if (count <= 0) return 0;
