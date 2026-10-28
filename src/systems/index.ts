@@ -7,7 +7,7 @@ import type {
   SystemContract,
 } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
-import { getContract } from '../simulator/contract.ts';
+import { resolveAdapter } from '../adapters/index.ts';
 
 export class SystemIntegrityError extends Error {
   constructor(message: string) {
@@ -76,6 +76,17 @@ export const SEEDED_TRADING_BRIEF: Readonly<SystemBrief> = Object.freeze({
   ],
   adapterId: 'synthetic-trading',
   updatedAt: '2026-10-26T00:00:00.000Z',
+});
+
+export const SEEDED_INVENTORY_BRIEF: Readonly<SystemBrief> = Object.freeze({
+  schemaVersion: 1, id: 'inventory-reservation', revision: 1,
+  name: 'Inventory reservation service',
+  overview: 'Deterministic stock receipts, reservations, cancellation and shipment with explicit message delivery.',
+  requirements: [
+    'Reservations may not exceed available stock; shipments and cancellation conserve quantities.',
+    'Accepted event ids are idempotent, conflicting ids are rejected, and rejected input leaves business state unchanged.',
+  ],
+  adapterId: 'inventory-reservation', updatedAt: '2026-10-27T00:00:00.000Z',
 });
 
 const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
@@ -160,10 +171,10 @@ export function validateSystemBrief(
     }
   }
 
-  if (b.adapterId !== 'synthetic-trading' && b.adapterId !== 'unconfigured') {
+  if (b.adapterId !== 'synthetic-trading' && b.adapterId !== 'inventory-reservation' && b.adapterId !== 'unconfigured') {
     return {
       valid: false,
-      error: "adapterId must be 'synthetic-trading' or 'unconfigured'",
+      error: "adapterId must be 'synthetic-trading', 'inventory-reservation' or 'unconfigured'",
     };
   }
 
@@ -403,9 +414,9 @@ export async function readSystemBriefFile(
   return validated.brief;
 }
 
-export async function ensureSeededSystem(systemsDir: string): Promise<SystemBrief> {
+async function ensureSeededBrief(systemsDir: string, seed: Readonly<SystemBrief>): Promise<SystemBrief> {
   await fs.mkdir(systemsDir, { recursive: true });
-  const seededId = SEEDED_TRADING_BRIEF.id;
+  const seededId = seed.id;
   const seededPath = resolveSystemPath(systemsDir, seededId);
 
   return withSystemLock(systemsDir, seededId, async () => {
@@ -415,7 +426,7 @@ export async function ensureSeededSystem(systemsDir: string): Promise<SystemBrie
       const code = (err as { code?: string })?.code;
       if (code === 'ENOENT') {
         // Seed ONLY on actual ENOENT
-        const seeded: SystemBrief = structuredClone(SEEDED_TRADING_BRIEF);
+        const seeded: SystemBrief = structuredClone(seed);
         seeded.updatedAt = new Date().toISOString();
         const serialized = JSON.stringify(seeded, null, 2);
         const tempPath = path.join(
@@ -432,6 +443,12 @@ export async function ensureSeededSystem(systemsDir: string): Promise<SystemBrie
   });
 }
 
+export async function ensureSeededSystem(systemsDir: string): Promise<SystemBrief> {
+  const trading = await ensureSeededBrief(systemsDir, SEEDED_TRADING_BRIEF);
+  await ensureSeededBrief(systemsDir, SEEDED_INVENTORY_BRIEF);
+  return trading;
+}
+
 export async function getSystemBrief(
   id: string,
   systemsDir: string
@@ -444,8 +461,9 @@ export async function getSystemBrief(
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code;
     if (code === 'ENOENT') {
-      if (id === SEEDED_TRADING_BRIEF.id) {
-        return ensureSeededSystem(systemsDir);
+      if (id === SEEDED_TRADING_BRIEF.id || id === SEEDED_INVENTORY_BRIEF.id) {
+        await ensureSeededSystem(systemsDir);
+        return readSystemBriefFile(filePath, id);
       }
       return null;
     }
@@ -593,13 +611,10 @@ export async function createSystemSnapshot(
   brief: SystemBrief,
   contractOverride?: SystemContract | null
 ): Promise<SystemBriefSnapshot> {
-  let contract: SystemContract | null = null;
-
-  if (brief.adapterId === 'synthetic-trading') {
-    contract = contractOverride !== undefined ? contractOverride : getContract();
-  } else {
-    contract = null;
-  }
+  const validated = validateSystemBrief(brief);
+  if (!validated.valid) throw new SystemIntegrityError(validated.error);
+  const contract = brief.adapterId === 'unconfigured' ? null
+    : contractOverride !== undefined ? contractOverride : resolveAdapter(brief.adapterId).getContract();
 
   const hash = computeSnapshotHash(brief, contract);
 

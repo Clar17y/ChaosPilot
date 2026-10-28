@@ -25,7 +25,7 @@
         <button type="button" class="nav-btn" data-view="findings">Findings &amp; reproductions</button>
       </nav>
       <button id="btn-prepare-nav" type="button" class="btn btn-primary rail-wide prepare-action" data-view="prepare">Prepare investigation</button>
-      <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator. It does not test an arbitrary application. The inventory reservation adapter is not available on this server, so it cannot be selected or run here. Other systems can be described and saved as drafts.</p>
+      <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator, and <strong>inventory-reservation</strong> tests the synthetic inventory reservation system. Neither tests an arbitrary application. Other systems can be described and saved as drafts.</p>
       <p id="announcement" class="visually-hidden" role="status" aria-live="polite"></p>
     </aside>
 
@@ -124,7 +124,7 @@
                 <label for="system-adapter-select">Execution adapter</label>
                 <select id="system-adapter-select" class="form-input">
                   <option value="synthetic-trading">synthetic-trading (Executable synthetic trading simulator)</option>
-                  <option value="inventory-reservation" disabled>inventory-reservation (Not available on this server — cannot be saved or run)</option>
+                  <option value="inventory-reservation">inventory-reservation (Executable synthetic inventory reservation system)</option>
                   <option value="unconfigured">unconfigured (Draft spec - Run disabled)</option>
                 </select>
               </div>
@@ -304,7 +304,10 @@
                   <p id="repro-fresh-status" class="input-hint" role="status"></p>
                 </div>
               </div>
-              <div class="repro-provenance" id="repro-provenance" aria-label="Reproduction provenance"></div>
+              <details class="repro-provenance" id="repro-provenance">
+                <summary>Run and source provenance</summary>
+                <div class="repro-provenance-items" id="repro-provenance-items"></div>
+              </details>
               <section id="repro-evidence" class="repro-evidence" aria-label="Evidence summary">
                 <h3 id="repro-evidence-heading">Original finding summary (historical)</h3>
                 <div id="repro-evidence-body"></div>
@@ -322,6 +325,12 @@
               <div id="repro-body" class="repro-body hidden">
                 <ol id="repro-timeline" class="repro-timeline" aria-label="Recorded steps"></ol>
                 <div class="repro-detail">
+                  <div class="repro-controls" role="group" aria-label="Recorded playback controls">
+                    <button type="button" class="btn btn-secondary" id="btn-repro-prev">Previous step</button>
+                    <button type="button" class="btn btn-primary" id="btn-repro-play" aria-pressed="false">Play recorded steps</button>
+                    <button type="button" class="btn btn-secondary" id="btn-repro-next">Next step</button>
+                    <button type="button" class="btn btn-secondary" id="btn-repro-reset">Reset</button>
+                  </div>
                   <p id="repro-step-count" class="repro-step-count" aria-live="polite"></p>
                   <h3 id="repro-step-title">Before the first recorded step</h3>
                   <p id="repro-step-kind" class="muted"></p>
@@ -347,13 +356,7 @@
                     <h4>Recorded state</h4><pre id="repro-state" class="code-block"></pre>
                   </details>
                   <p id="repro-unattributed" class="note warn hidden"></p>
-                  <div class="repro-controls" role="group" aria-label="Recorded playback controls">
-                    <button type="button" class="btn btn-secondary" id="btn-repro-prev">Previous step</button>
-                    <button type="button" class="btn btn-primary" id="btn-repro-play" aria-pressed="false">Play recorded steps</button>
-                    <button type="button" class="btn btn-secondary" id="btn-repro-next">Next step</button>
-                    <button type="button" class="btn btn-secondary" id="btn-repro-reset">Reset</button>
-                  </div>
-                  <p class="input-hint">Playback is distinct from real execution. Colour is used only for rule compliance or violation, always with text; order acceptance or rejection by itself is shown neutrally.</p>
+                  <p class="input-hint">Playback is distinct from real execution. Colour is used only for rule compliance or violation, always with text; acceptance, duplication or rejection by itself is shown neutrally.</p>
                 </div>
               </div>
             </section>
@@ -374,8 +377,8 @@
               </div>
               <div id="tab-state" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-state" tabindex="0">
                 <div class="state-grid">
-                  <div class="state-section"><h3>Credit &amp; Gateway Accounting</h3><div id="credit-state-table" class="snapshot-table"><div class="empty-state">No snapshot state available.</div></div></div>
-                  <div class="state-section"><h3>Orders Tracked</h3><div id="orders-state-table" class="snapshot-table"><div class="empty-state">No orders active in snapshot.</div></div></div>
+                  <div class="state-section"><h3 id="state-primary-title">Credit &amp; Gateway Accounting</h3><div id="credit-state-table" class="snapshot-table"><div class="empty-state">No snapshot state available.</div></div></div>
+                  <div class="state-section"><h3 id="state-secondary-title">Orders Tracked</h3><div id="orders-state-table" class="snapshot-table"><div class="empty-state">No orders active in snapshot.</div></div></div>
                 </div>
               </div>
             </div>

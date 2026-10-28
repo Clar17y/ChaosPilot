@@ -44,6 +44,7 @@ describe('generalized trading walkthrough', () => {
     const withContract = rec([e(0,'delivered:processed',{type:'execution',orderId:'o1',quantity:10})], { violations, contract: { name:'',description:'',operations:[],messages:[],invariants:[{id:'no_overfill',description:'Fills must not exceed order quantity'}],limits:{} } });
     const m = buildReproductionModel(withContract, 0, null)!;
     expect(m.evidence.invariant).toBe('no_overfill'); expect(m.evidence.ruleText).toContain('Fills must not exceed');
+    expect(m.evidence.ruleLabel).toBe("Pinned rule (no_overfill) from the run's saved contract"); // no trailing colon: the renderer adds one
     expect(m.evidence.creditRelevant).toBe(false); expect(m.allSteps[0]!.isViolation).toBe(true); expect(m.allSteps[0]!.facts.join(' ')).toContain('Order: o1');
     const legacy = buildReproductionModel(rec([e(0,'delivered:processed',{type:'execution',orderId:'o1'})], { violations }), 0, null)!;
     expect(legacy.evidence.ruleText).toBeNull(); expect(legacy.evidence.ruleLabel).toContain('unavailable');

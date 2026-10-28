@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import type { ProviderContext } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
+import { INVENTORY_PROMPT_VERSION, INVENTORY_SYSTEM_PROMPT, INVENTORY_PROMPT_TEMPLATE_HASH } from './inventory-prompt.ts';
 
 export const PROMPT_VERSION = '3.0';
 
@@ -85,7 +86,7 @@ export function computePromptHash(systemMessage: string, userMessage: string): s
 }
 
 export function buildInvestigationPrompt(context: ProviderContext): { systemMessage: string; userMessage: string } {
-  const systemMessage = SYSTEM_PROMPT_TEMPLATE;
+  const systemMessage = getPromptIdentity(context.systemBrief?.brief.adapterId).systemMessage;
 
   const sourceSection = context.source.files
     .map(f => `--- File: ${f.path} ---\n${f.content}`)
@@ -154,4 +155,10 @@ export function buildInvestigationPrompt(context: ProviderContext): { systemMess
   const userMessage = userMessageParts.join('\n');
 
   return { systemMessage, userMessage };
+}
+
+export function getPromptIdentity(adapterId = 'synthetic-trading') {
+  if (adapterId === 'synthetic-trading') return { promptVersion: PROMPT_VERSION, promptTemplateHash: PROMPT_TEMPLATE_HASH, systemMessage: SYSTEM_PROMPT_TEMPLATE };
+  if (adapterId === 'inventory-reservation') return { promptVersion: INVENTORY_PROMPT_VERSION, promptTemplateHash: INVENTORY_PROMPT_TEMPLATE_HASH, systemMessage: INVENTORY_SYSTEM_PROMPT };
+  throw new Error(`Unsupported prompt adapter: ${adapterId}`);
 }

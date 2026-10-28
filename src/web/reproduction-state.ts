@@ -1,5 +1,6 @@
 import type { Finding, InvestigationRecord } from '../domain.ts';
-import type { ExperimentReplayLike, FreshReplayState } from './reproduction-player.ts';
+import { firstResolvableFindingPosition } from '../experiment-identity.ts';
+import { classifyFreshReplay, type ExperimentReplayLike, type FreshClassification, type FreshReplayState } from './reproduction-player.ts';
 
 /** A terminal result can be reported before the server has finished saving it. */
 export function replayWaitsForSave(
@@ -94,5 +95,40 @@ export class ReproductionSession {
     this.fresh = next;
     this.freshReport = report ?? null;
     return true;
+  }
+
+  /**
+   * Production fresh-rerun settlement used by the app handler: classify the
+   * report (every classification is propagated unchanged) and settle it only
+   * if the pending scope is still current. Returns the settled
+   * classification, or null when the result is stale.
+   */
+  settleFreshReport(token: number, runId: string, report: ExperimentReplayLike, experimentPosition?: number, findingId?: string | null): FreshClassification | null {
+    const kind = classifyFreshReplay(report);
+    return this.settleFresh(token, runId, { kind }, report, experimentPosition, findingId) ? kind : null;
+  }
+
+  /** Production fresh-rerun error settlement; false when the scope is stale. */
+  settleFreshError(token: number, runId: string, message: string, experimentPosition?: number, findingId?: string | null): boolean {
+    return this.settleFresh(token, runId, { kind: 'error', message }, null, experimentPosition, findingId);
+  }
+
+  /**
+   * Default selection for a newly opened run: the first finding whose
+   * experiment resolves (including guarded legacy resolution). Falls back
+   * to experiment position 0 with no finding when none resolves. Callers
+   * must apply this only on a run change, never on same-run refresh, so a
+   * deliberate selection is preserved.
+   */
+  applyDefaultFindingSelection(record: InvestigationRecord | null | undefined): number {
+    const first = firstResolvableFindingPosition(record ?? undefined);
+    if (first) {
+      this.selectedFinding = first.finding as Finding;
+      this.experimentPosition = first.position;
+      return first.position;
+    }
+    this.selectedFinding = null;
+    this.experimentPosition = null;
+    return 0;
   }
 }

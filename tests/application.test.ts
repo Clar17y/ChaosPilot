@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { ChaosPilotServer, createServer } from '../src/server.ts';
+import { PROMPT_TEMPLATE_HASH, PROMPT_VERSION } from '../src/investigation/index.ts';
 import { main as cliMain } from '../src/cli.ts';
 import {
   saveRun,
@@ -101,8 +102,11 @@ function createDummyRecord(id: string, variant: TargetVariant = 'candidate-a'): 
     errors: [],
     contextAudit: {
       sourcePaths: ['order-engine.ts'],
-      contractHash: 'contract-hash',
-      promptVersion: '1.0',
+      // Legacy fixture: no contract hash was recorded, and the recorded prompt
+      // identity is the current one, so source+execution exactness is testable.
+      contractHash: '',
+      promptVersion: PROMPT_VERSION,
+      promptTemplateHash: PROMPT_TEMPLATE_HASH,
     },
   };
 }
@@ -807,6 +811,27 @@ describe('HTTP Server Lifecycle & Invariants', () => {
 
     const trav2 = await fetch(`${baseUrl}/etc/passwd`);
     expect(trav2.status).toBe(404);
+  });
+
+  it('serves every module imported by the workspace without exposing server modules', async () => {
+    const pending = [new URL('/app.js', baseUrl).href];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const moduleUrl = pending.pop()!;
+      if (visited.has(moduleUrl)) continue;
+      visited.add(moduleUrl);
+      const response = await fetch(moduleUrl);
+      expect(response.status, moduleUrl).toBe(200);
+      expect(response.headers.get('content-type'), moduleUrl).toContain('javascript');
+      const source = await response.text();
+      for (const match of source.matchAll(/^(?:import|export)\s+(?:.*?\sfrom\s*)?['"]([^'"]+)['"]/gm)) {
+        const specifier = match[1]!;
+        expect(specifier, moduleUrl).toMatch(/^\.{1,2}\//);
+        pending.push(new URL(specifier, moduleUrl).href);
+      }
+    }
+    expect(visited.has(new URL('/experiment-identity.js', baseUrl).href)).toBe(true);
+    expect((await fetch(`${baseUrl}/storage.js`)).status).toBe(404);
   });
 
   it('exposes contract without raw env or secret answer keys', async () => {

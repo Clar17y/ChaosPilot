@@ -1030,8 +1030,11 @@ button{font:inherit}
 .repro-head>div:first-child{flex:1 1 28rem;min-width:0}
 .repro-head h2{font-size:1.5rem;line-height:1.2}
 .repro-rerun{display:flex;flex-direction:column;gap:var(--space-2);max-width:340px}
-.repro-provenance{display:flex;gap:var(--space-2) var(--space-4);flex-wrap:wrap;font-size:13px;color:var(--text-muted);margin:var(--space-3) 0;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color);padding:var(--space-3) 0}
-.repro-provenance span{min-width:0;overflow-wrap:anywhere}
+.repro-provenance{font-size:13px;color:var(--text-muted);margin:var(--space-3) 0;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color);padding:var(--space-2) 0}
+.repro-provenance summary{cursor:pointer;font-weight:600;color:var(--text-main);min-height:var(--control-height);display:flex;align-items:center}
+.repro-provenance summary:focus-visible{outline:2px solid var(--accent-cyan);outline-offset:2px}
+.repro-provenance-items{display:flex;gap:var(--space-2) var(--space-4);flex-wrap:wrap;padding:var(--space-2) 0}
+.repro-provenance-items span{min-width:0;overflow-wrap:anywhere}
 .repro-body{display:grid;grid-template-columns:minmax(220px,.85fr) minmax(0,1.6fr);gap:var(--space-5);align-items:start}
 .repro-timeline{list-style:none;display:flex;flex-direction:column;gap:var(--space-2);margin:0;padding:2px;max-height:22rem;overflow-y:auto;scrollbar-color:var(--border-color) var(--bg-primary)}
 .repro-timeline button{width:100%;text-align:left;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius);color:var(--text-main);padding:var(--space-3);cursor:pointer;min-height:var(--control-height)}
@@ -1060,6 +1063,9 @@ button{font:inherit}
 .repro-controls{display:flex;gap:var(--space-2);flex-wrap:wrap}
 .repro-evidence{border:1px solid var(--border-color);border-radius:var(--radius);padding:var(--space-3);margin:var(--space-3) 0;overflow-wrap:anywhere}
 .repro-evidence p{margin:var(--space-1) 0}
+.repro-evidence-details{margin-top:var(--space-2)}
+.repro-evidence-details summary{cursor:pointer;font-weight:600;min-height:var(--control-height);display:flex;align-items:center}
+.repro-evidence-details summary:focus-visible{outline:2px solid var(--accent-cyan);outline-offset:2px}
 .repro-view-controls{display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center;margin:var(--space-3) 0}
 .repro-view-controls button:focus-visible{outline:2px solid var(--accent-cyan);outline-offset:2px}
 #repro-generic-facts{margin-left:1.2rem;overflow-wrap:anywhere}

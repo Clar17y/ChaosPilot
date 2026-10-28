@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
-import { compareSemanticReplay, canonicalJson } from '../evidence.ts';
+import { compareSemanticReplay, canonicalJson, computeContractHash } from '../evidence.ts';
 import { computeSnapshotHash, validateSystemBrief } from '../systems/index.ts';
+import { resolveAdapter, assertAdapterVariant } from '../adapters/index.ts';
 import type {
   Experiment,
   ExperimentProvider,
@@ -23,8 +24,7 @@ import type {
   Usage
 } from '../domain.ts';
 import {
-  PROMPT_VERSION,
-  PROMPT_TEMPLATE_HASH
+  getPromptIdentity
 } from './prompt.ts';
 
 export {
@@ -45,7 +45,7 @@ export type ExtendedInvestigationOptions = InvestigationOptions & {
   simulator?: SimulatorApi;
 };
 
-async function resolveSimulator(custom?: SimulatorApi): Promise<SimulatorApi> {
+async function resolveSimulator(custom?: SimulatorApi, adapterId = 'synthetic-trading'): Promise<SimulatorApi> {
   if (
     custom &&
     typeof custom.getContract === 'function' &&
@@ -56,13 +56,7 @@ async function resolveSimulator(custom?: SimulatorApi): Promise<SimulatorApi> {
     return custom;
   }
 
-  const mod = await import('../simulator/index.ts');
-  return {
-    getContract: mod.getContract,
-    getSourceBundle: mod.getSourceBundle,
-    parseExperiment: mod.parseExperiment,
-    executeExperiment: mod.executeExperiment
-  };
+  return resolveAdapter(adapterId);
 }
 
 function cloneRecord(record: InvestigationRecord): InvestigationRecord {
@@ -79,11 +73,14 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     throw new Error('maxProposalAttempts must be an integer from 0 to 60');
   }
 
-  const sim = await resolveSimulator(options.simulator);
+  const adapterId = options.systemBrief?.brief?.adapterId ?? 'synthetic-trading';
+  assertAdapterVariant(adapterId, variant);
+  const promptIdentity = getPromptIdentity(adapterId);
+  const sim = await resolveSimulator(options.simulator, adapterId);
   const contract = sim.getContract();
   const source = sim.getSourceBundle(variant);
 
-  const contractHash = crypto.createHash('sha256').update(JSON.stringify(contract)).digest('hex');
+  const contractHash = computeContractHash(contract);
 
   let systemBriefSnapshot: SystemBriefSnapshot | undefined = undefined;
   if (options.systemBrief !== undefined && options.systemBrief !== null) {
@@ -121,7 +118,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
         `Cannot run investigation: System brief "${clonedBrief.name}" has unconfigured adapter.`
       );
     }
-    if (clonedBrief.adapterId !== 'synthetic-trading') {
+    if (clonedBrief.adapterId !== 'synthetic-trading' && clonedBrief.adapterId !== 'inventory-reservation') {
       throw new Error(
         `Cannot run investigation: System brief "${clonedBrief.name}" has unsupported adapter "${clonedBrief.adapterId}".`
       );
@@ -144,6 +141,13 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     };
   }
 
+  // Record clean-control provenance for inventory and snapshot-backed trading
+  // runs so replay can verify it. Omit it when genuinely unavailable.
+  const cleanAudit: { adapterId: string; variant: TargetVariant; cleanSourceHash?: string } | Record<string, never> =
+    adapterId === 'inventory-reservation' || systemBriefSnapshot
+      ? { adapterId, variant, ...((): { cleanSourceHash?: string } => { try { const h = sim.getSourceBundle('clean').hash; return h ? { cleanSourceHash: h } : {}; } catch { return {}; } })() }
+      : {};
+
   const record: InvestigationRecord = {
     schemaVersion: 1,
     id,
@@ -165,10 +169,11 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     proposalAttempts: [],
     systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
     contextAudit: {
+      ...cleanAudit,
       sourcePaths: source.files.map(f => f.path),
       contractHash,
-      promptVersion: PROMPT_VERSION,
-      promptTemplateHash: PROMPT_TEMPLATE_HASH,
+      promptVersion: promptIdentity.promptVersion,
+      promptTemplateHash: promptIdentity.promptTemplateHash,
       providerConfiguration: provider.configuration ? { ...provider.configuration } : undefined,
       maxProposalAttempts
     }
@@ -423,6 +428,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     let result: ExperimentResult;
     try {
       result = sim.executeExperiment(parsedExperiment, variant);
+      if (result.sourceHash !== source.hash) throw new Error('Execution source identity does not match investigation source');
     } catch (simErr: unknown) {
       const errorMsg = simErr instanceof Error ? simErr.message : String(simErr);
       finishAttempt('failed', { error: `Simulator execution failed: ${errorMsg}` });
@@ -459,6 +465,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       let cleanResult: ExperimentResult | undefined;
       try {
         cleanResult = sim.executeExperiment(parsedExperiment, 'clean');
+        if (record.contextAudit.cleanSourceHash && cleanResult.sourceHash !== record.contextAudit.cleanSourceHash) cleanResult = undefined;
       } catch {
         cleanResult = undefined;
       }
@@ -490,7 +497,9 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
                 sourceHash: result.sourceHash,
                 reproduced: true,
                 cleanControlPassed: true,
-                replay: parsedExperiment
+                // Independent copy: the saved finding plan must not alias the
+                // experiment/result copies, matching persisted JSON semantics.
+                replay: structuredClone(parsedExperiment)
               };
               record.findings.push(finding);
             }
@@ -503,7 +512,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
 
     const expRecord: ExperimentRecord = {
       index: experimentCount,
-      experiment: parsedExperiment,
+      experiment: structuredClone(parsedExperiment),
       result,
       replayVerified,
       cleanControlPassed

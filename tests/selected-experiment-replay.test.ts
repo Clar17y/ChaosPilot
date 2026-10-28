@@ -16,9 +16,18 @@ import type {
   Experiment,
   ExperimentResult,
   InvestigationRecord,
+  SystemContract,
 } from '../src/domain.ts';
+import { computeContractHash } from '../src/evidence.ts';
+import { getPromptIdentity } from '../src/investigation/prompt.ts';
 
 const SOURCE = 'hash-abc-123';
+/** Contract the instrumented simulator reports; fixture audit hashes it so
+ * legacy context gates verify identical instead of blocking exact claims. */
+const FAKE_CONTRACT: SystemContract = {
+  name: 'Echo contract', description: 'Instrumented test contract',
+  operations: [], messages: [], invariants: [{ id: 'inv', description: 'test invariant' }], limits: {},
+};
 
 function resultFor(exp: Experiment, marker: string): ExperimentResult {
   return {
@@ -52,13 +61,19 @@ function makeRecord(id: string, indices: (number | undefined)[] = [7, 42]): Inve
     startedAt: new Date(Date.now() - 5000).toISOString(), finishedAt: new Date().toISOString(),
     sourceHash: SOURCE, experiments, findings: [],
     usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }, errors: [],
-    contextAudit: { sourcePaths: ['order-engine.ts'], contractHash: 'c', promptVersion: '1.0' },
+    contextAudit: {
+      sourcePaths: ['order-engine.ts'],
+      contractHash: computeContractHash(FAKE_CONTRACT),
+      promptVersion: getPromptIdentity('synthetic-trading').promptVersion,
+      promptTemplateHash: getPromptIdentity('synthetic-trading').promptTemplateHash,
+    },
   };
 }
 
 /** Instrumented deterministic simulator: echoes the saved result for the executed experiment. */
 function echoSimulator(calls: string[], opts: { bundleHash?: string; mutate?: (r: ExperimentResult) => void; throwOn?: string } = {}) {
   const sim: SimulatorApi = {
+    getContract: () => FAKE_CONTRACT,
     getSourceBundle: () => ({ hash: opts.bundleHash ?? SOURCE, files: [] }),
     executeExperiment: (exp) => {
       calls.push(exp.hypothesis);
