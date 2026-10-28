@@ -134,7 +134,7 @@ function createFakeRecord(
         requestHash: `req-hash-${model}-1`,
         systemMessage: 'system',
         userMessage: 'user',
-        configuration: { model, reasoningEffort: 'low', temperature: 0.2, maxOutputTokens: 4096, maxPromptBytes: 32768, requestTimeoutMs: 90000 },
+        configuration: { model, reasoningEffort: 'low', temperature: 0.2, maxOutputTokens: 32768, maxPromptBytes: 131072, requestTimeoutMs: 90000 },
       },
       response: {
         finishReason: 'stop',
@@ -516,6 +516,42 @@ describe('Controlled Benchmark Engine & Reports', () => {
     expect(trial.truncationCount).toBe(1);
     expect(trial.unknownUsageCount).toBe(1);
     expect(trial.executedExperimentCount).toBe(1);
+  });
+
+  it('preserves a real runner’s partial executions when a corrected trial exhausts its fixed call allowance', async () => {
+    let calls = 0;
+    const report = await runBenchmark({
+      provider: 'meta', models: ['muse-wonder-1.0'], targets: ['clean'], trials: 1, maxExperiments: 3,
+      benchmarksDir: testBenchmarksDir, simulator: createFakeSimulator(),
+      budgetLedger: new BudgetLedger(path.join(testRunsDir, 'test-ledger.json'), 500),
+      providerFactory: (_kind, model, config) => {
+        const actualConfig = {
+          model, reasoningEffort: String(config?.reasoningEffort), temperature: 0.2,
+          maxOutputTokens: Number(config?.maxOutputTokens), maxPromptBytes: Number(config?.maxPromptBytes),
+          requestTimeoutMs: Number(config?.requestTimeoutMs)
+        };
+        return {
+          kind: 'meta', model, configuration: actualConfig,
+          propose: async (_context, _signal, onRequestAudit) => {
+            calls++;
+            await onRequestAudit?.({ promptVersion: PROMPT_VERSION, promptTemplateHash: PROMPT_TEMPLATE_HASH,
+              promptHash: 'a'.repeat(64), requestHash: 'b'.repeat(64), systemMessage: 'system', userMessage: 'test', configuration: actualConfig });
+            const usage = { inputTokens: 10, outputTokens: 10, estimatedCostUsd: 0.001 };
+            return calls === 1
+              ? { experiment: null, validationError: 'Model response truncated', responseAudit: { finishReason: 'length' }, requestSent: true, usage }
+              : { experiment: { hypothesis: 'bounded test', expectedInvariant: 'credit_limit_respected', steps: [] }, requestSent: true, usage };
+          }
+        };
+      }
+    });
+    const trial = report.arms['muse-wonder-1.0']!.trials[0]!;
+    expect(calls).toBe(3);
+    expect(trial.status).toBe('failed');
+    expect(trial.errorReason).toContain('Maximum proposal attempts reached');
+    expect(trial.executedExperimentCount).toBe(2);
+    expect(trial.truncationCount).toBe(1);
+    expect(trial.record?.experiments).toHaveLength(2);
+    expect(trial.comparabilityStatus).toBe('comparable');
   });
 
   it('preserves failed and cancelled trials and saves partial report on abort', async () => {

@@ -196,6 +196,19 @@ describe('Inventory saved evidence and replay', () => {
     expect(report.reproduced).toBe(false);
   });
 
+  it('reports pre-compaction prompt version drift without losing matching experiment replay', async () => {
+    const old = await inventoryRecord();
+    old.contextAudit.promptVersion = 'inventory-1.0';
+    for (const attempt of old.proposalAttempts ?? []) {
+      if (attempt.request) attempt.request.promptVersion = 'inventory-1.0';
+    }
+    const report = await replayRun(old, runsDir);
+    expect(report.outcomes).toHaveLength(old.experiments.length);
+    expect(report.outcomes.every(outcome => outcome.exactMatched)).toBe(true);
+    expect(check(report, 'prompt')?.status).toBe('drifted');
+    expect(report.exactReproductionClaimed).toBe(false);
+  });
+
   it('reports contract description-only and semantic drift without aborting', async () => {
     const record = await inventoryRecord();
     const description = await replayRun(record, runsDir, inventorySimulator({

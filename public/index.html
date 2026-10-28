@@ -218,6 +218,29 @@
                 <div class="control-group">
                   <label for="target-select">Target Variant</label>
                   <select id="target-select" class="form-input"></select>
+                  <details id="trading-demo-guide" class="contract-details demo-target-guide hidden">
+                    <summary>Trading demo targets: reference</summary>
+                    <p>These are versions of the synthetic demo, each with a deliberately introduced fault. A real integration would normally investigate one system. Clean control is the comparison; not every candidate is a chaos or timing scenario.</p>
+                    <div class="table-responsive" role="region" aria-label="Trading demo target reference" tabindex="0">
+                      <table class="data-table demo-target-table">
+                        <caption class="visually-hidden">Trading demo targets and the scenarios that can expose their faults</caption>
+                        <thead><tr><th scope="col">Target</th><th scope="col">Deliberate fault</th><th scope="col">Example scenario</th></tr></thead>
+                        <tbody>
+                          <tr><th scope="row">Clean</th><td>No planted demo fault.</td><td>Reference for comparison, not proof the system is defect-free.</td></tr>
+                          <tr><th scope="row">A</th><td>A duplicate fill is counted twice.</td><td>Redeliver an execution report; credit and the fill are applied again.</td></tr>
+                          <tr><th scope="row">B</th><td>Cancellation releases too much reserved credit.</td><td>Delay a fill report until after cancellation is acknowledged.</td></tr>
+                          <tr><th scope="row">C</th><td>Credit admission ignores credit already used.</td><td>Ordinary order flow can admit an order above the total credit limit.</td></tr>
+                          <tr><th scope="row">D</th><td>An old quote overwrites a newer one.</td><td>Deliver a stale or repeated market quote after a newer update.</td></tr>
+                          <tr><th scope="row">E</th><td>An old credit limit overwrites a newer one.</td><td>Deliver a stale or repeated credit update after a newer update.</td></tr>
+                          <tr><th scope="row">F</th><td>Used credit is overwritten instead of accumulated.</td><td>Ordinary split fills leave only the latest fill counted as used credit.</td></tr>
+                          <tr><th scope="row">G</th><td>An execution with the wrong price is accepted.</td><td>Inject a fill report whose price conflicts with the order's locked price.</td></tr>
+                          <tr><th scope="row">H</th><td>A conflicting duplicate execution is acknowledged.</td><td>Send the same execution ID with different contents; it should be rejected.</td></tr>
+                          <tr><th scope="row">I</th><td>A partial fill is marked fully filled.</td><td>Ordinary partial execution leaves quantity remaining but sets status to filled.</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p>Known reproductions are scripted reference material. A live model must still propose a triggering scenario; a finding is not guaranteed.</p>
+                  </details>
                 </div>
                 <div class="control-group">
                   <label for="provider-select">Provider</label>
@@ -236,8 +259,9 @@
                   <label for="continue-after-findings-input"><input type="checkbox" id="continue-after-findings-input"> Continue after findings</label>
                   <span class="input-hint">Off: stop at the first verified finding. On: keep proposing within the experiment/proposal bounds; additional live proposals may cost more.</span>
                 </div>
+                <p id="request-preflight" class="note" role="status" aria-live="polite">Request preflight has not been evaluated.</p>
                 <div class="control-actions">
-                  <button id="btn-launch" class="btn btn-primary" type="button" aria-describedby="launch-readiness" disabled>Launch Investigation</button>
+                  <button id="btn-launch" class="btn btn-primary" type="button" aria-describedby="launch-readiness request-preflight" disabled>Launch Investigation</button>
                   <button id="btn-stop" class="btn btn-danger" type="button" disabled>Stop</button>
                 </div>
                 <p id="launch-readiness" class="input-hint hidden" role="status"></p>
@@ -283,6 +307,7 @@
             <div id="inspection-notice" class="note warn hidden"></div>
             <div id="dashboard-empty" class="empty-state">No investigation selected. Open a saved run from history or prepare a new investigation.</div>
             <div id="dashboard-detail" class="hidden">
+            <section id="run-outcome-summary" class="note warn run-outcome hidden" role="status"></section>
             <details id="run-system-snapshot" class="contract-details hidden">
               <summary>Requirements used for this investigation</summary>
               <p id="run-system-overview"></p>

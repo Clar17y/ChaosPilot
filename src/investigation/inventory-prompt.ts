@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const INVENTORY_PROMPT_VERSION = 'inventory-1.0';
+export const INVENTORY_PROMPT_VERSION = 'inventory-1.1';
 export const INVENTORY_SYSTEM_PROMPT = [
   'You are investigating an event-driven inventory reservation service using its public contract and selected implementation source.',
   'Propose short causal negative experiments, adapting to prior observations. Distinguish target rejection from invalid scheduling.',

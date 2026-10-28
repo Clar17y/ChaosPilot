@@ -922,6 +922,11 @@ textarea.form-input { min-height: 96px; resize: vertical; }
   color: var(--text-muted);
 }
 
+.demo-target-guide p{margin:12px 0;color:var(--text-muted);font-size:13px;line-height:1.5}
+.demo-target-table{min-width:0;table-layout:fixed}
+.demo-target-table th:first-child{width:15%}
+.demo-target-table td,.demo-target-table th{padding:8px;white-space:normal;overflow-wrap:anywhere}
+
 .code-block {
   margin-top: 8px;
   max-height: 280px;
@@ -974,6 +979,9 @@ textarea.form-input { min-height: 96px; resize: vertical; }
 .rowtop{display:flex;justify-content:space-between;gap:var(--space-4);align-items:flex-start;flex-wrap:wrap}
 .note{border:1px solid var(--border-color);border-left:3px solid var(--accent-cyan);padding:var(--space-3) var(--space-4);background:var(--bg-surface);margin-bottom:var(--space-4);font-size:13px;line-height:1.5;color:var(--text-main)}
 .note.warn{border-left-color:var(--accent-amber)}
+.run-outcome h3{margin:0 0 .35rem;font-size:1rem}
+.run-outcome p{margin:.35rem 0}
+.run-outcome-metrics{font-weight:600}
 .step{display:grid;grid-template-columns:30px minmax(0,1fr);gap:var(--space-3);padding:var(--space-3) 0;border-bottom:1px solid var(--border-color)}
 .step:last-child{border-bottom:0}
 .step .number{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:var(--bg-subtle);font-size:12px;font-family:var(--font-mono)}

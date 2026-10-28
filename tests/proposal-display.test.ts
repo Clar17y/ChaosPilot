@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeProposals } from '../src/web/proposals.ts';
+import { describeProposals, describeRunOutcome } from '../src/web/proposals.ts';
 import type { InvestigationRecord, ProposalAttempt } from '../src/domain.ts';
 
 function record(attempts?: ProposalAttempt[]): InvestigationRecord {
@@ -33,4 +33,46 @@ it('does not imply unknown network cost for a confirmed unsent or pending reques
   const known = attempt('executed', true);
   known.usageKnown = true;
   expect(describeProposals(record([known])).unknownCost).toBe(false);
+});
+
+it('summarizes the actual size failure and partial results without repeating technical errors', () => {
+  const rec = record([attempt('failed', false)]);
+  rec.status = 'failed';
+  rec.stopReason = 'Provider failed to propose';
+  rec.errors = ['Provider proposal failure: Prompt size (33923 bytes) exceeds maximum allowed size (32768 bytes)'];
+  rec.usage.estimatedCostUsd = 0.378492;
+  rec.experiments = [{}, {}] as InvestigationRecord['experiments'];
+  const summary = describeRunOutcome(rec)!;
+  expect(summary.heading).toBe('Investigation incomplete');
+  expect(summary.reason).toContain('33,923 bytes');
+  expect(summary.reason).toContain('32,768-byte limit');
+  expect(summary.metrics).toContain('2 experiments completed · 0 confirmed findings');
+  expect(summary.metrics).toContain('$0.3785');
+  expect(summary.notice).toContain('not a clean pass');
+});
+
+it('distinguishes cancellation and unknown usage, supports legacy records, and hides successful summaries', () => {
+  const rec = record();
+  rec.status = 'cancelled';
+  rec.stopReason = 'Investigation cancelled by user';
+  expect(describeRunOutcome(rec)).toMatchObject({ heading: 'Investigation stopped', reason: rec.stopReason });
+  expect(describeRunOutcome(rec)?.metrics).toContain('some usage is unknown');
+  rec.status = 'completed';
+  expect(describeRunOutcome(rec)).toBeNull();
+  rec.errors = ['Model response was truncated due to max_tokens limit'];
+  expect(describeRunOutcome(rec)?.reason).toContain('cut off');
+});
+
+it('does not call a legacy completed finding incomplete just because an earlier proposal was rejected', () => {
+  const rec = record([attempt('invalid_response'), attempt('executed', true)]);
+  rec.status = 'completed';
+  rec.stopReason = 'Verified finding confirmed';
+  rec.errors = ['Proposal rejected after three corrections: truncated'];
+  rec.findings = [{ reproduced: true, cleanControlPassed: true }] as InvestigationRecord['findings'];
+  const summary = describeRunOutcome(rec)!;
+  expect(summary.heading).toBe('Investigation completed with warnings');
+  expect(summary.reason).toContain('later confirmed a finding');
+  expect(summary.metrics).toContain('1 confirmed finding ·');
+  rec.proposalAttempts!.push(attempt('pending'));
+  expect(describeRunOutcome(rec)?.heading).toBe('Investigation incomplete');
 });

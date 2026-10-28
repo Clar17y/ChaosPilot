@@ -130,10 +130,14 @@ export interface ProviderRequestAudit {
   systemMessage: string;
   userMessage: string;
   configuration: Record<string, string | number>;
+  historyCompaction?: { totalObservations: number; summarizedObservations: number; omittedObservations: number };
 }
 
 export interface ProviderResponseAudit {
   content?: string;
+  /** The audit stores a bounded preview independently of the model's finish reason. */
+  contentTruncated?: boolean;
+  contentLength?: number;
   finishReason?: string;
   validationError?: string;
 }
