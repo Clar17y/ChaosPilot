@@ -1,3 +1,45 @@
+# Live market background — 28 October 2026
+
+This is the latest homepage acceptance record. The requested change is a continuously updating order book with coherent charts, retaining the selected option 1 layout and chart footprint.
+
+## Visual comparison
+
+- Before: `docs/design/homepage/market-live-before.jpg` and `market-live-mobile-before.jpg`. Final: `market-live-desktop-final.jpg` and `market-live-mobile-final.jpg`, in that same directory. All four genuine browser captures were opened together for comparison.
+- Desktop captures are both 1472 × 1047 pixels from a 1487 × 1058 CSS viewport; mobile captures are both 374 × 1604 from a 390 × 1058 CSS viewport. The browser capture provider introduces a small image scale and temporarily alters the scrollbar gutter during full-page capture; matching captures and pre-capture DOM geometry were used rather than inferring layout from those temporary metrics.
+- The hero, copy, scene and event-strip rectangles match the original desktop geometry exactly after normalizing viewport Y by scroll position. Mobile pre-capture rectangles also match exactly. Typography, text, controls, gutters, page height and navigation are retained. Canvas regions use the original 1511 × 1041 market image coordinate frame, with the existing desktop/tablet/mobile background transforms.
+- The original static values/charts were removed using built-in ImageGen to produce `public/assets/homepage/market-grid.png`, 1511 × 1041 opaque RGB. The original asset is preserved. Exact prompt and provenance: `docs/design/homepage/market-grid-asset.md`. Inspection found no ghost numbers or chart data.
+- Initial visual pass: candles/depth/volume were too strong and rising candle histories could compete with the headline. The final pass uses thinner, quieter candles, low-opacity stepped depth and volume, and reserves the actual copy rectangle. The data occupies the same plot regions; no panels or new controls were added.
+
+## Behavior, repairs and concrete coverage
+
+The new `homepage-market.ts` owns one seeded random simulation. `homepage-market-renderer.ts` derives every displayed plot from its snapshot. The existing RAF advances both the market and message timeline; scenario selection never resets or advances the market. Updates arrive 350–1000ms apart, with small bounded price changes and frequent quantity-only updates. Candles hold four seconds of trades and history is capped at 48 candles. There is no live financial feed or backend activity.
+
+The primary consolidated the source-review findings into one local integration repair after the worker finished: the first scene-bound market canvas clipped the mobile plots and cached incorrect scroll coordinates. A separate backdrop canvas now follows the background itself (fixed on desktop, document-anchored on mobile), with independent dimensions and no scroll-time layout reads. The same repair preserved resting book levels across price moves and made candle-only rollover invalidate the render immediately. A floating-point equality assertion was adjusted to a subpixel tolerance; it did not require a behavior change.
+
+| Invariant / transition | Evidence and limits |
+| --- | --- |
+| Shared book, trade, candle, depth and volume data | 18 market tests cover deterministic seeds, distinct seeds, chunked elapsed time, zero/invalid delta, 2,500 update steps, ordered positive levels, narrow spread, tick-sized moves, resting-level continuity, trade prices inside the current spread, OHLC enclosure and close/open continuity, exact cumulative depth and trade-volume sums, rollover, finite values and bounded history. |
+| Paused market survives scenario changes | Final paused book crops before/after 19 Next actions were pixel-identical. Earlier 15-action check also passed. The full paused page was byte-identical across separate captures. Evidence: `.llm-output/market-live-final-paused-a.jpg`, `market-live-final-paused-b.jpg` and earlier paused/running captures. |
+| Resize preserves market history | Desktop → mobile → desktop retained every visible price/quantity and the same candle history. Corresponding book pixels differed by at most 2/255 from screenshot compression, not changed values. Capture: `.llm-output/market-live-final-paused-after-resize.jpg`. |
+| Live updates and event switching | Separate playing captures show changed book values and charts; Play then Next remained in playback and injected event 21 into the running scene. Browser console warnings/errors were empty after the final integration. |
+| Footprint and scrolling | Transform tests cover 320/390/768/1024/1487, fixed desktop/document mobile scroll coordinates and CSS breakpoints independent of scrollbar width. Actual 320/768/1024 browser checks found no overflow, tag/copy/control collisions or tag-pair overlaps; `.llm-output/market-live-responsive.json`. Desktop/mobile comparisons above verify the requested footprint. |
+| Existing packet/scenario behavior | `homepage-events.ts`, `homepage-scene.ts` and `tests/homepage-scene.test.ts` were unchanged by this refinement. Reuse prior 210-case label-clearance checks and existing timeline tests. |
+| Hidden/offscreen and reduced-motion lifecycle | Source integration uses the existing single-loop eligibility gate and capped active-time delta. Existing timeline tests cover reduced motion; no OS reduced-motion toggle or real hidden-tab emulation was added to browser verification. No claim of exhaustive browser lifecycle coverage. |
+
+## Candidate and checks
+
+- Worktree/branch: `C:/dev/ChaosPilot-worktrees/homepage`, `codex/homepage`, base `e2fba1c0aca6b73c1cd6edbf2833f4f592324c0c`. Changes remain local and uncommitted; no push or PR for the homepage.
+- Stable code/asset binding: `.llm-output/market-live-candidate.json`, integrated native Git diff SHA-256 `493a19ced2785663169e55ea4de3c6bf4f78799994918a7df3b68dda0f241881`.
+- Host `npm test`: **514 passed in 29 files**, `.llm-output/market-live-full-tests.log`. This resolved the worker's restricted TEMP/child-process failures and missing-in-progress asset. Later changes only adjusted rendering opacity/line width, stepped depth drawing and the copy mask; unchanged full-suite evidence is reused.
+- Focused homepage/scene/market suite: **74 passed in 3 files**, `.llm-output/market-live-focused-tests.log`. Final typecheck and build passed (`market-live-typecheck.log`, `market-live-build.log`). The final one-line mask origin correction is covered by the final browser resize/scroll comparisons and typecheck/build. `git diff --check` passed.
+- Jev search completed. Integrated Jev review was saved against the candidate above, but remains **partial**, with unsupported/oversized/incomplete hunks and missing safe context. It provides no all-clear. Acceptance rests on inspected source, concrete tests and browser comparisons; no automatic extra reviewer was added for this illustrative frontend change.
+- Remote PR #16 (recorded walkthrough) merged during this work. Its merge commit was fetched and verified; clean primary `C:/dev/ChaosPilot` was safely fast-forwarded to `05695ea` with ignored-file overwrite protection. Main is clean and matches `origin/main`; task worktrees were preserved. The homepage worktree retains its original base rather than merging unrelated changes into this visual refinement.
+
+final result: passed
+
+
+---
+
 # Astra workspace integration — design QA
 
 final result: passed
@@ -74,3 +116,41 @@ The requested Meta review produced four further frontend findings, accepted by p
 | Out-of-order status response | Terminal result followed by delayed running body restored RUNNING and Stop, while backend was completed | Same delivery order retained COMPLETED with Stop hidden; `meta-repair-status-order.png` |
 
 The new request-boundary tests exercise code actually delegated to by the handlers, including immediate/deferred Stop, failure/retry, rapid settlement, terminal-before-running response order, slow-request progress, generation invalidation/stale errors, and failed profile loads without replacing context. Primary added the coupled terminal-controls case after browser acceptance exposed it. The stable final host run passed **401 tests in 24 files**, typecheck and production build. Earlier unchanged simulator, profile-store, snapshot and replay checks remain applicable. Full browser injection of every transport/init error combination is not claimed; the tests and specific observations above define the evidence.
+
+# Reproduction player - design verification
+
+This section was originally written in a different, combined checkout. Its
+screenshots were local-only files in that checkout's ignored output directory;
+they are not included in this repository and are not available to readers of
+this pull request, so no screenshot comparison can be checked from here. They
+are described, not linked, for that reason: a desktop source capture, a desktop
+implementation capture, a full-view comparison, a focused comparison, and a
+390 x 844 mobile capture, all of a saved candidate-C finding at the fourth key
+event with credit limit 100 and recorded exposure 200.
+
+Findings and repairs recorded at that time:
+- [P2] The initial player showed ten low-level rows and pushed controls beyond the demo frame. The final player derives four key events only for a validated, unambiguous credit-admission sequence, preserves source trace positions, and falls back to the complete trace otherwise.
+- [P2] Initial credit figures were visually subordinate. The final view emphasises the limit and total exposure, and the composition bar includes a limit marker.
+- [P1] Non-credit failures could be incorrectly labelled as credit-limit failures, and multiple entries sharing an action index could be assigned a violation ambiguously. Fixed by using the recorded invariant and only associating a violation when exactly one entry matches. A separate saved non-credit example and focused tests were checked at that time.
+- [P1] Recorded playback and real replay are distinct controls. The real replay reproduced the saved experiment with matching source and no model invocation at that time.
+
+Required visual surfaces:
+- Typography: existing product font and hierarchy retained; player title and failure figures enlarged.
+- Layout: aligned desktop two-column evidence and action areas; 390px view stacks content with no document horizontal overflow.
+- Colors: green represents a hypothetical rule-satisfying outcome, red a recorded violation; labels carry the same meaning in text.
+- Assets: source uses product UI rather than photography or illustrations; existing product identity retained.
+- Copy: the expected outcome is explicitly hypothetical, legacy brief absence is visible, and the synthetic target and historical status are identified.
+
+Intentional differences: the player lives within the existing investigation workspace instead of a separate page; key events are explicitly labelled as a selection from the full trace; additional provenance and replay distinctions prevent claims not supported by the saved record. A full accessibility audit and every provider failure timing were not tested.
+
+Historical checks: the combined checkout this section came from recorded 489
+passing tests plus typecheck/build and browser checks, and marked itself
+passed. That result belongs to that other combined checkout, not to this
+candidate, and cannot be verified from this pull request. It is retained only
+as historical context and is not a result for this branch.
+
+Current verification for this candidate is reported separately in the pull
+request / task handoff (focused test and typecheck commands actually run on
+this checkout), not asserted in this note.
+
+final result: not claimed for this candidate - see the separately reported current verification
