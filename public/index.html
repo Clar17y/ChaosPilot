@@ -232,6 +232,10 @@
                   <label for="max-experiments-input">Max Experiments</label>
                   <input type="number" id="max-experiments-input" class="form-input" min="1" max="20" value="5">
                 </div>
+                <div class="control-group">
+                  <label for="continue-after-findings-input"><input type="checkbox" id="continue-after-findings-input"> Continue after findings</label>
+                  <span class="input-hint">Off: stop at the first verified finding. On: keep proposing within the experiment/proposal bounds; additional live proposals may cost more.</span>
+                </div>
                 <div class="control-actions">
                   <button id="btn-launch" class="btn btn-primary" type="button" aria-describedby="launch-readiness" disabled>Launch Investigation</button>
                   <button id="btn-stop" class="btn btn-danger" type="button" disabled>Stop</button>

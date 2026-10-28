@@ -399,6 +399,27 @@ function replayOneExperiment(
   }
   const origResult = expRecord.result;
   const comparison = compareSemanticReplay(origResult, replayedResult);
+  // Category consistency between saved findings and saved result violations:
+  // a finding that retains an oracle category proves the evidence is
+  // category-aware, so a result violation with that category removed or
+  // changed cannot claim exact replay through the legacy path. This is a
+  // consistency check, not tamper resistance.
+  const categoryMismatches: string[] = [];
+  for (const finding of record.findings ?? []) {
+    const expectedCategory = finding?.category ?? finding?.violation?.category;
+    if (!expectedCategory || !finding?.violation?.id) continue;
+    if (finding.experimentIndex !== undefined && expRecord.index !== undefined && finding.experimentIndex !== expRecord.index) continue;
+    const saved = (origResult.violations || []).find(v => v.id === finding.violation.id);
+    if (saved && saved.category !== expectedCategory) {
+      categoryMismatches.push(`Saved finding category "${expectedCategory}" does not match saved result violation "${saved.id}" category`);
+    }
+  }
+  if (categoryMismatches.length > 0) {
+    comparison.mismatches.push(...categoryMismatches);
+    comparison.violationsMatched = false;
+    comparison.matched = false;
+    comparison.details = comparison.mismatches.join('; ');
+  }
   const outcome: ReplayExperimentOutcome = {
     index: expRecord.index ?? position,
     originalViolationsCount: (origResult.violations || []).length,

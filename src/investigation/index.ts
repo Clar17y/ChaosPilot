@@ -155,6 +155,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     model: provider.model,
     mode: provider.kind === 'mock' ? 'mock' : 'live',
     variant,
+    ...(options.continueAfterFindings === true ? { continueAfterFindings: true as const } : {}),
     status: 'running',
     startedAt: new Date().toISOString(),
     sourceHash: source.hash,
@@ -466,15 +467,26 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       try {
         cleanResult = sim.executeExperiment(parsedExperiment, 'clean');
         if (record.contextAudit.cleanSourceHash && cleanResult.sourceHash !== record.contextAudit.cleanSourceHash) cleanResult = undefined;
+        // Also reject a clean execution whose source does not match the
+        // currently reported clean bundle, even when no clean hash was
+        // recorded at launch (e.g. legacy or custom-simulator runs).
+        if (cleanResult) {
+          try {
+            const currentCleanHash = sim.getSourceBundle('clean').hash;
+            if (currentCleanHash && cleanResult.sourceHash !== currentCleanHash) cleanResult = undefined;
+          } catch { cleanResult = undefined; }
+        }
       } catch {
         cleanResult = undefined;
       }
 
       const cleanControlValid = Boolean(cleanResult && cleanResult.valid);
-      const cleanViolatedInvariantIds = new Set<string>();
+      const cleanViolatedInvariants = new Set<string>();
+      const cleanViolatedCategories = new Set<string>();
       if (cleanResult && cleanResult.valid) {
         for (const cv of cleanResult.violations) {
-          cleanViolatedInvariantIds.add(cv.invariant);
+          cleanViolatedInvariants.add(cv.invariant);
+          if (cv.category) cleanViolatedCategories.add(cv.category);
         }
       }
 
@@ -482,17 +494,23 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       let anyViolationConfirmed = false;
       if (replayVerified && cleanControlValid) {
         for (const violation of result.violations) {
-          const isAbsentOnClean = !cleanViolatedInvariantIds.has(violation.invariant);
-          if (isAbsentOnClean) {
+          const category = violation.category ?? violation.invariant;
+          // Conservative: a clean violation of the same invariant blocks
+          // confirmation regardless of its observed category. Category-level
+          // equivalence is not assumed across different categories.
+          const absent = !cleanViolatedInvariants.has(violation.invariant)
+            && !(violation.category && cleanViolatedCategories.has(violation.category));
+          if (absent) {
             anyViolationConfirmed = true;
-            // De-duplicate repeated invariant findings while preserving all detailed trace violations in history
-            const alreadyFound = record.findings.some(f => f.violation.invariant === violation.invariant);
+            // Group repeats of the same oracle category; different categories may share an invariant.
+            const alreadyFound = record.findings.some(f => (f.category ?? f.violation.category ?? f.violation.invariant) === category);
             if (!alreadyFound) {
               const finding: Finding = {
                 id: `finding-${record.findings.length + 1}-${violation.invariant}`,
                 title: `Violation of ${violation.invariant}: ${violation.message}`,
                 hypothesis: parsedExperiment.hypothesis,
                 experimentIndex: experimentCount,
+                ...(violation.category ? { category: violation.category } : {}),
                 violation,
                 sourceHash: result.sourceHash,
                 reproduced: true,
@@ -520,8 +538,8 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     record.experiments.push(expRecord);
     await options.onUpdate?.(cloneRecord(record));
 
-    // If verified finding is confirmed, stop investigation
-    if (record.findings.length > 0) {
+    // By default stop at the first verified finding; opt-in continuation stays bounded by the loop caps.
+    if (record.findings.length > 0 && options.continueAfterFindings !== true) {
       record.stopReason = 'Verified finding confirmed';
       break;
     }
@@ -536,7 +554,9 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
   if (record.status === 'running') {
     record.status = 'completed';
     if (!record.stopReason) {
-      if (record.findings.length > 0) {
+      if (record.findings.length > 0 && options.continueAfterFindings === true && experimentCount >= maxExperiments) {
+        record.stopReason = 'Finite experiment bound reached after verified findings';
+      } else if (record.findings.length > 0) {
         record.stopReason = 'Verified finding confirmed';
       } else if (maxProposalAttempts !== undefined && record.proposalAttempts!.length >= maxProposalAttempts) {
         record.stopReason = 'Maximum proposal attempts reached';

@@ -42,6 +42,7 @@ interface ParsedArgs {
   trials?: number;
   seeds?: number[];
   id?: string;
+  continueAfterFindings?: boolean;
   systemId?: string;
   runsDir?: string;
   systemsDir?: string;
@@ -146,6 +147,8 @@ function parseCliArgs(args: string[]): ParsedArgs {
       const val = arg.startsWith('--freeze=') ? arg.slice('--freeze='.length) : args[++i];
       if (!val) throw new Error(`Missing value for --freeze.`);
       result.freeze = val;
+    } else if (arg === '--continue-after-findings') {
+      result.continueAfterFindings = true;
     } else if (arg === '--max-experiments' || arg.startsWith('--max-experiments=')) {
       const val = arg.startsWith('--max-experiments=') ? arg.slice('--max-experiments='.length) : args[++i];
       if (!val) throw new Error(`Missing value for --max-experiments.`);
@@ -213,13 +216,14 @@ Options:
   --phase           Benchmark phase: 'calibration' | 'heldout' (default: calibration)
   --freeze          Path to freeze manifest for benchmark or benchmark-freeze
   --max-experiments Maximum experiments to execute (default: 5 for evaluate, 6 for benchmark)
+  --continue-after-findings  Continue after verified findings until bounds/provider stop (default: stop at first finding; extra live proposals may cost more)
   --trials          Number of trials (default: 3 for evaluate, 2 for benchmark)
   --seeds           Comma-separated seeds (e.g. 1001,1002,1003)
   --id              Run artifact ID for replay command or benchmark ID
   --system-id       System brief ID to investigate (default: trading-gateway)
   --runs-dir        Isolated run store (default: runs)
   --systems-dir     System store (default: <runs-dir>/systems)
-  Inventory target: clean | inventory-candidate-a; evaluate/benchmark remain trading-only
+  Inventory target: clean | inventory-candidate-a | inventory-candidate-b | inventory-candidate-c | inventory-candidate-d; evaluate/benchmark remain trading-only
   --help, -h        Show this help message
 `);
 }
@@ -270,6 +274,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
   console.log(` Target Variant:  ${target}`);
   console.log(` Provider:        ${providerKind.toUpperCase()}`);
   console.log(` Max Experiments: ${maxExperiments}`);
+  console.log(` Continue After Findings: ${args.continueAfterFindings ? 'YES (additional proposals may incur additional live cost)' : 'NO (stop at first verified finding)'}`);
   console.log(` Provenance:      ${providerKind === 'mock' ? 'MOCK (Scripted offline mock; no live model calls)' : 'LIVE (Official Meta API)'}`);
   console.log(`============================================================\n`);
 
@@ -318,6 +323,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       id: runId,
       variant: target,
       maxExperiments,
+      continueAfterFindings: args.continueAfterFindings === true,
       provider,
       systemBrief: structuredClone(snapshot),
       signal: abortController.signal,
@@ -369,6 +375,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       const f = record.findings[i]!;
       console.log(`[Finding ${i + 1}] ${f.title}`);
       console.log(`  Invariant: ${f.violation.invariant}`);
+      if (f.category ?? f.violation.category) console.log(`  Category:  ${f.category ?? f.violation.category}`);
       console.log(`  Message:   ${f.violation.message}`);
       console.log(`  Clean Control Passed: ${f.cleanControlPassed ? 'YES (Defect absent on clean)' : 'NO'}`);
       console.log(`  Replay Verified:      ${f.reproduced ? 'YES (Deterministic match)' : 'NO'}`);

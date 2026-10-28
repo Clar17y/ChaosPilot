@@ -9,8 +9,12 @@ evaluations.
 - Adapter id: `inventory-reservation`
 - Seeded saved system id: `inventory-reservation` (revision 1, seeded like the
   trading system on first read/listing in a systems store)
-- Variants: `clean` (correct control) and `inventory-candidate-a` (selectable
-  faulty implementation that can over-reserve stock)
+- Variants: `clean` (correct control), `inventory-candidate-a` (selectable
+  faulty implementation that can over-reserve stock), `inventory-candidate-b`
+  and `inventory-candidate-c` (single-fault variants for cancellation-release
+  and duplicate-shipment behaviour respectively) and `inventory-candidate-d`
+  (both of those faults). Variant identities are execution configuration only;
+  they never appear in the model-visible source or prompt.
 - Trading variants (`candidate-a` … `candidate-i`) and inventory variants are
   not interchangeable; cross-adapter launches fail before any provider call.
 
@@ -41,6 +45,33 @@ retry can succeed. Reservation ids cannot be reused, including after
 completion or cancellation. Unknown, completed and cancelled references are
 rejected. There is no wall clock, persistence, message loss or latency model;
 delivery order is business order.
+
+Findings are grouped by a deterministic category assigned by the independent
+oracle from the observed event (for example `cancellation_release` or
+`duplicate_shipment`), not by target labels or model text. Repeats of the same
+category are grouped; different categories may share one broad invariant. A
+continuing discrepancy keeps the category of the fault that introduced it:
+each event is re-checked locally by replaying just that transition with the
+reference reducer seeded from the target's own prior state, and only a
+transition that is incorrect even from that state earns the current event's
+category. The seeded reducer takes the target's actual `received`/`onHand`
+and per-reservation `remaining`/`shipped`/`cancelled` verbatim — it never
+re-derives on-hand from a conservation identity the corrupted state may
+violate — so reservation admission and shipment are judged against the
+balances the target actually had (including missing stock). A correct
+follow-on that merely transforms already-corrupted state
+(for example shipping an incorrectly admitted reservation, a correct
+insufficient-on-hand shipment rejection after an over-reservation, or
+cancelling after a duplicate shipment) is propagation, not a new finding; the full
+global expected/actual divergence is still recorded as raw evidence. A
+category is a finding attribution, not a root-cause claim. Confirmation is conservative per invariant:
+if the valid, source-matching clean control violates the same invariant (in
+any category), the candidate violation of that invariant is not confirmed.
+Investigations stop at the first verified finding by default. The explicit
+opt-in `--continue-after-findings` (CLI), `continueAfterFindings: true`
+(API/UI checkbox) continues within the existing experiment/proposal bounds,
+records `continueAfterFindings: true` on the run, and reports the actual stop
+reason. Additional live proposals under this opt-in may cost more.
 
 Checked invariants (independent oracle, separate from target code):
 
@@ -78,7 +109,8 @@ Start the server (`npm start`) and then, from the same machine:
   brief (id, revision, adapter id), executable inventory contract and their
   combined hash. The UI validates all three against this response.
 - `GET /api/targets?adapterId=inventory-reservation` → `["clean",
-  "inventory-candidate-a"]`; `GET /api/contract?adapterId=inventory-reservation`
+  "inventory-candidate-a", "inventory-candidate-b", "inventory-candidate-c",
+  "inventory-candidate-d"]`; `GET /api/contract?adapterId=inventory-reservation`
   returns the inventory contract. Without `adapterId`, both keep returning the
   trading defaults. Unknown adapters are rejected. The desktop obtains its
   choices from this endpoint for the selected adapter. `GET /api/status` keeps
@@ -102,7 +134,8 @@ Start the server (`npm start`) and then, from the same machine:
   before a provider is constructed. Replay rejects internally inconsistent
   saved evidence, including a mismatched snapshot hash or contradictory audit.
 - Findings require deterministic replay of the same plan on the same source
-  plus a passing clean control (no violation on `clean`).
+  plus a valid clean control with neither the same invariant nor the same
+  observed category violated.
 - Inventory runs record the inventory prompt identity
   (`inventory-1.0`), not the trading template. Trading prompt bytes, variant
   identities and archived evaluations are unchanged.
@@ -120,16 +153,34 @@ Start the server (`npm start`) and then, from the same machine:
   irrecoverable historical ordering is marked unverified and cannot support an
   exact claim. Older inventory records with duplicate violation IDs can replay,
   but an ID mismatch is reported instead of being treated as exact.
+- New inventory results carry a `categoryAware` marker. Category-insensitive
+  replay comparison applies only to genuine legacy results (no marker and no
+  recorded categories); on a category-aware result, removing or changing a
+  violation category — or a saved finding whose category no longer matches its
+  saved result violation — blocks an exact-reproduction claim. This is a
+  consistency check, not cryptographic tamper resistance: evidence with the
+  marker, categories and findings all removed is indistinguishable from legacy.
 
 ## Limitations
 
 - `evaluate` and `benchmark` remain trading-only and say so; `--targets`
   accepts trading variants only.
-- The mock inventory sequence is a fixed scripted fixture (baseline plus a
-  competing-reservations probe). The Meta provider path uses an
+- The mock inventory sequence is a fixed scripted fixture (partial
+  shipment/cancellation, competing-reservations and duplicate-shipment probes,
+  in that order). With `--continue-after-findings` and the normal budget, the
+  combined candidate yields separately replay-verified `cancellation_release`
+  and `duplicate_shipment` findings, each absent on clean. This is scripted
+  offline provenance, not live discovery. The Meta provider path uses an
   inventory-specific prompt, but no live evaluation results are claimed here.
-- One faulty variant exists (`inventory-candidate-a`); there is no held-out
-  set, freeze manifest or benchmark comparability story for inventory yet.
+- Attribution is deliberately conservative within one experiment: when a
+  second independent fault's local effect exactly coincides with the
+  per-path discrepancy already carried from an earlier fault, it is grouped
+  under the earlier category rather than split into a new finding. Distinct
+  faults are separated when their locally incorrect transitions are
+  observable (including both faults of the combined candidate in one
+  experiment, and across continued experiments).
+- There is no held-out set, freeze manifest or benchmark comparability story
+  for inventory yet.
 - The browser UI exposes the seeded inventory profile, its checks and
   inventory-specific state. It still runs only the local synthetic target;
   selecting this adapter does not connect an arbitrary application.

@@ -2,7 +2,7 @@
 
 An investigation workbench for negative scenarios in event-driven software. ChaosPilot reads a target's source and behavioural contract, proposes experiments, executes them against fresh deterministic instances, and verifies reproducible failures.
 
-Built from scratch for the Meta Global AI Developer Hackathon, 26 October–4 November 2026. The current target is a synthetic trading system covering prices, credit reservations, orders, partial fills and cancellation.
+Built from scratch for the Meta Global AI Developer Hackathon, 26 October–4 November 2026. The executable synthetic targets are a trading system covering prices, credit reservations, orders, partial fills and cancellation, and an inventory-reservation system covering stock, reservations, shipments and cancellation.
 
 **A scripted mock is included for offline development. Its results are not evidence of autonomous AI defect discovery.** Live investigations require a separately configured Meta Model API key. A Muse Code subscription does not provide application API credentials.
 
@@ -33,7 +33,7 @@ New browser and CLI investigations save an immutable brief, revision, contract a
 
 The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable prototype](docs/design/astra/prototype.html) guided this integration. The prototype's sample investigation data is illustrative; the application uses persisted records and real execution/replay APIs. Fields outside the saved brief schema remain design proposals.
 
-The integrated application and development tooling pass 418 tests in 25 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
+At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. New prompt 3.0 model performance has not yet been evaluated live.
 
 ## Live Meta configuration
 
@@ -75,6 +75,9 @@ Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/
 ```sh
 npm run demo
 npm run investigate -- --provider mock --target candidate-a
+npm run investigate -- --provider mock --system-id inventory-reservation --target inventory-candidate-a
+npm run investigate -- --provider mock --system-id inventory-reservation --target clean
+npm run investigate -- --provider mock --system-id inventory-reservation --target inventory-candidate-d --continue-after-findings
 npm run investigate -- --provider meta --target candidate-a --max-experiments 6
 npm run evaluate -- --provider mock --trials 3 --seeds 1001,1002,1003 --max-experiments 6
 npm run benchmark -- --provider mock --targets clean,candidate-a,candidate-b --trials 2 --max-experiments 3
@@ -102,13 +105,13 @@ The completed clean-target follow-up executed two model-generated experiments wi
 
 The subsequent frozen prompt 2.0 batch gave both models findings in **2/2 trials on a new synthetic target**, using one experiment each, while the unchanged conventional generator found it in **0/2 trials** within three experiments each. All 41 recorded experiments replayed identically. Total reported estimated API cost was **$0.953607**. Human timing was unmeasured, and fixture-author blinding was partial. See [controlled results and limitations](docs/CONTROLLED_RESULTS.md) and [the complete authentic reports](examples/controlled-v2/README.md). That archived revision passed 293 tests, the TypeScript check and production build. The current requirements workflow changes the investigator prompt to 3.0 and has not had a new live comparison.
 
-Targets are `clean` and nine independently selectable candidates, A through I. Candidate identities are execution configuration, not model instructions. The investigator receives the selected implementation as ordinary source, without another variant, the answer key or known reproductions. Default benchmark calibration remains A/B; select other targets explicitly.
+Trading targets are `clean` and nine independently selectable candidates, A through I. Candidate identities are execution configuration, not model instructions. The investigator receives the selected implementation as ordinary source, without another variant, the answer key or known reproductions. Default benchmark calibration remains A/B; select other targets explicitly.
 
 The [known fault lab](docs/FAULT_LAB.md) adds stale market and credit updates, split-fill accounting, mismatched execution prices, conflicting execution IDs and premature terminal order status to the original three faults. Its [offline catchability record](examples/fault-lab/README.md) contains nine known reproductions, exact replays and clean controls. These are deliberately authored recipes, **not new AI discovery results**. No live model calls were used for this expansion.
 
 ## What an experiment can do
 
-The model constructs structured action sequences. It can publish market and credit messages, submit and cancel orders, cause simulated venue fills or cancellation confirmations, inject raw JSON, duplicate messages, choose delivery order and advance logical time.
+The model constructs structured action sequences. For trading it can publish market and credit messages, submit and cancel orders, cause simulated venue fills or cancellation confirmations, inject raw JSON, duplicate messages, choose delivery order and advance logical time. For inventory it can send stock receipts, reservations, cancellations and shipments, duplicate messages, choose delivery order and advance logical time. See the [inventory contract and walkthrough](docs/SECOND_SYSTEM.md) for its bounds and checks.
 
 The experiment envelope is validated independently of its message payloads. Intentionally malformed payloads must reach the target decoder. An invalid experiment action is recorded as a rejected experiment; it is not automatically a target defect.
 

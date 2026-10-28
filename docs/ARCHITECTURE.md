@@ -8,7 +8,7 @@ A confirmed finding additionally carries a matching source identity, reproducibl
 
 ## Boundaries
 
-`src/domain.ts` defines integration records. `src/simulator/` owns business rules, logical venue, scheduler, input decoding, invariant checks and target source bundles. `src/investigation/` owns the bounded investigation lifecycle. `src/providers/` owns Meta transport, mock proposals, request validation and usage accounting. The server, CLI and evaluator consume the same core APIs.
+`src/domain.ts` defines integration records. `src/adapters/` registers the executable systems. `src/simulator/` owns the trading business rules, logical venue, scheduler, input decoding, invariant checks and target source bundles; `src/inventory/` owns the inventory contract, targets and independent checks. `src/investigation/` owns the bounded investigation lifecycle. `src/providers/` owns Meta transport, mock proposals, request validation and usage accounting. The server and CLI consume the same core APIs; the evaluator remains trading-only.
 
 The runtime model may see the selected system's business overview and contextual requirements, public contract, selected target source and experiment observations. It has no shell or general filesystem tool. Source paths are selected by the host; the model cannot choose arbitrary files. Environment configuration, tests, hidden selectors, answer keys, other implementations and verifier internals are not included.
 
@@ -18,9 +18,9 @@ Source awareness permits reading ordinary faulty code. It does not permit supply
 
 `src/systems/` stores versioned system briefs as JSON under the configured run directory. A brief has a stable ID, name, overview, contextual requirement list and adapter selection. The browser supports create, edit, save and selection; the CLI accepts a saved system ID. Dirty forms cannot launch, and an expected revision guards against launching a profile that another client has changed.
 
-Only `synthetic-trading` is executable. An `unconfigured` profile can preserve a future system definition but cannot start a provider. A trading profile uses the same public trading contract and simulator; editing prose does not change their behavior or turn a new domain into an adapter. The UI therefore distinguishes the ten existing deterministic checks from supplementary requirements that are context only.
+The executable adapters are `synthetic-trading` and `inventory-reservation`. An `unconfigured` profile can preserve a future system definition but cannot start a provider. Each executable profile uses its adapter's public contract and synthetic target; editing prose does not change their behavior or turn a new domain into an adapter. The UI distinguishes the selected adapter's deterministic checks from supplementary requirements that are context only. See [SECOND_SYSTEM.md](SECOND_SYSTEM.md) for the inventory contract, controls and limitations.
 
-New runs pin a full brief/contract snapshot with a revision and canonical content hash. The engine validates it against the execution contract and copies it into the provider context and run record. A later profile edit cannot rewrite old evidence. Legacy records without a snapshot remain readable and explicitly lack that provenance. Prompt 3.0 includes this business context; the archived prompt 2.0 comparison remains an earlier, separate evaluation.
+New runs pin a full brief/contract snapshot with a revision and canonical content hash. The engine validates it against the execution contract and copies it into the provider context and run record. A later profile edit cannot rewrite old evidence. Legacy records without a snapshot remain readable and explicitly lack that provenance. Trading prompt 3.0 and inventory prompt `inventory-1.0` include this business context; the archived trading prompt 2.0 comparison remains an earlier, separate evaluation.
 
 Creation, update and seeding share a per-system filesystem lock and compare-and-swap revision check. Lock acquisition is bounded and never steals an apparently old lock. Only an absent seed file is created automatically; invalid existing files fail visibly and remain intact. A process crash can leave a lock requiring operator inspection after confirming that no writer remains. There is no automatic crash-recovery or lock-stealing claim. Writes use a temporary file followed by rename; this provides atomic replacement under the supported local filesystem, not a power-loss durability guarantee.
 
@@ -38,11 +38,13 @@ The selected system, editable draft, inspected run and globally active investiga
 
 ## Simulation state
 
-The target combines a latest quote, latest credit limit, used and reserved credit, and a collection of orders with immutable accepted terms. The logical venue maintains business occurrence independently from report delivery. The scheduler has explicit message identities, due times and deterministic tie ordering.
+The trading target combines a latest quote, latest credit limit, used and reserved credit, and a collection of orders with immutable accepted terms. The logical venue maintains business occurrence independently from report delivery. The scheduler has explicit message identities, due times and deterministic tie ordering.
 
 No simulator behaviour depends on wall time, model latency or unseeded randomness. Logical time and delivery controls form part of the experiment.
 
-The normal message vocabulary covers quote, credit-limit, new-order, cancellation, execution and cancellation acknowledgement. Raw injection bypasses message-shape assumptions without bypassing experiment-envelope validation. Invalid target input and invalid test commands are different outcomes.
+The trading message vocabulary covers quote, credit-limit, new-order, cancellation, execution and cancellation acknowledgement. Raw injection bypasses message-shape assumptions without bypassing experiment-envelope validation. Invalid target input and invalid test commands are different outcomes.
+
+The inventory simulator likewise starts fresh for each experiment and uses deterministic message scheduling. Its state tracks stock receipts, on-hand quantities, reservations, shipments and accepted event identities; an independent reference reducer checks its transitions and conservation rules.
 
 ## Credit and cancellation
 
@@ -74,7 +76,7 @@ Live inference, scripted mocks, conventional generation and replay have distinct
 
 ## Proposal audit and controlled comparison
 
-The specialised investigator prompt is versioned in `src/investigation/prompt.ts`. It asks for a causal, testable hypothesis and a small executable plan. The model chooses message contents, business times, delivery order and subsequent probes; the simulator and verifier decide what happened. Malformed model JSON is a rejected proposal, while malformed business data inside a valid experiment can be a legitimate probe.
+The specialised investigator prompts are versioned in `src/investigation/prompt.ts` and `src/investigation/inventory-prompt.ts`. They ask for a causal, testable hypothesis and a small executable plan. The model chooses message contents, business times, delivery order and subsequent probes; the simulator and verifier decide what happened. Malformed model JSON is a rejected proposal, while malformed business data inside a valid experiment can be a legitimate probe.
 
 Each provider invocation creates a pending proposal before inference. The Meta adapter records the actual prepared system/user text, prompt hash, request hash and whitelisted settings before attempting the network request. Headers and credentials are excluded. The final audit retains the visible response, finish reason, validation outcome, duration and reported usage when available. A missing audit or unknown request outcome remains unknown. The browser exposes these records in the Proposals tab.
 
