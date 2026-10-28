@@ -359,7 +359,7 @@ function renderWorkspaceSummaries(): void {
   const { scoped } = partitionRuns(lastRunSummaries, workspaceSystemId());
   set('overview-run-count', String(scoped.length));
 
-  set('prepare-revision', revision === null ? 'Unsaved draft — save before launch' : `Brief revision ${revision}`);
+  set('prepare-revision', revision === null ? 'Unsaved draft: save before launch' : `Brief revision ${revision}`);
   set('prepare-adapter', isExecutableAdapter(adapter) ? adapterLabel(adapter) : 'Adapter unconfigured');
   set('prepare-purpose', overview || 'No business purpose saved yet.');
   set('prepare-overview', overview || 'No business purpose saved yet.');
@@ -470,7 +470,7 @@ function renderFindingsView(): void {
       p.className = 'muted';
       p.textContent = 'No run is currently opened.';
       opened.appendChild(p);
-    } else if (inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()) !== 'selected' && !(lifecycle.inspectedIsLive && lifecycle.inspectedId === rec.id)) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()) === 'legacy' ? `Opened run ${rec.id} · Legacy / system unavailable — not findings for ${selectedSystem?.name ?? 'the selected system'}. Open it in Investigations to inspect it under its own identity.` : `Opened run ${rec.id} belongs to system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are not shown here as selected-system findings; open it in Investigations to inspect it under its own identity.`; opened.appendChild(p); } else if (!rec.findings.length) {
+    } else if (inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()) !== 'selected' && !(lifecycle.inspectedIsLive && lifecycle.inspectedId === rec.id)) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()) === 'legacy' ? `Opened run ${rec.id} · Legacy / system unavailable: not findings for ${selectedSystem?.name ?? 'the selected system'}. Open it in Investigations to inspect it under its own identity.` : `Opened run ${rec.id} belongs to system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are not shown here as selected-system findings; open it in Investigations to inspect it under its own identity.`; opened.appendChild(p); } else if (!rec.findings.length) {
       const p = document.createElement('p');
       p.className = 'muted';
       p.textContent = `Opened run ${rec.id} has no findings.`;
@@ -478,7 +478,7 @@ function renderFindingsView(): void {
     } else {
       const idp = document.createElement('p'); idp.className = 'muted'; idp.textContent = `Opened run ${rec.id} · system ${rec.systemBrief?.brief.id ?? 'unavailable'} · brief revision ${rec.systemBrief?.brief.revision ?? 'unavailable'}`; opened.appendChild(idp); for (const f of rec.findings) {
         const p = document.createElement('p');
-        p.textContent = `${f.title} — ${f.violation.invariant} · observed category: ${findingCategoryLabel(f)} · replay ${f.reproduced ? 'verified' : 'not verified'} · clean comparison ${f.cleanControlPassed ? 'passed' : 'not passed'}`;
+        p.textContent = `${f.title}: ${f.violation.invariant} · observed category: ${findingCategoryLabel(f)} · replay ${f.reproduced ? 'verified' : 'not verified'} · clean comparison ${f.cleanControlPassed ? 'passed' : 'not passed'}`;
         opened.appendChild(p);
       }
     }
@@ -501,7 +501,7 @@ function updateActiveOtherSystemNotice(): void {
 function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraftMode, hasUnsavedSystemEdits, draftAdapterId: systemAdapterSelect?.value ?? null, savedAdapterId: selectedSystem?.adapterId ?? null }); }
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
-function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable — not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id} — not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
+function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
 function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
@@ -742,7 +742,7 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
 
 function renderProposals(rec: InvestigationRecord, display = describeProposals(rec)): void {
   // display supplied once by renderActiveRecord (SIM-02)
-  countProposals.textContent = display.count === null ? '—' : String(display.count);
+  countProposals.textContent = display.count === null ? 'Not recorded' : String(display.count);
   proposalSummary.textContent = display.summary + (display.unknownCost
     ? ' Some request usage is unknown. Reported token costs exclude it; the application retains a conservative allowance.' : '');
   const notes: string[] = [];
@@ -863,7 +863,7 @@ function renderFindings(findings: Finding[]): void {
     strongCategory.textContent = 'Observed category: ';
     pCategory.appendChild(strongCategory);
     pCategory.appendChild(document.createTextNode(findingCategoryLabel(f)));
-    pCategory.appendChild(document.createTextNode(' — what the oracle observed at this step, not a claimed root cause.'));
+    pCategory.appendChild(document.createTextNode(', what the oracle observed at this step, not a claimed root cause.'));
 
     const pStep = document.createElement('p');
     pStep.className = 'finding-meta';
@@ -1210,7 +1210,7 @@ function renderReproduction(): void {
   const toggleBtn = reproEl<HTMLButtonElement>('btn-repro-toggle-trace');
   if (toggleBtn) { const concise = reproModel && reproModel.sequence!=='trace'; toggleBtn.disabled = !reproModel || !concise || reproUseRerun; toggleBtn.setAttribute('aria-expanded', String(reproShowFull)); toggleBtn.textContent = reproShowFull ? 'Show concise view' : 'Show complete original trace'; }
   const modeEl = reproEl('repro-trace-mode');
-  if (modeEl) modeEl.textContent = !reproModel ? '' : reproUseRerun ? 'Showing fresh rerun trace (labelled rerun) — original recording still available' : reproShowFull ? `Showing complete original trace (${reproModel.traceCount} entries)` : reproModel.sequence==='key-events' ? 'Showing concise key events — complete original trace available' : reproModel.sequence==='grouped' ? 'Showing concise grouped view — complete original trace available' : `Showing complete recorded trace (${reproModel.traceCount} entries)`;
+  if (modeEl) modeEl.textContent = !reproModel ? '' : reproUseRerun ? 'Showing fresh rerun trace (labelled rerun). Original recording still available' : reproShowFull ? `Showing complete original trace (${reproModel.traceCount} entries)` : reproModel.sequence==='key-events' ? 'Showing concise key events. Complete original trace available' : reproModel.sequence==='grouped' ? 'Showing concise grouped view. Complete original trace available' : `Showing complete recorded trace (${reproModel.traceCount} entries)`;
   const rerunControls = reproEl('repro-rerun-controls');
   if (rerunControls) rerunControls.classList.toggle('hidden', !(reproSession.freshReport && reproRerunSteps.length>=0 && reproSession.fresh.kind!=='pending' && reproSession.fresh.kind!=='idle'));
   const prov = reproEl('repro-provenance-items') ?? reproEl('repro-provenance');
@@ -1252,7 +1252,7 @@ function renderReproduction(): void {
         btn.setAttribute('aria-label', `Show ${reproUseRerun ? 'fresh rerun step' : reproModel!.sequence === 'key-events' && !reproShowFull ? 'key event' : 'recorded step'} ${step.position + 1} of ${effSteps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
         const t = document.createElement('span'); t.className = 'repro-tl-title'; t.textContent = `${step.position + 1}. ${step.title}`;
         const sub = document.createElement('span'); sub.className = 'repro-tl-sub';
-        sub.textContent = step.isGroup ? `Grouped: ${step.groupCount} entries — expand full trace to inspect` : step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
+        sub.textContent = step.isGroup ? `Grouped: ${step.groupCount} entries, expand full trace to inspect` : step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled: not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed: state after this entry' : step.outcome;
         btn.append(t, sub);
         btn.addEventListener('click', () => { reproPlayback.select(step.position); });
         li.appendChild(btn);
@@ -1540,12 +1540,12 @@ function showReplayReport(report: ReplayReport): void {
   const behaviour = scoped ? replayBehaviourStatus(report.outcomes[0]) : 'unavailable';
   const behaviourMatchedCount = report.outcomes.filter(o => replayBehaviourStatus(o) === 'matched').length;
   const allBehaviourMatched = report.outcomes.length > 0 && behaviourMatchedCount === report.outcomes.length;
-  addLine(scoped ? 'Scope:' : 'Experiments Matched:', scoped ? `Selected experiment (position ${(report as ExperimentReplayReport).experimentPosition ?? '?'} ) only — no clean comparison or model call` : `${report.experimentsReproduced} / ${report.experimentsTotal}`);
+  addLine(scoped ? 'Scope:' : 'Experiments Matched:', scoped ? `Selected experiment (position ${(report as ExperimentReplayReport).experimentPosition ?? '?'} ) only: no clean comparison or model call` : `${report.experimentsReproduced} / ${report.experimentsTotal}`);
   if (scoped) addLine('Selected experiment behaviour (trace, snapshot, violations, rejections, validity):', behaviour.toUpperCase());
-  else if (report.outcomes.length) addLine('Behaviour matched (trace, snapshot, violations, rejections, validity — regardless of source/context):', `${behaviourMatchedCount} / ${report.outcomes.length}`);
-  if (report.contextStatus) addLine('Replay Context:', report.contextStatus === 'verified' ? 'VERIFIED' : report.contextStatus === 'drifted' ? 'DRIFTED — exact reproduction cannot be claimed' : report.contextStatus === 'legacy-unknown' ? 'LEGACY — pinned context was not recorded' : 'UNVERIFIED — exact reproduction cannot be claimed', report.contextStatus !== 'verified');
+  else if (report.outcomes.length) addLine('Behaviour matched (trace, snapshot, violations, rejections, validity, regardless of source/context):', `${behaviourMatchedCount} / ${report.outcomes.length}`);
+  if (report.contextStatus) addLine('Replay Context:', report.contextStatus === 'verified' ? 'VERIFIED' : report.contextStatus === 'drifted' ? 'DRIFTED: exact reproduction cannot be claimed' : report.contextStatus === 'legacy-unknown' ? 'LEGACY: pinned context was not recorded' : 'UNVERIFIED: exact reproduction cannot be claimed', report.contextStatus !== 'verified');
   const outcome = replayOutcome(report);
-  addLine('Deterministic Replay Result:', !report.sourceIdentical ? ((scoped ? behaviour === 'matched' : allBehaviourMatched) ? 'BEHAVIOUR MATCHED — SOURCE CHANGED, exact reproduction cannot be claimed' : (scoped ? behaviour === 'different' : report.outcomes.some(o => replayBehaviourStatus(o) === 'different')) ? 'BEHAVIOUR MISMATCH AND SOURCE CHANGED — exact reproduction cannot be claimed' : 'SOURCE CHANGED — exact reproduction cannot be claimed') : outcome === 'reproduced' ? (scoped ? 'SELECTED EXPERIMENT REPRODUCED EXACTLY (verified: identical source and semantic match)' : 'ALL EXPERIMENTS REPRODUCED') : outcome === 'unconfirmed' ? 'EXPERIMENTS MATCHED; EXACT REPLAY UNCONFIRMED' : outcome === 'empty' ? 'NO EXPERIMENTS REPLAYED' : 'MISMATCH DETECTED');
+  addLine('Deterministic Replay Result:', !report.sourceIdentical ? ((scoped ? behaviour === 'matched' : allBehaviourMatched) ? 'BEHAVIOUR MATCHED, SOURCE CHANGED: exact reproduction cannot be claimed' : (scoped ? behaviour === 'different' : report.outcomes.some(o => replayBehaviourStatus(o) === 'different')) ? 'BEHAVIOUR MISMATCH AND SOURCE CHANGED: exact reproduction cannot be claimed' : 'SOURCE CHANGED: exact reproduction cannot be claimed') : outcome === 'reproduced' ? (scoped ? 'SELECTED EXPERIMENT REPRODUCED EXACTLY (verified: identical source and semantic match)' : 'ALL EXPERIMENTS REPRODUCED') : outcome === 'unconfirmed' ? 'EXPERIMENTS MATCHED; EXACT REPLAY UNCONFIRMED' : outcome === 'empty' ? 'NO EXPERIMENTS REPLAYED' : 'MISMATCH DETECTED');
   addLine('Replay Engine:', 'Local Deterministic Simulator (No model invocation)');
 
   const noteEl = document.createElement('div');

@@ -81,13 +81,6 @@ main,
   align-items: center;
 }
 
-.btn-workspace {
-  background: var(--surface);
-  padding: 10px 18px;
-  border-radius: 8px;
-  border: 1px solid #2c313a;
-}
-
 .hero {
   position: relative;
   padding: 24px 64px 0;

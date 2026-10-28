@@ -69,7 +69,7 @@ export function unattributedText(violations: Violation[], useRerun: boolean): st
 /** Original finding/evidence summary is historical whenever the fresh trace is on screen. */
 export function evidenceHeading(useRerun: boolean): string {
   return useRerun
-    ? 'Original finding summary (historical — from the original recording, not the fresh rerun)'
+    ? 'Original finding summary (historical, from the original recording, not the fresh rerun)'
     : 'Original finding summary (historical)';
 }
 
@@ -81,4 +81,4 @@ export function detailVisibility(hasStep: boolean, creditRelevant: boolean): Det
   return { factsVisible: hasStep, creditVisible: hasStep && creditRelevant };
 }
 
-export const NO_STEP_CREDIT_TEXT = 'not recorded — no step selected';
+export const NO_STEP_CREDIT_TEXT = 'not recorded: no step selected';

@@ -15,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:4310](http://127.0.0.1:4310). The root page is an animated landing page with an illustrative, browser-local simulation (no runs are started and no simulated data enters run history); use **Unleash Chaos** / **Open workspace**, or go to `/workspace`, to enter the system workspace. On the landing page, Pause/Play and Next event step through the illustrative examples, and reduced-motion preferences show a static outcome instead. Start with the explicitly labelled mock provider to inspect the workflow without making any model requests.
+Open [http://127.0.0.1:4310](http://127.0.0.1:4310). The **How it works** link in the landing-page header opens `/how-it-works`, a dedicated page explaining the brief-to-replay flow and its limits. The root page is an animated landing page with an illustrative, browser-local simulation (no runs are started and no simulated data enters run history); use **Unleash Chaos**, or go to `/workspace`, to enter the system workspace. Click the ChaosPilot wordmark in the workspace to return home. On the landing page, the examples start at a random event, Pause/Play and Next event step through them, and reduced-motion preferences show a static outcome instead. Start with the explicitly labelled mock provider to inspect the workflow without making any model requests.
 
 The landing page's order book, candles, depth and volume charts share one simulated market. Quotes and quantities change at uneven intervals, trades update the charts, and switching chaos examples preserves the ongoing market. Pause/Play controls both the market and the message stream. These prices are generated locally for the demonstration, not taken from a live feed.
 

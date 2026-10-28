@@ -5,7 +5,10 @@ import { computeMarketTransform, copyExclusion, drawMarket, type CanvasRect, typ
 
 const $ = <T extends Element>(s: string) => document.querySelector<T>(s);
 
-let state: TimelineState = createTimeline({ reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches });
+let state: TimelineState = createTimeline({
+  reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  initialEventIndex: Math.floor(Math.random() * HOMEPAGE_EVENTS.length),
+});
 let rafId: number | null = null;
 let lastTs = 0;
 let visible = !document.hidden;
@@ -193,7 +196,7 @@ function updateLoop() {
 }
 
 if (catalogEl) {
-  catalogEl.innerHTML = HOMEPAGE_EVENTS.map((e, i) => `<li><strong>${i + 1}. ${e.title}</strong> — ${e.explanation}</li>`).join('');
+  catalogEl.innerHTML = HOMEPAGE_EVENTS.map((e, i) => `<li><strong>${i + 1}. ${e.title}</strong>: ${e.explanation}</li>`).join('');
 }
 
 pauseBtn?.addEventListener('click', () => {

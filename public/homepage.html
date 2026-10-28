@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ChaosPilot — Find your breaking point</title>
+  <title>ChaosPilot | Find your breaking point</title>
   <link rel="stylesheet" href="/homepage.css">
 </head>
 <body>
@@ -11,8 +11,7 @@
   <header class="site-header">
     <a class="wordmark" href="/">Chaos<span>Pilot</span></a>
     <nav class="site-nav" aria-label="Homepage">
-      <a href="#how-it-works">How it works</a>
-      <a class="btn-workspace" href="/workspace">Open workspace <span aria-hidden="true">↗</span></a>
+      <a href="/how-it-works">How it works</a>
     </nav>
   </header>
 
@@ -21,7 +20,7 @@
       <div class="scene" id="scene">
         <canvas id="scene-back" class="scene-canvas" aria-hidden="true"></canvas>
         <canvas id="scene-front" class="scene-canvas" aria-hidden="true"></canvas>
-        <p class="visually-hidden">Animated illustration: cyan order packets stream continuously from left to right along distributed lanes across a market backdrop. Coral and amber injected messages join a blue lane locally at one of several small junctions spread along the lanes, and the changed packets continue rightward — forming a pair, holding and releasing, reordering, changing path or appearance, or slowing and fading locally depending on the current illustrative event. Switching events injects a new message into the ongoing stream without resetting it.</p>
+        <p class="visually-hidden">Animated illustration: cyan order packets stream continuously from left to right along distributed lanes across a market backdrop. Coral and amber injected messages join a blue lane locally at one of several small junctions spread along the lanes. Depending on the current illustrative event, the changed packets continue rightward, forming a pair, holding and releasing, reordering, changing path or appearance, or slowing and fading locally. Switching events injects a new message into the ongoing stream without resetting it.</p>
         <span class="tag tag-injected" aria-hidden="true">Injected message</span>
         <span class="tag tag-incoming" id="incoming-label" aria-hidden="true">order.created</span>
         <span class="tag tag-outgoing" id="outgoing-label" aria-hidden="true">awaiting outcome</span>
@@ -38,7 +37,7 @@
 
       <div class="scene-bar">
         <div class="event-caption">
-          <p class="event-counter" id="event-counter">Event 1 of 42</p>
+          <p class="event-counter" id="event-counter">Loading event…</p>
           <p class="event-title" id="event-title">Injection entering the stream</p>
           <p class="event-explanation" id="event-explanation">Unexpected input joins the running system. Follow the messages to see how it responds.</p>
         </div>
