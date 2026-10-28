@@ -948,7 +948,8 @@ textarea.form-input { min-height: 96px; resize: vertical; }
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .workspace-layout{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
 .rail{padding:var(--space-5) var(--space-4);border-right:1px solid var(--border-color);background:var(--bg-surface);min-width:0}
-.brand{font-size:22px;font-weight:700;letter-spacing:-.5px;color:var(--text-main)}
+@media (min-width:721px){.rail{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto}}
+.brand{font-size:22px;font-weight:700;letter-spacing:-.5px;color:var(--text-main);text-decoration:none}
 .brand span{color:var(--accent-cyan)}
 .tagline{font-size:13px;line-height:1.5;color:var(--text-muted);margin:var(--space-1) 0 var(--space-5)}
 .rail .control-group label{font-size:13px}

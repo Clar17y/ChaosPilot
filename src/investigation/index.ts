@@ -26,6 +26,8 @@ import type {
 import {
   getPromptIdentity
 } from './prompt.ts';
+import { evaluateRequirementRules } from '../requirements/evaluator.ts';
+import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from '../requirements/identity.ts';
 
 export {
   PROMPT_VERSION,
@@ -106,7 +108,19 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       ? structuredClone(options.systemBrief.contract)
       : null;
 
-    const computedHash = computeSnapshotHash(clonedBrief, clonedContract);
+    const hasRules = (clonedBrief.requirementRules?.length ?? 0) > 0;
+    const suppliedEvaluator = options.systemBrief.requirementEvaluator;
+    if (hasRules) {
+      if (!isRequirementEvaluatorIdentity(suppliedEvaluator)) {
+        throw new Error('Requirement rules are pinned without a valid evaluator identity; re-save the system brief and launch from a fresh snapshot');
+      }
+      if (!requirementEvaluatorAvailable(suppliedEvaluator)) {
+        throw new Error('Requirement evaluator is unavailable or has drifted from the pinned identity; cannot execute the pinned requirement rules exactly');
+      }
+    }
+    const clonedEvaluator = suppliedEvaluator !== undefined ? structuredClone(suppliedEvaluator) : undefined;
+
+    const computedHash = computeSnapshotHash(clonedBrief, clonedContract, clonedEvaluator);
     if (options.systemBrief.hash !== computedHash) {
       throw new Error(
         `System brief snapshot hash mismatch: supplied hash "${options.systemBrief.hash}" does not match canonical computed hash "${computedHash}"`
@@ -138,6 +152,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       brief: clonedBrief,
       contract: clonedContract,
       hash: computedHash,
+      ...(clonedEvaluator ? { requirementEvaluator: clonedEvaluator } : {}),
     };
   }
 
@@ -438,6 +453,12 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       record.stopReason = `Simulator exception: ${errorMsg}`;
       await options.onUpdate?.(cloneRecord(record));
       break;
+    }
+
+    // Deterministic requirement-rule evaluation is recorded separately from
+    // oracle violations/findings and never promotes a finding by itself.
+    if (systemBriefSnapshot && (systemBriefSnapshot.brief.requirementRules?.length ?? 0) > 0) {
+      result.requirementRuleResults = evaluateRequirementRules(result, systemBriefSnapshot, experimentCount + 1);
     }
 
     finishAttempt('executed', { experimentIndex: experimentCount + 1 });

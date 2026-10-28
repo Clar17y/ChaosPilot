@@ -10,7 +10,7 @@
   <a class="skip-link" href="#main">Skip to workspace</a>
   <div class="workspace-layout">
     <aside class="rail">
-      <div class="brand">Chaos<span>Pilot</span></div>
+      <a class="brand" href="/" aria-label="ChaosPilot home">Chaos<span>Pilot</span></a>
       <p class="tagline">Understand the system. Challenge its rules.</p>
       <div class="control-group">
         <label for="system-select">System workspace</label>
@@ -135,8 +135,24 @@
             </div>
             <div class="control-group">
               <label for="system-requirements-input">Supplementary business requirements <span class="badge-tag">Contextual &bull; Not automatically verified</span></label>
-              <textarea id="system-requirements-input" class="form-input" rows="7" placeholder="One requirement per line. These provide guidance for model hypotheses but are NOT automatically verified unless supported by an executable oracle."></textarea>
-              <span class="input-hint"><strong>Notice:</strong> Supplementary requirements provide context for investigation hypotheses. They are NOT automatically verified by an executable oracle unless supported by the target simulator adapter.</span>
+              <textarea id="system-requirements-input" class="form-input" rows="7" placeholder="One requirement per line. These provide guidance for model hypotheses but are NOT automatically verified unless a reviewed rule below is attached."></textarea>
+              <span class="input-hint"><strong>Notice:</strong> Requirements are context only (explicitly unverified) unless a reviewed deterministic rule is attached below. A rule binds to the exact unique requirement text; renaming, deleting or duplicating that line requires an explicit remap or removal below.</span>
+            </div>
+            <div class="control-group" id="requirement-rule-panel">
+              <label>Requirement check <span class="badge-tag">synthetic trading</span></label>
+              <p class="input-hint" id="requirement-rule-description">When a new order is accepted, used credit plus reserved credit must not exceed the current credit limit. This check covers that event; it does not verify the whole requirement.</p>
+              <div class="system-form-grid">
+                <div class="control-group">
+                  <label for="requirement-rule-select">Requirement text</label>
+                  <select id="requirement-rule-select" class="form-input"></select>
+                </div>
+                <div class="control-group">
+                  <label for="requirement-rule-reviewed"><input type="checkbox" id="requirement-rule-reviewed"> I reviewed this check</label>
+                  <button id="btn-attach-requirement-rule" class="btn btn-secondary" type="button">Attach check</button>
+                </div>
+              </div>
+              <p class="input-hint" id="requirement-rule-status" role="status"></p>
+              <ul id="requirement-rule-list"></ul>
             </div>
             <div class="system-actions">
               <button id="btn-save-system" class="btn btn-primary" type="button">Save system brief</button>
@@ -184,7 +200,7 @@
             <ul>
               <li><strong>Unsupported:</strong> real component outages or drops, and real latency or liveness deadlines. Logical delays model ordering only; they do not measure transport latency.</li>
               <li><strong>Not configured:</strong> external transports such as FIX, TIBCO RV, Solace, Kafka and HTTP.</li>
-              <li><strong>Context only:</strong> supplementary brief prose. It guides hypotheses and is not verified unless an executable check exists.</li>
+              <li><strong>Context only:</strong> supplementary brief prose without an attached check guides hypotheses and remains unverified. The credit limit check can be attached to a trading requirement in Brief &amp; requirements; its results are shown separately from confirmed findings.</li>
             </ul>
           </section>
         </section>
@@ -208,7 +224,8 @@
               <details>
                 <summary>Read the model-visible context</summary>
                 <h3>Business overview</h3><p id="prepare-overview"></p>
-                <h3>Supplementary requirements (context only)</h3><ul id="prepare-requirements"></ul>
+                <h3>Supplementary requirements</h3><ul id="prepare-requirements"></ul>
+                <h3>Requirement checks</h3><ul id="prepare-requirement-rules"></ul>
                 <p class="muted">The model sees the saved brief, the selected system's public contract and the selected neutral business source. It does not see a hidden catalog or other candidate variants. The adapter always tests its synthetic simulator, not an arbitrary application described in the brief.</p>
               </details>
             </section>
@@ -311,8 +328,11 @@
             <details id="run-system-snapshot" class="contract-details hidden">
               <summary>Requirements used for this investigation</summary>
               <p id="run-system-overview"></p>
-              <p>Supplementary requirements recorded for this run (context only):</p>
+              <p>Supplementary requirements recorded for this run (context only unless a rule is configured):</p>
               <ul id="run-system-requirements"></ul>
+              <p>Configured deterministic rules pinned to this run:</p>
+              <ul id="run-system-requirement-rules"></ul>
+              <p id="run-system-evaluator"></p>
               <p id="run-system-contract"></p>
             </details>
             <div class="metrics-row">
@@ -398,7 +418,7 @@
                 <button class="tab-btn" data-tab="tab-state" type="button" role="tab" id="tab-btn-state" aria-controls="tab-state" aria-selected="false" tabindex="-1">Order &amp; credit exposure</button>
               </div>
               <div id="tab-findings" class="tab-pane active" role="tabpanel" aria-labelledby="tab-btn-findings" tabindex="0"><div id="findings-container" class="findings-list"><div class="empty-state">No findings recorded yet. Launch an investigation to observe behavior.</div></div></div>
-              <div id="tab-experiments" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-experiments" tabindex="0"><div id="experiments-container" class="experiments-list"><div class="empty-state">No experiments executed yet.</div></div></div>
+              <div id="tab-experiments" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-experiments" tabindex="0"><div id="experiments-container" class="experiments-list"><div class="empty-state">No experiments executed yet.</div></div><section id="requirement-rule-results" aria-label="Requirement rule results"><h3>Requirement rule results (separate from confirmed findings)</h3><p class="muted">Per-experiment outcomes of the pinned deterministic rule. A passing experiment does not verify the entire natural-language requirement, and a rule failure alone is not a confirmed finding.</p><div id="requirement-rule-results-body"><p class="muted">No requirement rule results recorded for this run.</p></div></section></div>
               <div id="tab-proposals" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-proposals" tabindex="0"><p id="proposal-summary">No proposals recorded yet.</p><p id="run-notes" class="run-notes"></p><div id="proposals-container"></div></div>
               <div id="tab-trace" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-trace" tabindex="0">
                 <div class="trace-header"><h3 id="trace-title">Execution trace</h3><span id="trace-exp-selector-label">Select an experiment to view trace.</span></div>

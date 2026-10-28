@@ -44,6 +44,8 @@ export interface SystemBrief {
   overview: string;
   // Additional human requirements are context until a deterministic check is configured.
   requirements: string[];
+  /** Explicitly reviewed declarative rules, associated by unique normalized text. */
+  requirementRules?: RequirementRule[];
   adapterId: 'synthetic-trading' | 'inventory-reservation' | 'unconfigured';
   updatedAt: string;
 }
@@ -52,6 +54,63 @@ export interface SystemBriefSnapshot {
   brief: SystemBrief;
   contract: SystemContract | null;
   hash: string;
+  requirementEvaluator?: RequirementEvaluatorIdentity;
+}
+
+export interface RequirementRule {
+  requirement: string;
+  preset: 'accepted-order-credit-limit';
+  reviewed: true;
+}
+
+export interface RequirementEvaluatorIdentity {
+  id: string;
+  version: number;
+  hash: string;
+}
+
+/** Actual delivery observations; never inferred from human-readable outcomes. */
+export interface DeliveryObservation {
+  traceIndex: number;
+  step: number;
+  action: 'deliver' | 'drain:deliver';
+  messageId: string;
+  channel: Channel;
+  messageType: string | null;
+  payloadValid: boolean;
+  status: 'accepted' | 'rejected' | 'exception';
+  reason?: string;
+  usedCredit?: number;
+  reservedCredit?: number;
+  creditLimit?: number;
+}
+
+export type RequirementRuleStatus = 'passed' | 'failed' | 'not-exercised' | 'inconclusive';
+
+export interface RequirementRuleEvidence {
+  traceIndex?: number;
+  step?: number;
+  action?: string;
+  messageId?: string;
+  status: RequirementRuleStatus | 'target-rejected' | 'invalid-payload';
+  detail: string;
+  usedCredit?: number;
+  reservedCredit?: number;
+  creditLimit?: number;
+  totalCredit?: number;
+  expected: 'usedCredit + reservedCredit <= current credit limit';
+}
+
+export interface RequirementRuleResult {
+  requirement: string;
+  preset: RequirementRule['preset'];
+  experimentIndex: number;
+  sourceHash: string;
+  snapshotHash: string;
+  evaluator: RequirementEvaluatorIdentity;
+  status: RequirementRuleStatus;
+  matchedEvents: number;
+  evidence: RequirementRuleEvidence[];
 }
 
 export interface Violation {
@@ -90,6 +149,9 @@ export interface ExperimentResult {
   violations: Violation[];
   rejections: { step: number; reason: string }[];
   valid: boolean;
+  deliveryObservations?: DeliveryObservation[];
+  executionComplete?: boolean;
+  requirementRuleResults?: RequirementRuleResult[];
 }
 
 export interface Usage {

@@ -62,7 +62,35 @@ describe('homepage HTTP routes', () => {
   it('existing endpoints still respond and CTA is plain navigation in source', async () => {
     const res = await request(server, '/api/targets'); expect(res.status).toBe(200);
     const home = (await request(server, '/')).body.toString('utf8');
-    expect(home).toContain('href="/workspace"'); expect(home).not.toMatch(/fetch\(|XMLHttpRequest/);
+    expect(home).toMatch(/<a class="btn-primary" href="\/workspace">Unleash Chaos/);
+    expect(home).not.toContain('Open workspace');
+    expect(home).not.toMatch(/fetch\(|XMLHttpRequest/);
+    const workspace = (await request(server, '/workspace')).body.toString('utf8');
+    expect(workspace).toMatch(/<a class="brand" href="\/" aria-label="ChaosPilot home">/);
+  });
+  it('GET /how-it-works serves the dedicated page and its stylesheet', async () => {
+    const res = await request(server, '/how-it-works'); expect(res.status).toBe(200); expect(ct(res)).toContain('text/html');
+    const body = res.body.toString('utf8');
+    expect(body).toContain('How it works'); expect(body).toContain('/how-it-works.css');
+    expect(body).toContain('/homepage.css');
+    expect(body).toMatch(/<a class="wordmark" href="\/">/);
+    expect(body).toMatch(/<a class="btn-primary" href="\/workspace">Unleash Chaos/);
+    // Actual flow and honesty boundaries, not speculative capabilities.
+    for (const phrase of ['Define and save a system brief', 'fresh deterministic simulator', 'Mock is not a live model', 'Context is not a check', 'Not every run finds a fault', 'Replay is not a fresh discovery', 'synthetic-trading', 'inventory-reservation', 'arbitrary external production']) {
+      expect(body, phrase).toContain(phrase);
+    }
+    const css = await request(server, '/how-it-works.css'); expect(css.status).toBe(200); expect(ct(css)).toContain('text/css');
+    expect(css.body.toString('utf8')).toContain('.hiw-hero');
+    const home = (await request(server, '/')).body.toString('utf8');
+    expect(home).toContain('<a href="/how-it-works">How it works</a>');
+    expect(home).not.toContain('href="#how-it-works"');
+    // Home summary section is retained even though the header now navigates away.
+    expect(home).toContain('id="how-it-works"'); expect(home).toContain('Replay the evidence');
+  });
+  it('denies the how-it-works source filename, unknown files and traversal', async () => {
+    for (const p of ['/how-it-works.html', '/how-it-works.css.map', '/unknown-page', '/how-it-works/../package.json', '/%2e%2e/how-it-works.html']) {
+      const res = await request(server, p); expect(res.status, p).toBe(404);
+    }
   });
   it('missing asset returns 404 not fabricated content', async () => {
     const res = await request(server, '/assets/homepage/missing.png'); expect(res.status).toBe(404);

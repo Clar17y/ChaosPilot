@@ -15,6 +15,8 @@ import { assertAdapterVariant, resolveAdapter } from './adapters/index.ts';
 import { resolveExperimentPositionForIndex } from './experiment-identity.ts';
 import { computeSnapshotHash, validateSystemBrief } from './systems/index.ts';
 import { getPromptIdentity } from './investigation/prompt.ts';
+import { evaluateRequirementRules } from './requirements/evaluator.ts';
+import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from './requirements/identity.ts';
 export {
   SEEDED_TRADING_BRIEF,
   validateSystemId,
@@ -66,12 +68,15 @@ export interface ReplayExperimentOutcome {
   mismatches?: string[];
   valid: boolean;
   replayedResult: ExperimentResult;
+  /** Present only when the saved result or pinned snapshot carries requirement-rule evidence. */
+  ruleResultsMatched?: boolean;
+  deliveryObservationsMatched?: boolean;
 }
 
 export type ReplayContextStatus = 'identical' | 'drifted' | 'unknown' | 'unverified-legacy';
 
 export interface ReplayContextCheck {
-  kind: 'prompt' | 'contract' | 'contract-hash' | 'clean-source' | 'target-source' | 'system-brief';
+  kind: 'prompt' | 'contract' | 'contract-hash' | 'clean-source' | 'target-source' | 'system-brief' | 'requirement-evaluator';
   status: ReplayContextStatus;
   detail: string;
   saved?: string;
@@ -420,6 +425,42 @@ function replayOneExperiment(
     comparison.matched = false;
     comparison.details = comparison.mismatches.join('; ');
   }
+  // Requirement-rule replay: re-evaluate the fresh execution with the pinned
+  // snapshot/evaluator (never current brief configuration) and compare with
+  // the saved historical rule outcomes. Legacy results without rule evidence
+  // keep their prior replay semantics untouched.
+  let ruleResultsMatched: boolean | undefined;
+  let deliveryObservationsMatched: boolean | undefined;
+  const pinnedRules = record.systemBrief?.brief?.requirementRules;
+  const savedRuleResults = origResult.requirementRuleResults;
+  if (Array.isArray(origResult.deliveryObservations)) {
+    deliveryObservationsMatched = canonicalJson(origResult.deliveryObservations) === canonicalJson(replayedResult.deliveryObservations ?? null);
+    if (!deliveryObservationsMatched) comparison.mismatches.push('Delivery observations mismatch between original and replayed execution');
+  }
+  if (pinnedRules && pinnedRules.length > 0) {
+    const evaluator = record.systemBrief?.requirementEvaluator;
+    if (!requirementEvaluatorAvailable(evaluator)) {
+      ruleResultsMatched = false;
+      comparison.mismatches.push('Requirement evaluator is unavailable or has drifted from the pinned identity; exact rule replay cannot be claimed');
+    } else {
+      try {
+        const freshRuleResults = evaluateRequirementRules(replayedResult, record.systemBrief!, expRecord.index ?? position + 1);
+        replayedResult.requirementRuleResults = freshRuleResults;
+        ruleResultsMatched = canonicalJson(savedRuleResults ?? null) === canonicalJson(freshRuleResults);
+        if (!ruleResultsMatched) comparison.mismatches.push('Requirement rule results mismatch between original and replayed execution');
+      } catch (err) {
+        ruleResultsMatched = false;
+        comparison.mismatches.push(`Requirement rule replay failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  } else if (savedRuleResults && savedRuleResults.length > 0) {
+    ruleResultsMatched = false;
+    comparison.mismatches.push('Saved requirement rule results have no pinned rule snapshot; rule provenance cannot be verified');
+  }
+  if (ruleResultsMatched === false || deliveryObservationsMatched === false) {
+    comparison.matched = false;
+    comparison.details = comparison.mismatches.join('; ');
+  }
   const outcome: ReplayExperimentOutcome = {
     index: expRecord.index ?? position,
     originalViolationsCount: (origResult.violations || []).length,
@@ -434,6 +475,8 @@ function replayOneExperiment(
     mismatches: comparison.mismatches,
     valid: replayedResult.valid,
     replayedResult,
+    ...(ruleResultsMatched !== undefined ? { ruleResultsMatched } : {}),
+    ...(deliveryObservationsMatched !== undefined ? { deliveryObservationsMatched } : {}),
   };
   return { outcome, exactMatched: comparison.matched };
 }
@@ -485,10 +528,27 @@ async function prepareReplay(
     const snapshot = record.systemBrief!;
     const validated = validateSystemBrief(snapshot?.brief);
     if (!validated.valid) throw new Error(`Invalid replay system brief: ${validated.error}`);
-    if (snapshot.hash !== computeSnapshotHash(validated.brief, snapshot.contract)) throw new Error('Replay system brief snapshot hash mismatch');
+    if (snapshot.hash !== computeSnapshotHash(validated.brief, snapshot.contract, snapshot.requirementEvaluator)) throw new Error('Replay system brief snapshot hash mismatch');
+    // Requirement-rule evaluator provenance: only records that pin rules (or
+    // carry saved rule outcomes) are gated on it; legacy records are not.
+    const pinnedRuleCount = validated.brief.requirementRules?.length ?? 0;
+    const savedRuleOutcomes = record.experiments.some(e => (e.result?.requirementRuleResults?.length ?? 0) > 0);
+    if (pinnedRuleCount > 0 || savedRuleOutcomes) {
+      const evaluator = snapshot.requirementEvaluator;
+      if (!isRequirementEvaluatorIdentity(evaluator)) {
+        addCheck({ kind: 'requirement-evaluator', status: 'unknown', detail: 'Pinned requirement rules or saved rule outcomes have no valid recorded evaluator identity; exact rule replay cannot be claimed.' }, true);
+      } else if (!requirementEvaluatorAvailable(evaluator)) {
+        addCheck({ kind: 'requirement-evaluator', status: 'drifted', detail: 'Recorded requirement evaluator identity differs from the current evaluator; exact rule replay cannot be claimed.', saved: `${evaluator.id}@${evaluator.version}:${evaluator.hash}` }, true);
+      } else {
+        addCheck({ kind: 'requirement-evaluator', status: 'identical', detail: 'Recorded requirement evaluator identity matches the current evaluator.', saved: `${evaluator.id}@${evaluator.version}:${evaluator.hash}` }, true);
+      }
+    }
     // adapter/variant audit contradictions are checked universally above.
   } else {
     addCheck({ kind: 'system-brief', status: 'unknown', detail: 'Legacy record without a pinned system brief snapshot; brief/contract context was not recorded.' }, false);
+    if (record.experiments.some(e => (e.result?.requirementRuleResults?.length ?? 0) > 0)) {
+      addCheck({ kind: 'requirement-evaluator', status: 'unknown', detail: 'Saved requirement rule outcomes have no pinned rule snapshot or evaluator identity; exact rule replay cannot be claimed.' }, true);
+    }
   }
 
   const simulator = simulatorOverride || (adapterId === 'synthetic-trading' ? await getSimulatorApi() : resolveAdapter(adapterId));
