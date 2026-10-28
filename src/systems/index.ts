@@ -2,12 +2,16 @@ import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type {
+  RequirementEvaluatorIdentity,
+  RequirementRule,
   SystemBrief,
   SystemBriefSnapshot,
   SystemContract,
 } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
 import { resolveAdapter } from '../adapters/index.ts';
+import { cloneRequirementRules, validateRequirementRules } from '../requirements/config.ts';
+import { getRequirementEvaluatorIdentity } from '../requirements/identity.ts';
 
 export class SystemIntegrityError extends Error {
   constructor(message: string) {
@@ -182,6 +186,20 @@ export function validateSystemBrief(
     return { valid: false, error: 'updatedAt must be a valid ISO 8601 date string' };
   }
 
+  const requirements = b.requirements.map((r: string) => r.trim()).filter((r: string) => r.length > 0);
+
+  // Optional reviewed requirement rules. Absent stays absent so legacy
+  // briefs/snapshots keep their canonical hashes; a present field must be a
+  // valid allowlisted preset configuration bound to unique requirement text.
+  let requirementRules: RequirementRule[] | undefined;
+  if (b.requirementRules !== undefined) {
+    const rulesError = validateRequirementRules(b.requirementRules, requirements, b.adapterId);
+    if (rulesError) {
+      return { valid: false, error: rulesError };
+    }
+    requirementRules = cloneRequirementRules(b.requirementRules as RequirementRule[]);
+  }
+
   return {
     valid: true,
     brief: {
@@ -190,7 +208,8 @@ export function validateSystemBrief(
       revision: b.revision,
       name: b.name.trim(),
       overview: b.overview,
-      requirements: b.requirements.map((r: string) => r.trim()).filter((r: string) => r.length > 0),
+      requirements,
+      ...(requirementRules !== undefined ? { requirementRules } : {}),
       adapterId: b.adapterId,
       updatedAt: b.updatedAt,
     },
@@ -199,11 +218,18 @@ export function validateSystemBrief(
 
 export function computeSnapshotHash(
   brief: SystemBrief,
-  contract: SystemContract | null
+  contract: SystemContract | null,
+  requirementEvaluator?: RequirementEvaluatorIdentity
 ): string {
+  // Without an evaluator identity this is exactly the historical hash, so
+  // old snapshots (whose optional fields were absent) keep verifying.
+  // When rules are pinned, the evaluator identity is bound into the hash.
+  const payload = requirementEvaluator === undefined
+    ? { brief, contract }
+    : { brief, contract, requirementEvaluator };
   return crypto
     .createHash('sha256')
-    .update(canonicalJson({ brief, contract }), 'utf8')
+    .update(canonicalJson(payload), 'utf8')
     .digest('hex');
 }
 
@@ -613,14 +639,18 @@ export async function createSystemSnapshot(
 ): Promise<SystemBriefSnapshot> {
   const validated = validateSystemBrief(brief);
   if (!validated.valid) throw new SystemIntegrityError(validated.error);
-  const contract = brief.adapterId === 'unconfigured' ? null
-    : contractOverride !== undefined ? contractOverride : resolveAdapter(brief.adapterId).getContract();
+  const canonicalBrief = validated.brief;
+  const contract = canonicalBrief.adapterId === 'unconfigured' ? null
+    : contractOverride !== undefined ? contractOverride : resolveAdapter(canonicalBrief.adapterId).getContract();
 
-  const hash = computeSnapshotHash(brief, contract);
+  const hasRules = (canonicalBrief.requirementRules?.length ?? 0) > 0;
+  const requirementEvaluator = hasRules ? getRequirementEvaluatorIdentity() : undefined;
+  const hash = computeSnapshotHash(canonicalBrief, contract, requirementEvaluator);
 
   return {
-    brief: structuredClone(brief),
+    brief: structuredClone(canonicalBrief),
     contract: contract ? structuredClone(contract) : null,
     hash,
+    ...(requirementEvaluator ? { requirementEvaluator } : {}),
   };
 }

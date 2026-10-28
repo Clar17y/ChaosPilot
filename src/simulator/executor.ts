@@ -1,10 +1,12 @@
 import type {
+  DeliveryObservation,
   Experiment,
   ExperimentResult,
   TargetVariant,
   TraceEntry,
   Violation,
 } from '../domain.ts';
+import { observeDelivery } from './delivery-observation.ts';
 import { getSourceBundle } from './bundle.ts';
 import { Oracle } from './oracle.ts';
 import { Scheduler } from './scheduler.ts';
@@ -70,6 +72,7 @@ export function executeExperiment(
 
   const trace: TraceEntry[] = [];
   const rejections: { step: number; reason: string }[] = [];
+  const deliveryObservations: DeliveryObservation[] = [];
 
   for (let stepIndex = 0; stepIndex < experiment.steps.length; stepIndex++) {
     const action = experiment.steps[stepIndex];
@@ -210,9 +213,11 @@ export function executeExperiment(
         const prevSnapshot = target.getSnapshot();
 
         let processResult: ProcessResult;
+        let targetException = false;
         try {
           processResult = target.processMessage(env.to, env.payload);
         } catch (err) {
+          targetException = true;
           processResult = {
             accepted: false,
             reason: `Target exception: ${err instanceof Error ? err.message : String(err)}`,
@@ -234,6 +239,7 @@ export function executeExperiment(
         }
 
         const currSnapshot = target.getSnapshot();
+        deliveryObservations.push(observeDelivery(env, processResult, currSnapshot, trace, stepIndex, 'deliver', targetException));
         oracle.evaluateTransition({
           step: stepIndex,
           targetSnapshot: currSnapshot,
@@ -275,9 +281,11 @@ export function executeExperiment(
 
           const prevSnapshot = target.getSnapshot();
           let processResult: ProcessResult;
+          let targetException = false;
           try {
             processResult = target.processMessage(env.to, env.payload);
           } catch (err) {
+            targetException = true;
             processResult = {
               accepted: false,
               reason: `Target exception: ${err instanceof Error ? err.message : String(err)}`,
@@ -299,6 +307,7 @@ export function executeExperiment(
           }
 
           const currSnapshot = target.getSnapshot();
+          deliveryObservations.push(observeDelivery(env, processResult, currSnapshot, trace, stepIndex, 'drain:deliver', targetException));
           oracle.evaluateTransition({
             step: stepIndex,
             targetSnapshot: currSnapshot,
@@ -514,5 +523,7 @@ export function executeExperiment(
     violations: finalViolations,
     rejections,
     valid: rejections.length === 0,
+    deliveryObservations,
+    executionComplete: true,
   };
 }

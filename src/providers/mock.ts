@@ -79,6 +79,28 @@ export class MockProvider implements ExperimentProvider {
 
     const experimentIndex = context.history.length;
 
+    // When a requirement check is configured, start with its existing offline
+    // credit-admission fixture. This gives the workspace a reproducible demo
+    // against candidate-c without changing mock runs that have no rule.
+    if (experimentIndex === 0 && context.systemBrief?.brief.requirementRules?.some(
+      rule => rule.preset === 'accepted-order-credit-limit'
+    )) {
+      const { getFaultCatalogEntry } = await import('../testing/fault-catalog.ts');
+      const fixture = getFaultCatalogEntry('candidate-c')!.knownExperiment;
+      const experiment: Experiment = {
+        ...structuredClone(fixture),
+        hypothesis: '[Scripted Offline Credit Check] Test credit admission after an earlier order is filled',
+      };
+      return {
+        experiment,
+        usage,
+        summary: 'Scripted offline credit check; no autonomous discovery claimed',
+        requestAudit,
+        responseAudit: { content: JSON.stringify(experiment), finishReason: 'stop' },
+        requestSent: false,
+      };
+    }
+
     // Sequence of deterministic scripted offline experiments:
     // 0: Normal baseline trading sequence (no defect expected)
     // 1: Duplication defect with partial fill (tests execution message deduplication on candidate-a within quantity bounds)

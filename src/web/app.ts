@@ -5,6 +5,7 @@ import type {
   Violation,
   TargetVariant,
   ProviderKind,
+  RequirementRule,
   SystemBrief,
   SystemContract,
 } from '../domain.ts';
@@ -91,6 +92,7 @@ let selectedSystem: SystemBrief | null = null;
 let isDraftMode = false;
 let hasUnsavedSystemEdits = false;
 let isSystemSavePending = false;
+let draftRequirementRules: RequirementRule[] = [];
 
 // Workspace view / history state
 /* current view is tracked by the visible panel and aria-current */
@@ -155,6 +157,11 @@ const systemNameInput = document.getElementById('system-name-input') as HTMLInpu
 const systemAdapterSelect = document.getElementById('system-adapter-select') as HTMLSelectElement;
 const systemOverviewInput = document.getElementById('system-overview-input') as HTMLTextAreaElement;
 const systemRequirementsInput = document.getElementById('system-requirements-input') as HTMLTextAreaElement;
+const requirementRuleSelect = document.getElementById('requirement-rule-select') as HTMLSelectElement | null;
+const requirementRuleReviewed = document.getElementById('requirement-rule-reviewed') as HTMLInputElement | null;
+const btnAttachRequirementRule = document.getElementById('btn-attach-requirement-rule') as HTMLButtonElement | null;
+const requirementRuleStatus = document.getElementById('requirement-rule-status') as HTMLElement | null;
+const requirementRuleList = document.getElementById('requirement-rule-list') as HTMLElement | null;
 const btnSaveSystem = document.getElementById('btn-save-system') as HTMLButtonElement;
 const btnDiscardSystem = document.getElementById('btn-discard-system') as HTMLButtonElement;
 const systemFeedback = document.getElementById('system-feedback') as HTMLElement;
@@ -270,12 +277,72 @@ function checkCount(): number {
   return executableCheckCount(effectiveAdapter(), contractCheckCount);
 }
 
+const normalizeRequirementText = (text: string): string => text.trim().replace(/\s+/g, ' ');
+function currentRequirementLines(): string[] {
+  return (systemRequirementsInput?.value ?? '').split('\n').map(normalizeRequirementText).filter(Boolean);
+}
+function renderRequirementRulePanel(): void {
+  const lines = currentRequirementLines();
+  const uniqueLines = [...new Set(lines)];
+  const adapter = systemAdapterSelect?.value ?? selectedSystem?.adapterId ?? 'unconfigured';
+  if (requirementRuleSelect) {
+    const previous = requirementRuleSelect.value;
+    requirementRuleSelect.textContent = '';
+    for (const text of uniqueLines) {
+      const opt = document.createElement('option');
+      opt.value = text;
+      opt.textContent = text;
+      requirementRuleSelect.appendChild(opt);
+    }
+    if (uniqueLines.includes(previous)) requirementRuleSelect.value = previous;
+    requirementRuleSelect.disabled = isSystemSavePending || adapter !== 'synthetic-trading' || lines.length === 0;
+  }
+  if (btnAttachRequirementRule) btnAttachRequirementRule.disabled = isSystemSavePending || adapter !== 'synthetic-trading';
+  if (requirementRuleReviewed) requirementRuleReviewed.disabled = isSystemSavePending || adapter !== 'synthetic-trading';
+  const notes: string[] = [];
+  if (adapter !== 'synthetic-trading') notes.push('Requirement rules support synthetic-trading only; explicitly remove attached rules before switching adapter.');
+  const counts = new Map<string, number>();
+  for (const line of lines) counts.set(line, (counts.get(line) ?? 0) + 1);
+  for (const rule of draftRequirementRules) {
+    const count = counts.get(rule.requirement) ?? 0;
+    if (count === 0) notes.push(`Stale rule: linked requirement text was renamed or removed — remove it, or remap by removing and attaching the new text: "${rule.requirement}"`);
+    else if (count > 1) notes.push(`Ambiguous rule: linked requirement text now appears ${count} times — deduplicate it or remove the rule: "${rule.requirement}"`);
+  }
+  if (requirementRuleStatus) requirementRuleStatus.textContent = notes.join(' ');
+  if (requirementRuleList) {
+    requirementRuleList.textContent = '';
+    if (!draftRequirementRules.length) {
+      const li = document.createElement('li');
+      li.textContent = 'No deterministic rule attached. All requirements above are unverified context.';
+      requirementRuleList.appendChild(li);
+    }
+    for (const rule of draftRequirementRules) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `Credit limit for accepted orders → "${rule.requirement}" (reviewed)`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-secondary btn-xs';
+      remove.textContent = 'Remove rule';
+      remove.disabled = isSystemSavePending;
+      remove.addEventListener('click', () => {
+        if (isSystemSavePending) return;
+        draftRequirementRules = draftRequirementRules.filter(r => r.requirement !== rule.requirement);
+        markUnsavedEdits();
+      });
+      li.append(label, document.createTextNode(' '), remove);
+      requirementRuleList.appendChild(li);
+    }
+  }
+}
+
 function renderWorkspaceSummaries(): void {
   const name = isDraftMode ? (systemNameInput?.value || 'New system') : (selectedSystem?.name ?? 'No system selected');
   const overview = isDraftMode ? systemOverviewInput?.value ?? '' : (selectedSystem?.overview ?? '');
   const requirements = isDraftMode
     ? (systemRequirementsInput?.value.split('\n').map(r => r.trim()).filter(Boolean) ?? [])
     : (selectedSystem?.requirements ?? []);
+  const requirementRules = isDraftMode ? draftRequirementRules : (selectedSystem?.requirementRules ?? []);
   const adapter = effectiveAdapter() ?? 'unconfigured';
   const revision = isDraftMode ? null : (selectedSystem?.revision ?? null);
   const checks = checkCount();
@@ -296,7 +363,10 @@ function renderWorkspaceSummaries(): void {
   set('prepare-adapter', isExecutableAdapter(adapter) ? adapterLabel(adapter) : 'Adapter unconfigured');
   set('prepare-purpose', overview || 'No business purpose saved yet.');
   set('prepare-overview', overview || 'No business purpose saved yet.');
-  set('prepare-counts', `${checks} executable checks · ${requirements.length} contextual requirements without checks`);
+  const configuredRuleTexts = new Set(requirementRules.map(r => r.requirement));
+  const unverifiedCount = requirements.filter(r => !configuredRuleTexts.has(normalizeRequirementText(r))).length;
+  const ruleCount = requirementRules.length;
+  set('prepare-counts', `${checks} built-in checks · ${ruleCount} linked requirement ${ruleCount === 1 ? 'check' : 'checks'} · ${unverifiedCount} unverified requirements`);
   set('prepare-meta-readiness', metaKeyConfigured
     ? 'Meta: backend reports a configured key.'
     : 'Meta: backend reports no configured key.');
@@ -310,8 +380,24 @@ function renderWorkspaceSummaries(): void {
     }
     for (const text of requirements) {
       const li = document.createElement('li');
-      li.textContent = text;
+      li.textContent = configuredRuleTexts.has(normalizeRequirementText(text))
+        ? `${text} — configured deterministic rule attached`
+        : `${text} — unverified (context only)`;
       reqList.appendChild(li);
+    }
+  }
+  const ruleList = document.getElementById('prepare-requirement-rules');
+  if (ruleList) {
+    ruleList.textContent = '';
+    if (!requirementRules.length) {
+      const li = document.createElement('li');
+      li.textContent = 'None. No requirement rule will be pinned to the next run.';
+      ruleList.appendChild(li);
+    }
+    for (const rule of requirementRules) {
+      const li = document.createElement('li');
+      li.textContent = `Credit limit for accepted orders: "${rule.requirement}" — used plus reserved credit must stay within the limit.`;
+      ruleList.appendChild(li);
     }
   }
   const dirtyNote = document.getElementById('prepare-dirty-note');
@@ -588,14 +674,39 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
     const requirements = document.getElementById('run-system-requirements');
     const contract = document.getElementById('run-system-contract');
     if (overview) overview.textContent = rec.systemBrief.brief.overview;
+    const pinnedRuleTexts = new Set((rec.systemBrief.brief.requirementRules ?? []).map(r => r.requirement));
     if (requirements) {
       requirements.textContent = '';
       for (const text of rec.systemBrief.brief.requirements) {
         const item = document.createElement('li');
-        item.textContent = text;
+        item.textContent = pinnedRuleTexts.has(normalizeRequirementText(text))
+          ? `${text} — configured deterministic rule pinned to this run`
+          : `${text} — unverified (context only)`;
         requirements.appendChild(item);
       }
       if (!rec.systemBrief.brief.requirements.length) requirements.textContent = 'None recorded.';
+    }
+    const pinnedRulesEl = document.getElementById('run-system-requirement-rules');
+    if (pinnedRulesEl) {
+      pinnedRulesEl.textContent = '';
+      const rules = rec.systemBrief.brief.requirementRules ?? [];
+      if (!rules.length) {
+        const item = document.createElement('li');
+        item.textContent = 'None pinned to this run.';
+        pinnedRulesEl.appendChild(item);
+      }
+      for (const rule of rules) {
+        const item = document.createElement('li');
+        item.textContent = `Credit limit for accepted orders: "${rule.requirement}" (reviewed)`;
+        pinnedRulesEl.appendChild(item);
+      }
+    }
+    const evaluatorEl = document.getElementById('run-system-evaluator');
+    if (evaluatorEl) {
+      const ev = rec.systemBrief.requirementEvaluator;
+      evaluatorEl.textContent = ev
+        ? `Check version ${ev.version} is pinned to this run. Later brief edits do not change it.`
+        : 'No requirement check pinned to this run.';
     }
     if (contract) contract.textContent = `${rec.systemBrief.contract?.invariants.length ?? 0} available deterministic checks in the pinned contract. Snapshot hash: ${rec.systemBrief.hash}`;
   }
@@ -778,7 +889,42 @@ function renderFindings(findings: Finding[]): void {
   }
 }
 
+function renderRequirementRuleResults(experiments: ExperimentRecord[]): void {
+  const body = document.getElementById('requirement-rule-results-body');
+  if (!body) return;
+  body.textContent = '';
+  const rows = (experiments ?? []).flatMap((expRec, i) => (expRec.result?.requirementRuleResults ?? []).map(r => ({ r, label: expRec.index || i + 1 })));
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'No requirement rule results recorded for this run.';
+    body.appendChild(p);
+    return;
+  }
+  for (const { r, label } of rows) {
+    const section = document.createElement('article');
+    const head = document.createElement('h4');
+    head.textContent = `Experiment #${label} · ${r.status.replace('not-exercised', 'not exercised')} · Credit limit for accepted orders`;
+    const meta = document.createElement('p');
+    meta.textContent = `Requirement: "${r.requirement}" · ${r.matchedEvents} matching ${r.matchedEvents === 1 ? 'order' : 'orders'}`;
+    section.append(head, meta);
+    const list = document.createElement('ul');
+    for (const ev of r.evidence) {
+      const li = document.createElement('li');
+      const where = ev.traceIndex !== undefined ? `recorded event ${ev.traceIndex + 1}` : 'experiment';
+      const detail = ev.status === 'passed' || ev.status === 'failed'
+        ? `Used ${ev.usedCredit ?? '?'} + reserved ${ev.reservedCredit ?? '?'} = ${ev.totalCredit ?? '?'}; limit ${ev.creditLimit ?? '?'}.`
+        : ev.detail;
+      li.textContent = `${ev.status.replace('not-exercised', 'not exercised')} (${where}): ${detail}`;
+      list.appendChild(li);
+    }
+    section.appendChild(list);
+    body.appendChild(section);
+  }
+}
+
 function renderExperiments(experiments: ExperimentRecord[]): void {
+  renderRequirementRuleResults(experiments ?? []);
   selectedExperimentIndex = clampSelectedIndex(selectedExperimentIndex, experiments?.length ?? 0);
   // Preserve keyboard focus across rerenders (polling refreshes this list).
   const focusedExperiment = document.activeElement instanceof HTMLButtonElement
@@ -835,6 +981,12 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     hint.className = 'exp-inspect-hint';
     hint.textContent = 'View trace';
     right.append(statusPillEl, hint);
+    for (const ruleResult of expRec.result.requirementRuleResults ?? []) {
+      const rulePill = document.createElement('span');
+      rulePill.className = ruleResult.status === 'passed' ? 'pill-badge pill-pass' : ruleResult.status === 'failed' ? 'pill-badge pill-fail' : 'pill-badge';
+      rulePill.textContent = `Check: ${ruleResult.status.replace('not-exercised', 'not exercised')}`;
+      right.append(rulePill);
+    }
 
     item.append(left, right);
 
@@ -1482,10 +1634,12 @@ function setSystemSavePending(pending: boolean): void {
     systemAdapterSelect, systemOverviewInput, systemRequirementsInput, btnSaveSystem, btnDiscardSystem]) {
     control.disabled = pending;
   }
+  renderRequirementRulePanel();
   updateRunReadiness();
 }
 
 function markUnsavedEdits(): void {
+  renderRequirementRulePanel();
   hasUnsavedSystemEdits = true;
   snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null;
   setSaveStatus('draft', isDraftMode ? 'New Profile (Draft)' : 'Unsaved Edits (Draft)');
@@ -1518,6 +1672,9 @@ function selectSystem(system: SystemBrief): void { recordSequencer.invalidate();
   if (systemAdapterSelect) systemAdapterSelect.value = system.adapterId;
   if (systemOverviewInput) systemOverviewInput.value = system.overview;
   if (systemRequirementsInput) systemRequirementsInput.value = system.requirements.join('\n');
+  draftRequirementRules = structuredClone(system.requirementRules ?? []);
+  if (requirementRuleReviewed) requirementRuleReviewed.checked = false;
+  renderRequirementRulePanel();
 
   if (systemRevisionBadge) systemRevisionBadge.textContent = `Rev ${system.revision}`;
   renderHistory();
@@ -1831,6 +1988,9 @@ if (btnNewSystem) {
     systemAdapterSelect.value = 'unconfigured';
     systemOverviewInput.value = '';
     systemRequirementsInput.value = '';
+    draftRequirementRules = [];
+    if (requirementRuleReviewed) requirementRuleReviewed.checked = false;
+    renderRequirementRulePanel();
     systemRevisionBadge.textContent = 'Rev 1 (Draft)'; renderHistory(); renderFindingsView(); showView('brief');
     updateAdapterBadge('unconfigured');
     setSaveStatus('draft', 'New Draft');
@@ -1883,6 +2043,7 @@ if (btnSaveSystem) {
       name,
       overview,
       requirements,
+      ...(draftRequirementRules.length ? { requirementRules: structuredClone(draftRequirementRules) } : {}),
       adapterId,
       updatedAt: new Date().toISOString(),
     };
@@ -1943,6 +2104,16 @@ if (systemNameInput) systemNameInput.addEventListener('input', markUnsavedEdits)
 if (systemAdapterSelect) systemAdapterSelect.addEventListener('change', markUnsavedEdits);
 if (systemOverviewInput) systemOverviewInput.addEventListener('input', markUnsavedEdits);
 if (systemRequirementsInput) systemRequirementsInput.addEventListener('input', markUnsavedEdits);
+if (btnAttachRequirementRule) btnAttachRequirementRule.addEventListener('click', () => {
+  if (isSystemSavePending) return;
+  const requirement = requirementRuleSelect?.value ?? '';
+  if (!requirement) { showAlert('Select a requirement line before attaching a rule.'); return; }
+  if (!requirementRuleReviewed?.checked) { showAlert('Review the check above, then tick the review box before attaching it.'); return; }
+  if (draftRequirementRules.some(r => r.requirement === requirement)) { showAlert('That requirement already has the supported rule attached.'); return; }
+  draftRequirementRules = [...draftRequirementRules, { requirement, preset: 'accepted-order-credit-limit', reviewed: true }];
+  if (requirementRuleReviewed) requirementRuleReviewed.checked = false;
+  markUnsavedEdits();
+});
 
 // Tab switching (WAI-ARIA tab pattern: roving tabindex, arrow/Home/End)
 const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
