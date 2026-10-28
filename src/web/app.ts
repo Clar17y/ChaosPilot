@@ -12,6 +12,17 @@ import { extractSnapshotDisplay } from './snapshot.ts';
 import { clampSelectedIndex, tabIndexForKey } from './presentation.ts';
 import { describeProposals } from './proposals.ts';
 import {
+  buildReproductionModel,
+  creditBarLayout,
+  describeFreshReplay,
+  explainStep,
+  fmtCredit,
+  isCreditAdmissionViolation,
+  PlaybackController,
+  resolveExperimentPosition,
+  type ReproductionModel,
+} from './reproduction-player.ts';
+import {
   effectiveAdapterId,
   executableCheckCount,
   groupRunsByRevision,
@@ -24,15 +35,22 @@ import {
   classifyStartFailure,
   InvestigationLifecycle,
 
+  adapterLabel,
+  contractChecksVisible,
+  defaultTargetVariant,
+  isExecutableAdapter,
   shouldClearInspectionOnSelection,
   stopControlState,
-  tradingContractVisible,
+  targetVariantsForAdapter,
+  type SnapshotLoadState,
   type WorkspaceView,
 } from './workspace.ts';
+import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
   fetchSystemBriefs,
+  loadSystemContract,
   parseApiErrorResponse,
   requestInvestigationStop,
   StatusRequestCoordinator,
@@ -78,8 +96,18 @@ let serverRunStatus: string = 'idle';
 let lastFocusedElement: HTMLElement | null = null;
 const historySequencer = new RequestSequencer();
 const recordSequencer = new RequestSequencer();
+const snapshotSequencer = new RequestSequencer();
+let snapshotState: SnapshotLoadState = 'none';
+let snapshotSystemId: string | null = null;
+let snapshotIdentity: { id: string; revision: number; adapterId: string } | null = null;
+let serverTargetVariants: string[] = [];
 const lifecycle = new InvestigationLifecycle();
 let latestLiveRecord: InvestigationRecord | null = null;
+// Reproduction player state (recorded playback only; fresh replay is separate).
+// Run-scoped: see ReproductionSession for reset/preserve and late-result rules.
+const reproSession = new ReproductionSession();
+const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
+let reproModel: ReproductionModel | null = null;
 
 // DOM Elements - Controls
 const targetSelect = document.getElementById('target-select') as HTMLSelectElement;
@@ -167,6 +195,15 @@ function announce(message: string): void {
 }
 
 function showView(view: WorkspaceView, focusHeading = true): void {
+  if (view !== 'investigations') {
+    reproPlayback.stop();
+    if (reproSession.fresh.kind === 'pending') {
+      reproSession.invalidateFresh();
+      renderReproduction();
+    } else {
+      renderReproductionDetail();
+    }
+  }
   // panel visibility + aria-current below reflect the current view
   document.querySelectorAll<HTMLElement>('[data-view-panel]').forEach(panel => {
     panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
@@ -182,7 +219,26 @@ function showView(view: WorkspaceView, focusHeading = true): void {
   if (view === 'overview' || view === 'prepare') renderWorkspaceSummaries();
 }
 
+function scopedVariants(): string[] {
+  if (isDraftMode || !selectedSystem) return [];
+  return targetVariantsForAdapter(selectedSystem.adapterId, serverTargetVariants);
+}
+function snapshotReadyForSelected(): boolean {
+  return Boolean(selectedSystem) && snapshotState === 'ready' && snapshotSystemId === selectedSystem?.id
+    && snapshotIdentity !== null && snapshotIdentity.id === selectedSystem?.id
+    && snapshotIdentity.revision === selectedSystem?.revision && snapshotIdentity.adapterId === selectedSystem?.adapterId
+    && !isDraftMode && !hasUnsavedSystemEdits;
+}
+function effectiveSnapshotState(): SnapshotLoadState {
+  if (isDraftMode || !selectedSystem) return 'none';
+  if (hasUnsavedSystemEdits) return 'none';
+  if (snapshotSystemId !== selectedSystem.id) return snapshotState === 'loading' ? 'loading' : 'none';
+  if (snapshotState === 'ready' && !snapshotReadyForSelected()) return 'error';
+  return snapshotState;
+}
+function refreshTargetChoices(): void { updateTargetChoices(scopedVariants()); }
 function checkCount(): number {
+  if (!snapshotReadyForSelected()) return 0;
   return executableCheckCount(effectiveAdapter(), contractCheckCount);
 }
 
@@ -201,15 +257,15 @@ function renderWorkspaceSummaries(): void {
   if (titleOverview) titleOverview.textContent = name;
   set('overview-purpose', overview || 'No business purpose saved yet.');
   set('overview-revision', revision === null ? 'Unsaved draft' : `Current brief · revision ${revision}`);
-  set('overview-adapter', adapter === 'synthetic-trading' ? 'Synthetic trading adapter' : 'No adapter configured');
-  set('overview-readiness', adapter === 'synthetic-trading' ? 'Ready for supported scope' : 'Draft · adapter unconfigured');
+  set('overview-adapter', isExecutableAdapter(adapter) ? `${adapterLabel(adapter)} adapter` : 'No adapter configured');
+  set('overview-readiness', isExecutableAdapter(adapter) && snapshotReadyForSelected() ? 'Ready for supported scope' : isExecutableAdapter(adapter) ? 'Contract not confirmed' : 'Draft · adapter unconfigured');
   set('overview-check-count', String(checks));
   set('overview-context-count', String(requirements.length));
   const { scoped } = partitionRuns(lastRunSummaries, workspaceSystemId());
   set('overview-run-count', String(scoped.length));
 
   set('prepare-revision', revision === null ? 'Unsaved draft — save before launch' : `Brief revision ${revision}`);
-  set('prepare-adapter', adapter === 'synthetic-trading' ? 'Synthetic trading' : 'Adapter unconfigured');
+  set('prepare-adapter', isExecutableAdapter(adapter) ? adapterLabel(adapter) : 'Adapter unconfigured');
   set('prepare-purpose', overview || 'No business purpose saved yet.');
   set('prepare-overview', overview || 'No business purpose saved yet.');
   set('prepare-counts', `${checks} executable checks · ${requirements.length} contextual requirements without checks`);
@@ -332,8 +388,8 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable — not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id} — not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
-function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
+function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; updateInspectionNotice(); }
+function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
   if (mode === 'live') {
@@ -395,10 +451,9 @@ function updateTargetChoices(variants: string[]): void {
 
   if (variants.includes(currentVal)) {
     targetSelect.value = currentVal;
-  } else if (variants.includes('candidate-a')) {
-    targetSelect.value = 'candidate-a';
-  } else if (variants.length > 0) {
-    targetSelect.value = variants[0]!;
+  } else {
+    const d = defaultTargetVariant(variants);
+    if (d) targetSelect.value = d;
   }
 }
 
@@ -436,9 +491,10 @@ function applyStatusResponse(data: ServerStatusResponse): void {
     }
     updateActiveOtherSystemNotice();
 
-    // Update target dropdown if variants returned
+    // Store global variants only; choices stay scoped to the selected system.
     if (data.targetVariants && Array.isArray(data.targetVariants)) {
-      updateTargetChoices(data.targetVariants);
+      serverTargetVariants = [...data.targetVariants];
+      refreshTargetChoices();
     }
 
     // Update launch and stop controls
@@ -488,7 +544,7 @@ function startPolling(): void {
   pollTimer = setInterval(fetchStatus, 800);
 }
 
-function renderActiveRecord(rec: InvestigationRecord): void { if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
+function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
   dashRunId.textContent = `Run ID: ${rec.id}`;
 
   if (dashSystemBrief) {
@@ -547,6 +603,7 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (!hasRunDetail(
   renderExperiments(rec.experiments);
   renderProposals(rec, proposalDisplay);
   renderSelectedExperimentTrace();
+  renderReproduction();
 }
 
 function renderProposals(rec: InvestigationRecord, display = describeProposals(rec)): void {
@@ -675,6 +732,14 @@ function renderFindings(findings: Finding[]): void {
     body.appendChild(pMsg);
     body.appendChild(pStep);
 
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'btn btn-primary btn-xs';
+    openBtn.textContent = 'Open reproduction player';
+    openBtn.setAttribute('aria-label', `Open reproduction player for finding ${i + 1}: ${f.title}`);
+    openBtn.addEventListener('click', () => openReproductionForFinding(f));
+    body.appendChild(openBtn);
+
     card.appendChild(header);
     card.appendChild(body);
 
@@ -743,9 +808,12 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     item.append(left, right);
 
     item.addEventListener('click', () => {
+      reproPlayback.stop();
+      reproSession.clearFinding();
       selectedExperimentIndex = i;
       renderExperiments(experiments);
       renderSelectedExperimentTrace();
+      renderReproduction();
       const traceTab = document.getElementById('tab-btn-trace') as HTMLButtonElement | null;
       if (traceTab) activateTab(traceTab, true);
     });
@@ -860,9 +928,237 @@ function renderSelectedExperimentTrace(): void {
   }
 }
 
+function reproEl<T extends HTMLElement>(id: string): T | null { return document.getElementById(id) as T | null; }
+
+function resetReproductionSelection(): void {
+  reproPlayback.stop();
+  reproSession.clear();
+  reproModel = null;
+}
+
+function renderReproduction(): void {
+  const rec = currentInvestigationRecord;
+  if (rec && reproSession.syncToRun(rec.id)) { reproPlayback.stop(); selectedExperimentIndex = 0; }
+  if (reproSession.selectedFinding && rec && (resolveExperimentPosition(rec, reproSession.selectedFinding) !== selectedExperimentIndex || !rec.findings.some(f => f.id === reproSession.selectedFinding!.id))) reproSession.clearFinding();
+  reproModel = rec ? buildReproductionModel(rec, selectedExperimentIndex, reproSession.selectedFinding) : null;
+  const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
+  const reproEyebrow = reproEl('repro-eyebrow');
+  if (reproEyebrow) reproEyebrow.textContent = waitingForSave ? 'Investigation in progress or saving · recorded playback only' : 'Recorded evidence · recorded playback only';
+  const reproDescription = reproEl('repro-description');
+  if (reproDescription) reproDescription.textContent = waitingForSave ? 'Step through the trace recorded so far. This investigation may not have been saved yet. Playing recorded steps does not execute the target or contact a model.' : 'Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.';
+  const freshEl = reproEl('repro-fresh-status');
+  if (freshEl) freshEl.textContent = waitingForSave
+    ? 'Wait for this investigation to finish and be saved before rerunning it.'
+    : describeFreshReplay(reproSession.fresh);
+  const rerunBtn = reproEl<HTMLButtonElement>('btn-repro-rerun');
+  if (rerunBtn) rerunBtn.disabled = !rec || waitingForSave || reproSession.fresh.kind === 'pending';
+  const prov = reproEl('repro-provenance');
+  const empty = reproEl('repro-empty');
+  const body = reproEl('repro-body');
+  const invalid = reproEl('repro-invalid');
+  if (!reproModel) {
+    reproPlayback.setCount(0);
+    if (prov) prov.textContent = '';
+    empty?.classList.remove('hidden'); body?.classList.add('hidden'); invalid?.classList.add('hidden');
+    return;
+  }
+  if (prov) {
+    prov.textContent = '';
+    for (const text of [reproModel.modelLabel, `Run ID: ${reproModel.runId}`, reproModel.systemLabel, reproModel.briefLabel, reproModel.targetLabel, reproModel.sequence === 'key-events' ? 'Trace: key recorded events; full trace in Action trace & timeline' : 'Trace: complete recorded trace', reproModel.replayLabel, reproModel.cleanLabel, reproModel.experimentLabel]) {
+      const s = document.createElement('span'); s.textContent = text; prov.appendChild(s);
+    }
+  }
+  if (invalid) {
+    invalid.classList.toggle('hidden', reproModel.invalidLabel === null);
+    invalid.textContent = reproModel.invalidLabel ?? '';
+  }
+  const key = `${reproModel.runId}|${selectedExperimentIndex}|${reproSession.selectedFinding?.id ?? ''}|${reproModel.sequence}|${reproModel.steps.length}`;
+  if (key !== reproSession.renderedKey) {
+    reproSession.renderedKey = key;
+    reproPlayback.setCount(reproModel.steps.length);
+    const timeline = reproEl<HTMLOListElement>('repro-timeline');
+    if (timeline) {
+      timeline.textContent = '';
+      reproModel.steps.forEach((step) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.reproPosition = String(step.position);
+        if (step.isViolation) btn.classList.add('is-violation');
+        btn.setAttribute('aria-label', `Show ${reproModel!.sequence === 'key-events' ? 'key event' : 'recorded step'} ${step.position + 1} of ${reproModel!.steps.length}: ${step.title}${step.isViolation ? '. Error: rule violation recorded at this action.' : ''}`);
+        const t = document.createElement('span'); t.className = 'repro-tl-title'; t.textContent = `${step.position + 1}. ${step.title}`;
+        const sub = document.createElement('span'); sub.className = 'repro-tl-sub';
+        sub.textContent = step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled — not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed — state after this entry' : step.outcome;
+        btn.append(t, sub);
+        btn.addEventListener('click', () => { reproPlayback.select(step.position); });
+        li.appendChild(btn);
+        timeline.appendChild(li);
+      });
+    }
+  }
+  if (empty) {
+    empty.classList.toggle('hidden', reproModel.hasTrace);
+    if (!reproModel.hasTrace) empty.textContent = 'No trace entries were recorded for this experiment. No playback state can be shown.';
+  }
+  body?.classList.toggle('hidden', !reproModel.hasTrace);
+  renderReproductionDetail();
+}
+
+function renderReproductionDetail(): void {
+  const model = reproModel;
+  if (!model || !model.hasTrace) return;
+  const pos = reproPlayback.position;
+  const step = pos >= 0 ? model.steps[pos] : undefined;
+  const set = (id: string, text: string) => { const el = reproEl(id); if (el) el.textContent = text; };
+  let selectedButton: HTMLButtonElement | null = null;
+  document.querySelectorAll<HTMLButtonElement>('[data-repro-position]').forEach(btn => {
+    if (Number(btn.dataset.reproPosition) === pos) { btn.setAttribute('aria-current', 'step'); selectedButton = btn; }
+    else btn.removeAttribute('aria-current');
+  });
+  // Keep the active recorded event visible inside the timeline without moving
+  // the surrounding page while playback advances.
+  const timeline = reproEl<HTMLOListElement>('repro-timeline');
+  if (timeline && selectedButton) {
+    const itemBounds = (selectedButton as HTMLButtonElement).getBoundingClientRect();
+    const listBounds = timeline.getBoundingClientRect();
+    if (itemBounds.top < listBounds.top) timeline.scrollTop -= listBounds.top - itemBounds.top;
+    else if (itemBounds.bottom > listBounds.bottom) timeline.scrollTop += itemBounds.bottom - listBounds.bottom;
+  }
+  const playBtn = reproEl<HTMLButtonElement>('btn-repro-play');
+  if (playBtn) {
+    playBtn.textContent = reproPlayback.playing ? 'Pause recorded playback' : 'Play recorded steps';
+    playBtn.setAttribute('aria-pressed', String(reproPlayback.playing));
+  }
+  const prevBtn = reproEl<HTMLButtonElement>('btn-repro-prev');
+  if (prevBtn) prevBtn.disabled = pos < 0;
+  const nextBtn = reproEl<HTMLButtonElement>('btn-repro-next');
+  if (nextBtn) nextBtn.disabled = pos >= model.steps.length - 1 && !reproPlayback.playing;
+  const unattributed = reproEl('repro-unattributed');
+  if (unattributed) {
+    unattributed.classList.toggle('hidden', model.unattributedViolations.length === 0);
+    unattributed.textContent = model.unattributedViolations.length
+      ? `Some recorded violations could not be pinned to one processed trace entry. ${model.unattributedViolations.map(v => `Action #${v.step} (${v.invariant}): ${v.message}`).join(' · ')}`
+      : '';
+  }
+  if (!step) {
+    const keyEvents = model.sequence === 'key-events';
+    set('repro-step-count', `No ${keyEvents ? 'key event' : 'recorded step'} shown yet · ${model.steps.length} ${keyEvents ? 'key events' : 'recorded steps'}`);
+    set('repro-step-title', keyEvents ? 'Before the first key event' : 'Before the first recorded step');
+    set('repro-step-kind', 'No recorded state is selected yet.');
+    set('repro-step-detail', keyEvents
+      ? 'Play or step through the selected key events; the complete sequence remains in the action trace.'
+      : 'Press Play recorded steps or Next step to show the first recorded entry exactly as recorded.');
+    set('repro-observed-text', 'Nothing has been played yet. No outcome is claimed.');
+    reproEl('repro-expected')?.classList.add('hidden');
+    reproEl('repro-observed')?.classList.remove('is-violation');
+    set('repro-credit', '');
+    const creditHost = reproEl('repro-credit'); if (creditHost) creditHost.textContent = 'not recorded — no step selected';
+    reproEl('repro-exposure-bar')?.classList.add('hidden');
+    set('repro-exposure-legend', '');
+    set('repro-action', 'not recorded'); set('repro-outcome', 'not recorded'); set('repro-payload', 'not recorded'); set('repro-state', 'not recorded');
+    return;
+  }
+  const explanation = explainStep(step, step.violations);
+  set('repro-step-count', `${model.sequence === 'key-events' ? 'Key event' : 'Step'} ${step.position + 1} of ${model.steps.length} · trace entry ${step.tracePosition + 1} · recorded action #${step.actionIndex} · T=${step.time}`);
+  set('repro-step-title', step.title);
+  set('repro-step-kind', step.kindLabel);
+  set('repro-step-detail', step.detail);
+  const expectedBox = reproEl('repro-expected');
+  if (expectedBox) {
+    expectedBox.classList.toggle('hidden', explanation.expected === null);
+    expectedBox.classList.toggle('is-hypothetical', explanation.expected !== null);
+    set('repro-expected-label', explanation.expectedLabel ?? '');
+    set('repro-expected-text', explanation.expected ?? '');
+  }
+  const observedBox = reproEl('repro-observed');
+  observedBox?.classList.toggle('is-violation', explanation.observedIsViolation);
+  set('repro-observed-text', explanation.observed);
+  const creditHost = reproEl('repro-credit');
+  if (creditHost) {
+    creditHost.textContent = '';
+    const c = step.credit;
+    const creditAdmissionViolated = step.violations.some(isCreditAdmissionViolation);
+    const figures: [string, string][] = c
+      ? [['Limit', fmtCredit(c.limit)], ['Total exposure', fmtCredit(c.total)], ['Used', fmtCredit(c.used)], ['Reserved', fmtCredit(c.reserved)]]
+      : [['Limit', 'not recorded'], ['Total exposure', 'not recorded'], ['Used', 'not recorded'], ['Reserved', 'not recorded']];
+    for (const [label, value] of figures) {
+      const box = document.createElement('div'); box.className = 'repro-figure';
+      if (label === 'Total exposure' && creditAdmissionViolated) box.classList.add('is-violation');
+      const lab = document.createElement('span'); lab.textContent = label;
+      const b = document.createElement('b'); b.textContent = value;
+      box.append(lab, b); creditHost.appendChild(box);
+    }
+    const bar = reproEl('repro-exposure-bar');
+    const usedEl = reproEl('repro-bar-used'); const resEl = reproEl('repro-bar-reserved');
+    const layout = creditBarLayout(c);
+    if (c && layout && bar && usedEl && resEl) {
+      bar.classList.remove('hidden');
+      bar.classList.toggle('has-limit', layout.limit !== null);
+      if (layout.limit !== null) bar.style.setProperty('--repro-limit', `${layout.limit}%`);
+      usedEl.style.width = `${layout.used}%`;
+      resEl.style.width = `${layout.reserved}%`;
+      set('repro-exposure-legend', `Used: ${fmtCredit(c.used)} · Reserved: ${fmtCredit(c.reserved)} · Total exposure: ${fmtCredit(c.total)} · Limit: ${fmtCredit(c.limit)}${layout.limit !== null ? ' · Marker shows the limit.' : ''}${creditAdmissionViolated ? ' · Error: this recorded admission violated the credit limit rule.' : ' · Exposure above the limit alone is not shown as a violation; only recorded check evidence is.'}`);
+    } else {
+      bar?.classList.add('hidden');
+      const legend = !c
+        ? 'Credit state: not recorded for this entry.'
+        : c.used === null || c.reserved === null || c.total === null
+          ? 'Recorded credit figures are incomplete for this entry (shown as not recorded above).'
+          : c.used < 0 || c.reserved < 0
+            ? 'The recorded credit state contains a negative balance; a stacked exposure bar is not available.'
+            : 'No credit is used or reserved at this step.';
+      set('repro-exposure-legend', legend);
+    }
+  }
+  set('repro-action', `${step.action}${step.messageId ? ` · message ${step.messageId}` : ''}`);
+  set('repro-outcome', step.outcome || 'not recorded');
+  set('repro-payload', step.payloadText);
+  set('repro-state', step.stateText);
+}
+
+function openReproductionForFinding(finding: Finding, focusPlayer = true): void {
+  const rec = currentInvestigationRecord;
+  if (!rec) return;
+  const position = resolveExperimentPosition(rec, finding);
+  if (position < 0) { showAlert('The experiment for this finding is not present in the opened run, so its recorded reproduction cannot be shown.'); return; }
+  reproPlayback.stop();
+  selectedExperimentIndex = position;
+  reproSession.selectFinding(finding);
+  renderExperiments(rec.experiments);
+  renderSelectedExperimentTrace();
+  renderReproduction();
+  if (focusPlayer) {
+    document.getElementById('reproduction-player')?.scrollIntoView({ block: 'start' });
+    reproEl('repro-title')?.focus({ preventScroll: true });
+  }
+  announce(`Opened recorded reproduction for finding: ${finding.title}`);
+}
+
+async function rerunSavedInvestigation(): Promise<void> {
+  const rec = currentInvestigationRecord;
+  if (!rec || replayWaitsForSave(rec, isInvestigationActive, activeRecordId) || reproSession.fresh.kind === 'pending') return;
+  const runId = rec.id;
+  const seq = reproSession.beginFresh(runId);
+  renderReproduction();
+  const btn = reproEl<HTMLButtonElement>('btn-repro-rerun');
+  const trigger = btn ?? undefined;
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/replay`, { method: 'POST' });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || `HTTP ${res.status}`); }
+    const report = (await res.json()) as ReplayReport;
+    if (!reproSession.settleFresh(seq, runId, report.reproduced ? { kind: 'success' } : { kind: 'mismatch' })) return;
+    renderReproduction();
+    lastFocusedElement = trigger ?? null;
+    showReplayReport(report);
+  } catch (e) {
+    if (!reproSession.settleFresh(seq, runId, { kind: 'error', message: e instanceof Error ? e.message : String(e) })) return;
+    renderReproduction();
+  }
+}
+
 async function openRun(id: string): Promise<void> {
   const token = recordSequencer.next();
-  if (lifecycle.openLive(id) && latestLiveRecord && latestLiveRecord.id === id) { isInspectingHistory = false; selectedExperimentIndex = 0; currentInvestigationRecord = latestLiveRecord; renderActiveRecord(latestLiveRecord); renderFindingsView(); announce(`Opened investigation ${id}.`); return; }
+  if (lifecycle.openLive(id) && latestLiveRecord && latestLiveRecord.id === id) { isInspectingHistory = false; resetReproductionSelection(); selectedExperimentIndex = 0; currentInvestigationRecord = latestLiveRecord; renderActiveRecord(latestLiveRecord); renderFindingsView(); announce(`Opened investigation ${id}.`); return; }
   if (activeRecordId && id === activeRecordId) { renderEmptyDashboard('Investigation is starting.'); return; }
   try {
     const runRes = await fetch(`/api/runs/${encodeURIComponent(id)}`);
@@ -870,6 +1166,7 @@ async function openRun(id: string): Promise<void> {
     const rec: InvestigationRecord = await runRes.json();
     if (!recordSequencer.isCurrent(token)) return;
     lifecycle.openHistory(rec.id); isInspectingHistory = true;
+    resetReproductionSelection();
     selectedExperimentIndex = 0;
     currentInvestigationRecord = rec;
     renderActiveRecord(rec);
@@ -985,20 +1282,27 @@ function setSaveStatus(type: 'saved' | 'draft' | 'error', text: string): void {
 function updateAdapterBadge(adapterId: string): void {
   if (!systemAdapterBadge) return;
   systemAdapterBadge.textContent = adapterId;
-  if (adapterId === 'synthetic-trading') {
-    systemAdapterBadge.className = 'system-badge badge-adapter-exec';
-  } else {
-    systemAdapterBadge.className = 'system-badge badge-adapter-unconfigured';
-  }
-  const executable = adapterId === 'synthetic-trading';
-  document.getElementById('invariants-list')?.classList.toggle('hidden', !executable);
-  document.getElementById('raw-contract-view')?.closest('details')?.classList.toggle('hidden', !executable); document.getElementById('contract-lists')?.classList.toggle('hidden', !tradingContractVisible(adapterId)); document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', tradingContractVisible(adapterId));
+  systemAdapterBadge.className = isExecutableAdapter(adapterId) ? 'system-badge badge-adapter-exec' : 'system-badge badge-adapter-unconfigured';
+  const visible = contractChecksVisible({ effectiveAdapterId: adapterId, snapshotState: effectiveSnapshotState(), isDraftMode, hasUnsavedSystemEdits });
+  document.getElementById('invariants-list')?.classList.toggle('hidden', !visible);
+  document.getElementById('raw-contract-view')?.closest('details')?.classList.toggle('hidden', !visible);
+  document.getElementById('contract-lists')?.classList.toggle('hidden', !visible);
+  document.getElementById('capabilities-scope-note')?.classList.toggle('hidden', visible);
   const heading = document.getElementById('contract-availability-title');
   const description = document.getElementById('contract-availability-description');
-  if (heading) heading.textContent = executable ? 'Synthetic Trading Rules & Available Checks' : 'No Executable Contract Configured';
-  if (description) description.textContent = executable
-    ? 'These trading checks are available to the deterministic verifier. Their presence is not evidence that an investigation exercised them. Supplementary prose does not alter these checks.'
-    : 'This profile can preserve business requirements, but it has no execution adapter or deterministic checks. Investigations are disabled.';
+  const note = document.getElementById('capabilities-scope-note');
+  if (isExecutableAdapter(adapterId) && !visible) {
+    if (heading) heading.textContent = `${adapterLabel(adapterId)} Rules & Available Checks`;
+    if (description) description.textContent = snapshotState === 'error' ? 'The system contract could not be loaded. Checks are unavailable until it loads successfully.' : 'Loading the selected system contract… Checks are unavailable until it is confirmed.';
+    if (note) note.textContent = 'The selected system contract is not confirmed yet, so no operations, messages or checks are shown.';
+  } else if (isExecutableAdapter(adapterId)) {
+    if (heading) heading.textContent = 'Synthetic Trading Rules & Available Checks';
+    if (description) description.textContent = 'These checks are available to the deterministic verifier for the selected system. Their presence is not evidence that an investigation exercised them. Supplementary prose does not alter these checks.';
+  } else {
+    if (heading) heading.textContent = 'No Executable Contract Configured';
+    if (description) description.textContent = 'This profile can preserve business requirements, but it has no execution adapter or deterministic checks. Investigations are disabled.';
+    if (note) note.textContent = 'No adapter is configured for this system, so there is no supported execution contract to show. Operations and message vocabulary from another system are not listed here because they would not run for this system.';
+  }
 }
 
 function updateRunReadiness(): void {
@@ -1028,6 +1332,9 @@ function launchBlockedReason(): string | null {
     hasUnsavedSystemEdits,
     hasSelectedSystem: Boolean(selectedSystem),
     selectedAdapterId: selectedSystem?.adapterId ?? null,
+    snapshotState: effectiveSnapshotState(),
+    selectedVariant: targetSelect?.value || null,
+    allowedVariants: scopedVariants(),
   });
 }
 
@@ -1042,12 +1349,24 @@ function setSystemSavePending(pending: boolean): void {
 
 function markUnsavedEdits(): void {
   hasUnsavedSystemEdits = true;
+  snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null;
   setSaveStatus('draft', isDraftMode ? 'New Profile (Draft)' : 'Unsaved Edits (Draft)');
+  clearContractDisplay();
   updateAdapterBadge(systemAdapterSelect.value);
+  refreshTargetChoices();
   updateRunReadiness();
 }
+function clearContractDisplay(): void {
+  contractCheckCount = 0;
+  for (const id of ['operations-list', 'messages-list']) {
+    const host = document.getElementById(id);
+    if (host) { host.textContent = ''; const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'No confirmed contract for the selected system.'; host.appendChild(p); }
+  }
+  if (invariantsList) invariantsList.textContent = '';
+  if (rawContractView) rawContractView.textContent = '';
+}
 
-function selectSystem(system: SystemBrief): void { recordSequencer.invalidate(); if (shouldClearInspectionOnSelection({ recordId: currentInvestigationRecord?.id ?? null, recordSystemId: currentInvestigationRecord?.systemBrief?.brief.id ?? null, activeRecordId, selectedSystemId: system.id })) { currentInvestigationRecord = null; lifecycle.clearInspection(); isInspectingHistory = false; renderEmptyDashboard('No investigation selected for this system. Open a saved run from its history below.'); }
+function selectSystem(system: SystemBrief): void { recordSequencer.invalidate(); if (shouldClearInspectionOnSelection({ recordId: currentInvestigationRecord?.id ?? null, recordSystemId: currentInvestigationRecord?.systemBrief?.brief.id ?? null, activeRecordId, selectedSystemId: system.id })) { currentInvestigationRecord = null; lifecycle.clearInspection(); isInspectingHistory = false; resetReproductionSelection(); renderEmptyDashboard('No investigation selected for this system. Open a saved run from its history below.'); }
   selectedSystem = system;
   isDraftMode = false;
   hasUnsavedSystemEdits = false;
@@ -1065,9 +1384,16 @@ function selectSystem(system: SystemBrief): void { recordSequencer.invalidate();
   if (systemRevisionBadge) systemRevisionBadge.textContent = `Rev ${system.revision}`;
   renderHistory();
   updateActiveOtherSystemNotice();
+  snapshotSequencer.invalidate();
+  snapshotSystemId = system.id;
+  snapshotIdentity = null;
+  snapshotState = isExecutableAdapter(system.adapterId) ? 'loading' : 'none';
+  clearContractDisplay();
+  refreshTargetChoices();
   updateAdapterBadge(system.adapterId);
   setSaveStatus('saved', 'Saved');
   updateRunReadiness();
+  if (isExecutableAdapter(system.adapterId)) void fetchSystemContract(system.id);
   if (systemFeedback) systemFeedback.textContent = ''; updateInspectionNotice(); syncStopControls(); renderFindingsView();
 }
 
@@ -1118,15 +1444,43 @@ async function loadSystems(): Promise<void> {
   }
 }
 
-async function fetchContract(): Promise<void> {
-  try {
-    const res = await fetch('/api/contract');
-    if (!res.ok) return;
-    const contract: SystemContract = await res.json();
-    renderContract(contract);
-  } catch {
-    // Graceful handling
-  }
+async function fetchSystemContract(systemId: string): Promise<void> {
+  const expected = selectedSystem && selectedSystem.id === systemId
+    ? { id: systemId, revision: selectedSystem.revision, adapterId: selectedSystem.adapterId }
+    : { id: systemId };
+  await loadSystemContract({
+    fetchFn: (url) => fetch(url),
+    expected,
+    sequencer: snapshotSequencer,
+    isCurrentSelection: () => Boolean(
+      selectedSystem && selectedSystem.id === expected.id
+      && (expected.revision === undefined || selectedSystem.revision === expected.revision)
+      && (expected.adapterId === undefined || selectedSystem.adapterId === expected.adapterId)
+      && !isDraftMode && !hasUnsavedSystemEdits,
+    ),
+    onLoading: () => {
+      snapshotState = 'loading'; snapshotSystemId = systemId; snapshotIdentity = null;
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+    },
+    onReady: (snapshot) => {
+      snapshotState = 'ready'; snapshotSystemId = snapshot.brief.id;
+      snapshotIdentity = { id: snapshot.brief.id, revision: snapshot.brief.revision, adapterId: snapshot.brief.adapterId };
+      renderContract(snapshot.contract!);
+      updateRunReadiness();
+    },
+    onIncompatible: () => {
+      snapshotState = 'incompatible'; snapshotIdentity = null; clearContractDisplay();
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+    },
+    onError: (err) => {
+      snapshotState = 'error'; snapshotIdentity = null; clearContractDisplay();
+      updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
+      if (systemFeedback) {
+        systemFeedback.textContent = `System contract unavailable: ${err instanceof Error ? err.message : String(err)} Reselect or reload the system profile to retry.`;
+        systemFeedback.className = 'action-feedback error';
+      }
+    },
+  });
 }
 
 function renderKeyedList(id: string, items: Record<string, unknown>[] | undefined, label: (item: Record<string, unknown>) => string): void {
@@ -1189,7 +1543,7 @@ btnLaunch.addEventListener('click', async () => {
     showAlert(reason ?? 'Please select a saved system profile.');
     return;
   }
-  recordSequencer.invalidate(); lifecycle.beginLaunch(); latestLiveRecord = null; isInspectingHistory = false; currentInvestigationRecord = null; renderEmptyDashboard('Starting investigation…'); serverRunStatus = 'starting';
+  recordSequencer.invalidate(); lifecycle.beginLaunch(); latestLiveRecord = null; isInspectingHistory = false; currentInvestigationRecord = null; resetReproductionSelection(); renderEmptyDashboard('Starting investigation…'); serverRunStatus = 'starting';
   selectedExperimentIndex = 0;
   const variant = targetSelect.value as TargetVariant;
   const provider = providerSelect.value as ProviderKind;
@@ -1292,6 +1646,7 @@ if (btnNewSystem) {
     }
     isDraftMode = true;
     hasUnsavedSystemEdits = true;
+    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; clearContractDisplay(); refreshTargetChoices();
     const newId = `profile-${Date.now().toString(36)}`;
     systemIdInput.value = newId;
     systemIdInput.readOnly = false;
@@ -1327,7 +1682,7 @@ if (btnSaveSystem) {
 
     const id = systemIdInput.value.trim();
     const name = systemNameInput.value.trim();
-    const adapterId = systemAdapterSelect.value as 'synthetic-trading' | 'unconfigured';
+    const adapterId = systemAdapterSelect.value;
     const overview = systemOverviewInput.value;
     const rawReqs = systemRequirementsInput.value.split('\n');
     const requirements = rawReqs.map(r => r.trim()).filter(r => r.length > 0);
@@ -1438,10 +1793,23 @@ tabButtons.forEach((btn, index) => {
 });
 activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
+// Reproduction player controls (recorded playback only)
+reproEl<HTMLButtonElement>('btn-repro-prev')?.addEventListener('click', () => reproPlayback.previous());
+reproEl<HTMLButtonElement>('btn-repro-next')?.addEventListener('click', () => reproPlayback.next());
+reproEl<HTMLButtonElement>('btn-repro-reset')?.addEventListener('click', () => reproPlayback.reset());
+reproEl<HTMLButtonElement>('btn-repro-play')?.addEventListener('click', () => {
+  if (reproPlayback.playing) reproPlayback.pause();
+  else reproPlayback.play();
+  renderReproductionDetail();
+});
+reproEl<HTMLButtonElement>('btn-repro-rerun')?.addEventListener('click', () => { void rerunSavedInvestigation(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { reproPlayback.stop(); renderReproductionDetail(); }
+});
+
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
 // Initialization - showView('overview', false) below
 fetchStatus();
 loadHistory();
-fetchContract();
 loadSystems();
 startPolling();

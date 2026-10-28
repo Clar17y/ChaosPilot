@@ -1,5 +1,7 @@
-import type { SystemBrief } from '../domain.ts';
-import { classifyDeferredStop, type DeferredStopOutcome, type InvestigationLifecycle } from './workspace.ts';
+import type { SystemBrief, SystemBriefSnapshot } from '../domain.ts';
+import { classifyDeferredStop, normalizeExpectedIdentity, validateSystemSnapshot, type DeferredStopOutcome, type ExpectedSystemIdentity, type InvestigationLifecycle, type RequestSequencer } from './workspace.ts';
+
+export type { ExpectedSystemIdentity } from './workspace.ts';
 
 /** Unsaved drafts have no saved-system identity; the prior saved selection is kept only for discard. */
 export function effectiveWorkspaceSystemId(state: {
@@ -137,5 +139,66 @@ export class StatusRequestCoordinator {
       if (isStale()) return;
       onError(err);
     }
+  }
+}
+
+/** Fetches the selected saved system's own snapshot; throws displayable errors and rejects mismatched/invalid payloads. */
+export async function fetchSystemSnapshot(
+  fetchFn: SystemsFetch,
+  expected: string | ExpectedSystemIdentity,
+  expectedRevision?: number,
+  expectedAdapterId?: string,
+): Promise<SystemBriefSnapshot> {
+  const want = normalizeExpectedIdentity(expected, expectedRevision, expectedAdapterId);
+  let res: ApiResponseLike;
+  try {
+    res = await fetchFn(`/api/systems/${encodeURIComponent(want.id)}/snapshot`);
+  } catch (err) {
+    throw new Error(`Could not reach the server to load the system contract: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!res.ok) throw new Error(await parseApiErrorResponse(res));
+  let data: unknown;
+  try { data = await res.json(); } catch { throw new Error(`Invalid snapshot response (HTTP ${res.status}).`); }
+  const v = validateSystemSnapshot(data, want);
+  if (!v.ok) throw new Error(`Invalid snapshot response: ${v.reason}.`);
+  return data as SystemBriefSnapshot;
+}
+
+export type SystemContractLoadOutcome = 'ready' | 'incompatible' | 'error' | 'stale';
+
+export interface SystemContractLoadDeps {
+  fetchFn: SystemsFetch;
+  /** Identity captured from the selected saved profile when the request starts. */
+  expected: string | ExpectedSystemIdentity;
+  sequencer: RequestSequencer;
+  /** True only while the captured identity is still the clean selected profile. */
+  isCurrentSelection: () => boolean;
+  onLoading?: () => void;
+  onReady?: (snapshot: SystemBriefSnapshot) => void;
+  onIncompatible?: (snapshot: SystemBriefSnapshot) => void;
+  onError?: (err: unknown) => void;
+}
+
+/**
+ * Production load path used by app.ts `fetchSystemContract`. A delayed or
+ * superseded response is stale and has no side effects. A response for the
+ * current selection whose id/revision/adapter does not match the captured
+ * identity is an error, never ready. Every non-stale terminal outcome invokes
+ * exactly one side-effect callback so callers refresh launch readiness there
+ * without depending on later status polling.
+ */
+export async function loadSystemContract(deps: SystemContractLoadDeps): Promise<SystemContractLoadOutcome> {
+  const token = deps.sequencer.next();
+  deps.onLoading?.();
+  try {
+    const snapshot = await fetchSystemSnapshot(deps.fetchFn, deps.expected);
+    if (!deps.sequencer.isCurrent(token) || !deps.isCurrentSelection()) return 'stale';
+    if (!snapshot.contract) { deps.onIncompatible?.(snapshot); return 'incompatible'; }
+    deps.onReady?.(snapshot);
+    return 'ready';
+  } catch (err) {
+    if (!deps.sequencer.isCurrent(token) || !deps.isCurrentSelection()) return 'stale';
+    deps.onError?.(err);
+    return 'error';
   }
 }
