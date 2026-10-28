@@ -14,9 +14,10 @@ Register the adapter in `src/adapters/index.ts` by supplying the full
 
 - `id` — stable adapter id string.
 - `variants` — the closed list of target variants this adapter may execute,
-  including its clean control (`clean`). Variants are never shared across
-  adapters; launches with a cross-adapter variant fail before any provider
-  call (`assertAdapterVariant`).
+  including its clean control (`clean`). Both built-in adapters use the
+  `clean` name, so the saved adapter identity determines which one runs.
+  Unsupported adapter/variant combinations fail before any provider call
+  (`assertAdapterVariant`).
 - `getContract()` — the pinned public `SystemContract` (operations, messages,
   invariants, limits). It is snapshotted into every run and hashed with
   canonical JSON.
@@ -92,6 +93,8 @@ keyed by the run's pinned adapter; unknown adapters must keep the neutral
   not connect a real application, message bus or database.
 - Benchmark and evaluation harnesses may remain scoped to specific adapters;
   say so explicitly rather than implying coverage.
-- Replay can only claim exact reproduction when source and recorded context
-  still match current code. Changing an adapter's contract, prompt or source
-  legitimately turns older runs into drift reports.
+- Snapshot-backed runs can only claim exact reproduction when source and
+  recorded context still match current code. Changing an adapter's contract,
+  prompt or source legitimately turns older runs into drift reports. Legacy
+  records with missing context retain their historical source-and-execution
+  comparison, labelled with unknown context.
