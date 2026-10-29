@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import type { ExperimentRecord, Finding, InvestigationRecord, TraceEntry } from '../src/domain.ts';
 import {
   buildReproductionModel,
+  buildTraceSteps,
   classifyStep,
   creditBarLayout,
   creditFromState,
@@ -355,6 +356,25 @@ describe('recorded trace derivation', () => {
     ];
     const model = buildReproductionModel(recordWith(trace), 0, null)!;
     expect(model.steps[0]!.payloadText).toContain('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('shared trace-step attribution', () => {
+  it('keeps multiple violations in recorded order and unmatched checks unattributed, including an empty trace', () => {
+    const rec = recordWith(creditTrace());
+    rec.experiments[0]!.result.violations = [
+      { id: 'first-at-pos', invariant: 'credit_limit_respected', step: 8, orderId: 'ord-2', message: 'first', evidence: { limit: 100, totalRequired: 200 } },
+      { id: 'second-at-pos', invariant: 'no_overfill', step: 8, orderId: 'ord-2', message: 'second', evidence: {} },
+      { id: 'no-match', invariant: 'version_monotonicity', step: 42, message: 'none', evidence: {} },
+    ];
+    const model = buildReproductionModel(rec, 0, null)!;
+    expect(model.allSteps[7]!.violations.map(v => v.id)).toEqual(['first-at-pos', 'second-at-pos']);
+    expect(model.unattributedViolations.map(v => v.id)).toEqual(['no-match']);
+    const empty = buildTraceSteps(creditTrace(), []);
+    expect(empty.steps.every(s => !s.isViolation)).toBe(true);
+    expect(empty.unattributedViolations).toEqual([]);
+    expect(buildTraceSteps([], rec.experiments[0]!.result.violations).unattributedViolations.map(v => v.id))
+      .toEqual(['first-at-pos', 'second-at-pos', 'no-match']);
   });
 });
 

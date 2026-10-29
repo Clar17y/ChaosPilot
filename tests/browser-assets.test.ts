@@ -14,10 +14,11 @@ describe('browser entry point', () => {
 
   it('ships the reproduction player controls with accessible labels', async () => {
     const html = await readFile(htmlUrl, 'utf8');
-    for (const id of ['reproduction-player', 'btn-repro-prev', 'btn-repro-next', 'btn-repro-play', 'btn-repro-reset', 'btn-repro-rerun', 'repro-timeline']) {
+    for (const id of ['reproduction-player', 'btn-repro-prev', 'btn-repro-next', 'btn-repro-play', 'btn-repro-reset', 'btn-repro-rerun', 'btn-repro-report', 'repro-timeline']) {
       expect(html).toContain(`id="${id}"`);
     }
-    expect(html).toContain('recorded playback only');
+    expect(html).toContain('Original recording');
+    expect(html).toContain('Play recorded steps');
     expect(html).toContain('id="repro-evidence-heading"');
     expect(html).toContain('Original finding summary (historical)');
     expect(html).not.toContain('Concept — not implemented');
@@ -41,9 +42,9 @@ describe('browser entry point', () => {
     expect(app).toContain('settleFreshReport(');
     expect(app).toContain('settleFreshError(');
     expect(app).not.toContain("kind === 'success' ?");
-    // Fresh view is labelled playback of the completed rerun; the new-run
+    // Fresh view is labelled as a recording; the new-run
     // default selection goes through the production session helper.
-    expect(app).toContain('Fresh rerun evidence · playback of the completed rerun');
+    expect(app).toContain('Fresh rerun recording');
     expect(app).toContain('applyDefaultFindingSelection(');
   });
 
