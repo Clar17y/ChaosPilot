@@ -200,7 +200,7 @@ describe('System Briefs & Requirements Specification', () => {
       expect(prompt.userMessage).toContain(
         'Note: Supplementary business requirements without executable checks remain unverified context and do not alter the deterministic contract invariants.'
       );
-      expect(PROMPT_VERSION).toBe('3.0');
+      expect(PROMPT_VERSION).toBe('3.1');
     });
 
     it('case: running snapshot after concurrent edit', async () => {

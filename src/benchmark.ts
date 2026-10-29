@@ -30,6 +30,7 @@ import {
   BudgetLedger,
   calculateWorstCaseCost,
 } from './providers/budget.ts';
+import { DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_MAX_PROMPT_BYTES } from './providers/meta.ts';
 import {
   saveBenchmarkReport,
 } from './storage.ts';
@@ -44,8 +45,8 @@ export const ALLOWED_META_MODELS = new Set<string>([
 export const DEFAULT_META_CONFIG: Record<string, string | number> = {
   reasoning: 'low',
   reasoningEffort: 'low',
-  maxOutputTokens: 4096,
-  maxPromptBytes: 32768,
+  maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+  maxPromptBytes: DEFAULT_MAX_PROMPT_BYTES,
   timeoutMs: 90000,
   requestTimeoutMs: 90000,
 };
@@ -815,14 +816,14 @@ export async function runBenchmark(options: BenchmarkOptions = {}): Promise<Benc
 
     const maxOutputTokensRaw = rawConfig.maxOutputTokens ?? DEFAULT_META_CONFIG.maxOutputTokens;
     const maxOutputTokens = Number(maxOutputTokensRaw);
-    if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 8192) {
-      throw new Error(`Invalid maxOutputTokens: ${maxOutputTokensRaw}. Range: [1, 8192].`);
+    if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > DEFAULT_MAX_OUTPUT_TOKENS) {
+      throw new Error(`Invalid maxOutputTokens: ${maxOutputTokensRaw}. Range: [1, ${DEFAULT_MAX_OUTPUT_TOKENS}].`);
     }
 
     const maxPromptBytesRaw = rawConfig.maxPromptBytes ?? DEFAULT_META_CONFIG.maxPromptBytes;
     const maxPromptBytes = Number(maxPromptBytesRaw);
-    if (!Number.isSafeInteger(maxPromptBytes) || maxPromptBytes < 1000 || maxPromptBytes > 131072) {
-      throw new Error(`Invalid maxPromptBytes: ${maxPromptBytesRaw}. Range: [1000, 131072].`);
+    if (!Number.isSafeInteger(maxPromptBytes) || maxPromptBytes < 1000 || maxPromptBytes > DEFAULT_MAX_PROMPT_BYTES) {
+      throw new Error(`Invalid maxPromptBytes: ${maxPromptBytesRaw}. Range: [1000, ${DEFAULT_MAX_PROMPT_BYTES}].`);
     }
 
     const timeoutRaw = rawConfig.requestTimeoutMs ?? rawConfig.timeoutMs ?? DEFAULT_META_CONFIG.timeoutMs;
@@ -1071,8 +1072,8 @@ export async function runBenchmark(options: BenchmarkOptions = {}): Promise<Benc
     providerFactory = (kind: ProviderKind, model: string, config?: Record<string, string | number>) => {
       if (kind === 'meta') {
         const reasoningEffort = String(config?.reasoningEffort ?? config?.reasoning ?? 'low');
-        const maxOutputTokens = Number(config?.maxOutputTokens ?? 4096);
-        const maxPromptBytes = Number(config?.maxPromptBytes ?? 32768);
+        const maxOutputTokens = Number(config?.maxOutputTokens ?? DEFAULT_META_CONFIG.maxOutputTokens);
+        const maxPromptBytes = Number(config?.maxPromptBytes ?? DEFAULT_META_CONFIG.maxPromptBytes);
         const requestTimeoutMs = Number(config?.requestTimeoutMs ?? config?.timeoutMs ?? 90000);
         return provMod.createProvider('meta', {
           model,

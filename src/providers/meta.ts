@@ -37,6 +37,9 @@ export interface MetaProviderOptions {
   ledger?: BudgetLedger;
 }
 
+export const DEFAULT_MAX_PROMPT_BYTES = 131072;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
+
 export class MetaProvider implements ExperimentProvider {
   public readonly kind: ProviderKind = 'meta';
   public readonly model: string;
@@ -72,7 +75,7 @@ export class MetaProvider implements ExperimentProvider {
         throw new Error(`Invalid CHAOSPILOT_MAX_PROMPT_BYTES: "${envPromptBytesStr}". Must be a bounded positive integer.`);
       }
     }
-    const resolvedPromptBytes = options.maxPromptBytes ?? envPromptBytes ?? 32768;
+    const resolvedPromptBytes = options.maxPromptBytes ?? envPromptBytes ?? DEFAULT_MAX_PROMPT_BYTES;
     if (!Number.isSafeInteger(resolvedPromptBytes) || resolvedPromptBytes <= 0) {
       throw new Error(`Invalid maxPromptBytes: ${resolvedPromptBytes}. Must be a bounded positive integer.`);
     }
@@ -88,7 +91,7 @@ export class MetaProvider implements ExperimentProvider {
         throw new Error(`Invalid CHAOSPILOT_MAX_OUTPUT_TOKENS: "${envOutputTokensStr}". Must be a bounded positive integer.`);
       }
     }
-    const resolvedOutputTokens = options.maxOutputTokens ?? envOutputTokens ?? 4096;
+    const resolvedOutputTokens = options.maxOutputTokens ?? envOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     if (!Number.isSafeInteger(resolvedOutputTokens) || resolvedOutputTokens <= 0) {
       throw new Error(`Invalid maxOutputTokens: ${resolvedOutputTokens}. Must be a bounded positive integer.`);
     }
@@ -135,6 +138,30 @@ export class MetaProvider implements ExperimentProvider {
     return buildInvestigationPrompt(context);
   }
 
+  /** Pure preparation shared by preflight and propose: no ledger access or network I/O. */
+  public prepareRequest(context: ProviderContext) {
+    const serialize = (prompt: { systemMessage: string; userMessage: string }) => {
+      const systemMessage = this.sanitize(prompt.systemMessage);
+      const userMessage = this.sanitize(prompt.userMessage);
+      const serializedPayload = canonicalJson({
+        model: this.model,
+        messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: userMessage }],
+        max_tokens: this.maxOutputTokens, reasoning_effort: this.reasoningEffort,
+        temperature: 0.2, response_format: { type: 'json_object' }
+      });
+      return { systemMessage, userMessage, serializedPayload, promptBytes: Buffer.byteLength(serializedPayload, 'utf-8') };
+    };
+    let prepared = serialize(this.serializePrompt(context));
+    let historyCompaction: ProviderRequestAudit['historyCompaction'];
+    // Keep the original prompt when it fits. Otherwise summarize, then drop oldest
+    // summaries deterministically. Source, contract, brief and feedback stay intact.
+    for (let start = 0; prepared.promptBytes > this.maxPromptBytes && start <= context.history.length && context.history.length > 0; start++) {
+      prepared = serialize(buildInvestigationPrompt(context, { start }));
+      historyCompaction = { totalObservations: context.history.length, summarizedObservations: context.history.length - start, omittedObservations: start };
+    }
+    return { ...prepared, historyCompaction, maxPromptBytes: this.maxPromptBytes, maxOutputTokens: this.maxOutputTokens };
+  }
+
   public async propose(
     context: ProviderContext,
     signal?: AbortSignal,
@@ -151,26 +178,10 @@ export class MetaProvider implements ExperimentProvider {
     }
 
     // 3. Serialize and validate prompt bounds
-    const prompt = this.serializePrompt(context);
-    const systemMessage = this.sanitize(prompt.systemMessage);
-    const userMessage = this.sanitize(prompt.userMessage);
-    const requestBodyObj = {
-      model: this.model,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage }
-      ],
-      max_tokens: this.maxOutputTokens,
-      reasoning_effort: this.reasoningEffort,
-      temperature: 0.2,
-      response_format: { type: 'json_object' }
-    };
-
-    const serializedPayload = canonicalJson(requestBodyObj);
-    const promptBytes = Buffer.byteLength(serializedPayload, 'utf-8');
+    const { systemMessage, userMessage, serializedPayload, promptBytes, historyCompaction } = this.prepareRequest(context);
 
     if (promptBytes > this.maxPromptBytes) {
-      throw this.auditedError(new Error(`Prompt size (${promptBytes} bytes) exceeds maximum allowed size (${this.maxPromptBytes} bytes)`), false);
+      throw this.auditedError(new Error(`Prompt size (${promptBytes} bytes) exceeds maximum allowed size (${this.maxPromptBytes} bytes), even after available history compaction. Shorten the system brief or select a smaller source bundle, or explicitly raise CHAOSPILOT_MAX_PROMPT_BYTES within your budget. No request was sent.`), false);
     }
 
     const promptHash = computePromptHash(systemMessage, userMessage);
@@ -183,7 +194,8 @@ export class MetaProvider implements ExperimentProvider {
       requestHash,
       systemMessage,
       userMessage,
-      configuration: this.configuration
+      configuration: this.configuration,
+      ...(historyCompaction ? { historyCompaction } : {})
     };
 
     let reservationId: string | undefined;
@@ -257,8 +269,10 @@ export class MetaProvider implements ExperimentProvider {
         // Keep deadline active through complete body consumption and JSON parsing
         responseData = await response.json() as typeof responseData;
         const visible = responseData?.choices?.[0];
+        const visibleContent = typeof visible?.message?.content === 'string' ? this.sanitize(visible.message.content) : undefined;
         responseAudit = {
-          content: typeof visible?.message?.content === 'string' ? this.sanitize(visible.message.content).slice(0, 32768) : undefined,
+          content: visibleContent?.slice(0, 32768),
+          ...(visibleContent && visibleContent.length > 32768 ? { contentTruncated: true, contentLength: visibleContent.length } : {}),
           finishReason: typeof visible?.finish_reason === 'string' ? this.sanitize(visible.finish_reason) : undefined
         };
       } finally {
