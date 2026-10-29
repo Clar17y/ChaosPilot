@@ -1621,6 +1621,10 @@ const requestPreflight = new RequestPreflight(text => {
   }
   updateRunReadiness();
 });
+function selectedMaxExperiments(): number {
+  return Math.min(Math.max(1, Math.floor(Number(maxExperimentsInput.value) || 5)), 20);
+}
+
 function updateRequestPreflight(): void {
   const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
     && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
@@ -1628,7 +1632,7 @@ function updateRequestPreflight(): void {
   void requestPreflight.update(validSelection && selectedSystem ? {
     systemId: selectedSystem.id, expectedRevision: selectedSystem.revision, adapterId: selectedSystem.adapterId,
     variant: targetSelect.value, provider: providerSelect.value,
-    maxExperiments: Math.min(Math.max(1, Math.floor(Number(maxExperimentsInput.value) || 5)), 20)
+    maxExperiments: selectedMaxExperiments()
   } : null);
 }
 
@@ -1917,7 +1921,7 @@ btnLaunch.addEventListener('click', async () => {
   selectedExperimentIndex = 0;
   const variant = targetSelect.value as TargetVariant;
   const provider = providerSelect.value as ProviderKind;
-  const maxExperiments = Math.min(Math.max(1, Math.floor(Number(maxExperimentsInput.value) || 5)), 20);
+  const maxExperiments = selectedMaxExperiments();
 
   isLaunchRequestPending = true;
   statusCoordinator.invalidate();
