@@ -401,7 +401,8 @@ describe('Proposal Attempts Audit & Lifecycle', () => {
       expect(callCount).toBe(2);
       expect(record.proposalAttempts).toHaveLength(2);
       expect(record.experiments).toHaveLength(0);
-      expect(record.stopReason).toBe('Maximum proposal attempts reached');
+      expect(record.status).toBe('failed');
+      expect(record.stopReason).toContain('Maximum proposal attempts reached');
       expect(record.contextAudit.maxProposalAttempts).toBe(2);
     });
 
@@ -495,6 +496,88 @@ describe('Proposal Attempts Audit & Lifecycle', () => {
       expect(attempt.status).toBe('executed');
       expect(attempt.request).toBeUndefined();
       expect(attempt.requestSent).toBeUndefined();
+    });
+
+    it('asks for a shorter complete experiment after truncation and executes a valid retry', async () => {
+      const contexts: ProviderContext[] = [];
+      const provider: ExperimentProvider = {
+        kind: 'meta', model: 'fake',
+        propose: async context => {
+          contexts.push(structuredClone(context));
+          return contexts.length === 1
+            ? { experiment: null, validationError: 'Model response was truncated due to max_tokens limit', responseAudit: { finishReason: 'length' }, requestSent: true, usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 } }
+            : { experiment: validExp, requestSent: true, usage: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0.0005 } };
+        }
+      };
+      const record = await runInvestigation({ variant: 'clean', maxExperiments: 1, provider, simulator: createTestSimulator() });
+      expect(contexts[1]?.feedback?.join(' ')).toContain('shorter COMPLETE JSON experiment');
+      expect(record.status).toBe('completed');
+      expect(record.experiments).toHaveLength(1);
+      expect(record.proposalAttempts?.map(a => a.status)).toEqual(['invalid_response', 'executed']);
+      expect(record.usage.estimatedCostUsd).toBeCloseTo(0.0015);
+    });
+
+    it('stops after bounded truncation retries without losing earlier completed experiments or usage', async () => {
+      let calls = 0;
+      const provider: ExperimentProvider = {
+        kind: 'meta', model: 'fake', propose: async () => {
+          calls++;
+          return calls === 1
+            ? { experiment: validExp, requestSent: true, usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 } }
+            : { experiment: null, validationError: 'Model response was truncated due to max_tokens limit', responseAudit: { finishReason: 'length' }, requestSent: true, usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 } };
+        }
+      };
+      const record = await runInvestigation({ variant: 'clean', maxExperiments: 3, provider, simulator: createTestSimulator() });
+      expect(calls).toBe(4);
+      expect(record.status).toBe('failed');
+      expect(record.stopReason).toContain('truncated');
+      expect(record.experiments).toHaveLength(1);
+      expect(record.proposalAttempts?.map(a => a.status)).toEqual(['executed', 'invalid_response', 'invalid_response', 'invalid_response']);
+      expect(record.proposalAttempts?.slice(1).map(a => a.experimentNumber)).toEqual([2, 2, 2]);
+      expect(record.usage).toEqual({ inputTokens: 40, outputTokens: 80, estimatedCostUsd: 0.004 });
+    });
+
+    it('reports exhausted proposal limits and cancellation during a retry without inventing an experiment', async () => {
+      const controller = new AbortController();
+      let calls = 0;
+      const provider: ExperimentProvider = {
+        kind: 'meta', model: 'fake', propose: async () => {
+          calls++;
+          if (calls === 1) return { experiment: validExp, requestSent: true, usage: { inputTokens: 2, outputTokens: 3, estimatedCostUsd: 0.001 } };
+          if (calls === 2) return { experiment: null, validationError: 'truncated output', requestSent: true, usage: { inputTokens: 2, outputTokens: 3, estimatedCostUsd: 0.001 } };
+          controller.abort();
+          throw Object.assign(new DOMException('aborted', 'AbortError'), { requestSent: true, usageKnown: false });
+        }
+      };
+      const capped = await runInvestigation({ variant: 'clean', maxExperiments: 3, maxProposalAttempts: 2, provider, simulator: createTestSimulator() });
+      expect(capped.status).toBe('failed');
+      expect(capped.stopReason).toContain('Maximum proposal attempts');
+      expect(capped.experiments).toHaveLength(1);
+      calls = 0;
+      const cancelled = await runInvestigation({ variant: 'clean', maxExperiments: 3, provider, simulator: createTestSimulator(), signal: controller.signal });
+      expect(cancelled.status).toBe('cancelled');
+      expect(cancelled.experiments).toHaveLength(1);
+      expect(cancelled.proposalAttempts?.map(a => a.status)).toEqual(['executed', 'invalid_response', 'cancelled']);
+      expect(cancelled.proposalAttempts?.at(-1)).toMatchObject({ requestSent: true, usageKnown: false });
+    });
+
+    it('preserves a verified finding at the proposal cap while distinguishing stop-on-finding from continuation', async () => {
+      const sim = createTestSimulator();
+      const execute = sim.executeExperiment;
+      sim.executeExperiment = (experiment, variant) => {
+        const result = execute(experiment, variant);
+        result.violations = variant === 'clean' ? [] : [{ id: 'v1', invariant: 'credit_limit_respected', message: 'Violation', step: 0, evidence: {} }];
+        return result;
+      };
+      const provider: ExperimentProvider = { kind: 'mock', model: 'fake', propose: async () => ({ experiment: validExp, usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 } }) };
+      const stopOnFinding = await runInvestigation({ variant: 'candidate-a', maxExperiments: 2, maxProposalAttempts: 1, provider, simulator: sim });
+      const continued = await runInvestigation({ variant: 'candidate-a', maxExperiments: 2, maxProposalAttempts: 1, continueAfterFindings: true, provider, simulator: sim });
+      expect(stopOnFinding.status).toBe('completed');
+      expect(stopOnFinding.findings).toHaveLength(1);
+      expect(continued.status).toBe('failed');
+      expect(continued.stopReason).toContain('Maximum proposal attempts');
+      expect(continued.experiments).toHaveLength(1);
+      expect(continued.findings).toHaveLength(1);
     });
   });
 });

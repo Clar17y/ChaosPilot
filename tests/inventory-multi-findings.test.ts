@@ -389,7 +389,7 @@ describe('finding continuation', () => {
       .mockRejectedValueOnce(new Error('boom')) };
     const record = await runInvestigation({ variant: 'inventory-candidate-b', systemBrief: await snapshot(), provider, maxExperiments: 5, continueAfterFindings: true });
     expect(record.status).toBe('failed');
-    expect(record.stopReason).toBe('Provider failed to propose');
+    expect(record.stopReason).toBe('Provider failed to propose: boom');
     expect(record.findings).toHaveLength(1);
   });
 

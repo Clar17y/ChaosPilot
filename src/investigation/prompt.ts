@@ -3,7 +3,7 @@ import type { ProviderContext } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
 import { INVENTORY_PROMPT_VERSION, INVENTORY_SYSTEM_PROMPT, INVENTORY_PROMPT_TEMPLATE_HASH } from './inventory-prompt.ts';
 
-export const PROMPT_VERSION = '3.0';
+export const PROMPT_VERSION = '3.1';
 
 export const SYSTEM_PROMPT_TEMPLATE = [
   'You are an expert distributed systems verification assistant testing an event-driven financial trading system.',
@@ -85,7 +85,31 @@ export function computePromptHash(systemMessage: string, userMessage: string): s
     .digest('hex');
 }
 
-export function buildInvestigationPrompt(context: ProviderContext): { systemMessage: string; userMessage: string } {
+export interface HistoryWindow {
+  /** Start excludes earlier observations; saved evidence is unchanged. */
+  start: number;
+}
+
+function shortText(text: string, limit = 240): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)} [text omitted]`;
+}
+
+function compactHistory(context: ProviderContext, start: number): string {
+  const disclosure = `HISTORY COMPACTION: ${context.history.length} saved observations; ${start} earlier observations omitted entirely. Remaining observations are abbreviated summaries: steps, snapshots, traces and detailed evidence are omitted; long text and lists are bounded. Full evidence remains saved outside this request. Do not assume omitted information was assessed or proves correctness.`;
+  return [disclosure, ...context.history.slice(start).map((h, i) => JSON.stringify({
+    experimentNumber: start + i + 1,
+    hypothesis: shortText(h.experiment.hypothesis),
+    expectedInvariant: shortText(h.experiment.expectedInvariant),
+    stepCount: h.experiment.steps.length,
+    valid: h.result.valid,
+    violationCount: h.result.violations.length,
+    violations: h.result.violations.slice(0, 8).map(v => ({ invariant: shortText(v.invariant), message: shortText(v.message), step: v.step })),
+    rejectionCount: h.result.rejections.length,
+    rejections: h.result.rejections.slice(0, 8).map(r => ({ step: r.step, reason: shortText(r.reason) }))
+  }))].join('\n');
+}
+
+export function buildInvestigationPrompt(context: ProviderContext, historyWindow?: HistoryWindow): { systemMessage: string; userMessage: string } {
   const systemMessage = getPromptIdentity(context.systemBrief?.brief.adapterId).systemMessage;
 
   const sourceSection = context.source.files
@@ -94,7 +118,7 @@ export function buildInvestigationPrompt(context: ProviderContext): { systemMess
 
   let historySection = 'None (first experiment)';
   if (context.history.length > 0) {
-    historySection = context.history.map((h, i) => {
+    historySection = historyWindow ? compactHistory(context, historyWindow.start) : context.history.map((h, i) => {
       const violations = h.result.violations.map(v => `${v.invariant}: ${v.message} (step ${v.step})`).join('; ') || 'None';
       const rejections = h.result.rejections.map(r => `step ${r.step}: ${r.reason}`).join('; ') || 'None';
       const traceSummary = h.result.trace.length > 0

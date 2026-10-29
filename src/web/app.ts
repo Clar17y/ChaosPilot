@@ -12,7 +12,8 @@ import type {
 import type { RunSummary, ReplayReport } from '../storage.ts';
 import { extractInventorySnapshotDisplay, extractSnapshotDisplay, stateKindForRecord, statePresentationFor } from './snapshot.ts';
 import { clampSelectedIndex, continuationSettingLabel, findingCategoryLabel, formatContractEntry, replayOutcome, tabIndexForKey, targetVariantLabel } from './presentation.ts';
-import { describeProposals } from './proposals.ts';
+import { RequestPreflight } from './preflight.ts';
+import { describeProposals, describeRunOutcome } from './proposals.ts';
 import {
   buildReproductionModel,
   buildRerunTrace,
@@ -344,6 +345,7 @@ function renderWorkspaceSummaries(): void {
     : (selectedSystem?.requirements ?? []);
   const requirementRules = isDraftMode ? draftRequirementRules : (selectedSystem?.requirementRules ?? []);
   const adapter = effectiveAdapter() ?? 'unconfigured';
+  document.getElementById('trading-demo-guide')?.classList.toggle('hidden', adapter !== 'synthetic-trading');
   const revision = isDraftMode ? null : (selectedSystem?.revision ?? null);
   const checks = checkCount();
 
@@ -654,6 +656,19 @@ function startPolling(): void {
 }
 
 function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.syncToRun(rec.id)) { onReproRunChanged(rec); } if (!hasRunDetail(rec.id)) { renderEmptyDashboard('No investigation selected.'); return; } document.getElementById('dashboard-empty')?.classList.add('hidden'); document.getElementById('dashboard-detail')?.classList.remove('hidden'); document.getElementById('dashboard-header-right')?.classList.remove('hidden'); updateInspectionNotice(); syncStopControls();
+  const outcome = document.getElementById('run-outcome-summary');
+  if (outcome) {
+    const summary = describeRunOutcome(rec);
+    outcome.replaceChildren();
+    outcome.classList.toggle('hidden', summary === null);
+    if (summary) {
+      const heading = document.createElement('h3'); heading.textContent = summary.heading;
+      const reason = document.createElement('p'); reason.textContent = summary.reason;
+      const metrics = document.createElement('p'); metrics.className = 'run-outcome-metrics'; metrics.textContent = summary.metrics;
+      const notice = document.createElement('p'); notice.textContent = summary.notice;
+      outcome.append(heading, reason, metrics, notice);
+    }
+  }
   dashRunId.textContent = `Run ID: ${rec.id}`;
 
   if (dashSystemBrief) {
@@ -778,6 +793,11 @@ function renderProposals(rec: InvestigationRecord, display = describeProposals(r
       const error = document.createElement('p');
       error.textContent = attempt.error;
       card.appendChild(error);
+    }
+    if (attempt.response?.contentTruncated) {
+      const note = document.createElement('p');
+      note.textContent = 'The saved response preview was shortened. This is separate from the model’s output limit.';
+      card.appendChild(note);
     }
     for (const [label, data, suffix] of [
       ['Prepared request audit', attempt.request, 'request'],
@@ -1593,7 +1613,31 @@ function updateAdapterBadge(adapterId: string): void {
   }
 }
 
+const requestPreflight = new RequestPreflight(text => {
+  const el = document.getElementById('request-preflight');
+  if (el) {
+    el.textContent = text;
+    el.classList.toggle('warn', requestPreflight.warning);
+  }
+  updateRunReadiness();
+});
+function selectedMaxExperiments(): number {
+  return Math.min(Math.max(1, Math.floor(Number(maxExperimentsInput.value) || 5)), 20);
+}
+
+function updateRequestPreflight(): void {
+  const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
+    && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
+    && scopedVariants().includes(targetSelect.value);
+  void requestPreflight.update(validSelection && selectedSystem ? {
+    systemId: selectedSystem.id, expectedRevision: selectedSystem.revision, adapterId: selectedSystem.adapterId,
+    variant: targetSelect.value, provider: providerSelect.value,
+    maxExperiments: selectedMaxExperiments()
+  } : null);
+}
+
 function updateRunReadiness(): void {
+  updateRequestPreflight();
   const reason = launchBlockedReason();
   btnLaunch.disabled = reason !== null;
   btnLaunch.title = reason ?? '';
@@ -1613,7 +1657,7 @@ function updateRunReadiness(): void {
 }
 
 function launchBlockedReason(): string | null {
-  return launchBlockedReasonPure({
+  const reason = launchBlockedReasonPure({
     isLaunchRequestPending,
     isInvestigationActive,
     isSystemSavePending,
@@ -1626,6 +1670,10 @@ function launchBlockedReason(): string | null {
     allowedVariants: scopedVariants(),
     targetState: effectiveTargetState(),
   });
+  if (reason) return reason;
+  if (providerSelect.value === 'meta' && requestPreflight.checking) return 'Checking the initial request size.';
+  if (providerSelect.value === 'meta' && requestPreflight.overLimit) return 'The initial request exceeds the configured size limit.';
+  return null;
 }
 
 function setSystemSavePending(pending: boolean): void {
@@ -1873,7 +1921,7 @@ btnLaunch.addEventListener('click', async () => {
   selectedExperimentIndex = 0;
   const variant = targetSelect.value as TargetVariant;
   const provider = providerSelect.value as ProviderKind;
-  const maxExperiments = parseInt(maxExperimentsInput.value, 10) || 5;
+  const maxExperiments = selectedMaxExperiments();
 
   isLaunchRequestPending = true;
   statusCoordinator.invalidate();
@@ -1947,13 +1995,17 @@ btnCloseReplay.addEventListener('click', () => { lastFocusedElement?.focus();
 });
 
 providerSelect.addEventListener('change', () => {
+  updateRequestPreflight();
   fetchStatus();
 });
+
+maxExperimentsInput.addEventListener('input', updateRequestPreflight);
 
 if (targetSelect) {
   targetSelect.addEventListener('change', () => {
     // Explicit choice wins over any earlier captured preference for the next refresh.
     targetSelection.select(targetSelect.value || null);
+    updateRequestPreflight();
   });
 }
 

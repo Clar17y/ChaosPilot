@@ -1,4 +1,6 @@
 import * as http from 'node:http';
+import { MetaProvider } from './providers/meta.ts';
+import { readSystemBriefFile, resolveSystemPath } from './systems/index.ts';
 import { resolveAdapter, assertAdapterVariant, listRegisteredAdapters } from './adapters/index.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -547,6 +549,60 @@ export class ChaosPilotServer {
           return;
         }
 
+        // Read-only assessment: no run creation, provider call or ledger reservation.
+        if (method === 'POST' && pathname === '/api/investigation/preflight') {
+          if (!(req.headers['content-type'] ?? '').toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Preflight requires application/json' });
+            return;
+          }
+          const parsed = await this.readJsonBody(req);
+          if (parsed.error) { this.sendJson(res, parsed.status || 400, { error: parsed.error }); return; }
+          const body = (parsed.data ?? {}) as Record<string, unknown>;
+          if (body.provider === 'mock') {
+            this.sendJson(res, 200, { mode: 'mock', assessment: 'not_applicable' });
+            return;
+          }
+          if (body.provider !== 'meta' || typeof body.systemId !== 'string' || !validateSystemId(body.systemId)
+            || !Number.isSafeInteger(body.expectedRevision) || !isKnownTargetVariant(body.variant as TargetVariant)) {
+            this.sendJson(res, 400, { error: 'Select a saved system revision, supported target and provider for preflight.' });
+            return;
+          }
+          try {
+            // Unlike getSystemBrief, this never seeds missing records on disk.
+            const brief = await readSystemBriefFile(resolveSystemPath(this.systemsDir, body.systemId), body.systemId);
+            if (brief.revision !== body.expectedRevision) {
+              this.sendJson(res, 409, { error: 'System revision changed. Reload the saved profile to reassess request size.' });
+              return;
+            }
+            const variant = body.variant as TargetVariant;
+            assertAdapterVariant(brief.adapterId, variant);
+            const adapter = resolveAdapter(brief.adapterId);
+            const snapshot = await createSystemSnapshot(brief);
+            // Custom factories may have different serialization; never claim a default assessment for them.
+            if (this.providerFactoryOverride) {
+              this.sendJson(res, 503, { error: 'Request preflight unavailable for a custom provider factory.' });
+              return;
+            }
+            const prepared = new MetaProvider().prepareRequest({
+              contract: adapter.getContract(), source: adapter.getSourceBundle(variant),
+              history: [], experimentNumber: 1,
+              maxExperiments: Math.min(Math.max(1, Math.floor(Number(body.maxExperiments) || 5)), 20),
+              systemBrief: snapshot
+            });
+            const headroomBytes = prepared.maxPromptBytes - prepared.promptBytes;
+            this.sendJson(res, 200, {
+              mode: 'live', systemId: brief.id, revision: brief.revision, adapterId: brief.adapterId, variant,
+              requestBytes: prepared.promptBytes, limitBytes: prepared.maxPromptBytes,
+              maxOutputTokens: prepared.maxOutputTokens, headroomBytes,
+              assessment: headroomBytes < 0 ? 'over_limit' : headroomBytes <= prepared.maxPromptBytes * 0.2 ? 'near_limit' : 'fits'
+            });
+          } catch {
+            // Do not expose source, prompt, environment values or credentials through diagnostics.
+            this.sendJson(res, 422, { error: 'Request preflight unavailable. Check the saved system revision, adapter, target and server model configuration.' });
+          }
+          return;
+        }
+
         // POST /api/investigation/start - Launch an investigation
         if (method === 'POST' && pathname === '/api/investigation/start') {
           // Rule: Single active investigation exclusivity
@@ -585,7 +641,7 @@ export class ChaosPilotServer {
             const variant = (body.variant as TargetVariant) || 'candidate-a';
             const providerKind = (body.provider as ProviderKind) || 'mock';
             const maxExperiments = Math.min(
-              Math.max(Number(body.maxExperiments) || 5, 1),
+              Math.max(Math.floor(Number(body.maxExperiments) || 5), 1),
               20
             );
             if (body.continueAfterFindings !== undefined && typeof body.continueAfterFindings !== 'boolean') {

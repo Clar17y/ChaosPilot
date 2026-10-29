@@ -4,7 +4,7 @@ import type { Experiment, ProviderContext } from '../src/domain.ts';
 
 it('records bounded model settings without credentials and rejects unsupported reasoning', () => {
   const provider = new MetaProvider({ apiKey: 'not-in-metadata', reasoningEffort: 'low', requestTimeoutMs: 90000 });
-  expect(provider.configuration).toMatchObject({ reasoningEffort: 'low', requestTimeoutMs: 90000, maxOutputTokens: 4096 });
+  expect(provider.configuration).toMatchObject({ reasoningEffort: 'low', requestTimeoutMs: 90000, maxOutputTokens: 32768, maxPromptBytes: 131072 });
   expect(JSON.stringify(provider.configuration)).not.toContain('not-in-metadata');
   expect(() => new MetaProvider({ reasoningEffort: 'none' })).toThrow(/META_REASONING_EFFORT/);
 });

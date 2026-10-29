@@ -209,8 +209,28 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
   const history: Observation[] = [];
   let feedback: string[] = [];
   let experimentCount = 0;
-  const maxProposalRetries = 3;
+  const maxConsecutiveInvalidProposals = 3;
   let retryCount = 0;
+
+  const failProposal = (reason: string) => {
+    record.status = 'failed';
+    record.stopReason = reason;
+    record.errors.push(reason);
+  };
+  const failAttemptLimit = (lastError?: string) => failProposal(
+    `Maximum proposal attempts reached${lastError ? `: ${lastError}` : ''}. Investigation incomplete; reduce the proposal size or explicitly adjust attempt limits before retrying.`
+  );
+  const rejectProposal = (error: string, truncated = false) => {
+    retryCount++;
+    if (record.proposalAttempts!.length >= maxProposalAttempts) {
+      failAttemptLimit(error);
+    } else if (retryCount >= maxConsecutiveInvalidProposals) {
+      failProposal(`Proposal rejected after ${maxConsecutiveInvalidProposals} consecutive invalid responses: ${error}. Investigation incomplete; request a shorter experiment or review the configured output limit before retrying.`);
+    } else {
+      // Bounded feedback replaces earlier errors instead of growing indefinitely.
+      feedback = [`Validation error: ${error}${truncated ? ' Return a shorter COMPLETE JSON experiment: one concise hypothesis, only essential actions, no prose or reasoning. Do not claim completion because the previous reply was truncated.' : ''}`];
+    }
+  };
 
   while (experimentCount < maxExperiments) {
     // Check cancellation at start of iteration
@@ -222,7 +242,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
 
     // Check global proposal attempts cap
     if (maxProposalAttempts !== undefined && record.proposalAttempts!.length >= maxProposalAttempts) {
-      record.stopReason = 'Maximum proposal attempts reached';
+      failAttemptLimit();
       break;
     }
 
@@ -330,7 +350,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       } else {
         record.errors.push(`Provider proposal failure: ${errorMsg}`);
         record.status = 'failed';
-        record.stopReason = 'Provider failed to propose';
+        record.stopReason = `Provider failed to propose: ${errorMsg}`;
       }
       await options.onUpdate?.(cloneRecord(record));
       break;
@@ -373,20 +393,10 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     if (reply.validationError) {
       finishAttempt('invalid_response', { error: reply.validationError });
 
-      if (maxProposalAttempts !== undefined && record.proposalAttempts!.length >= maxProposalAttempts) {
-        record.stopReason = 'Maximum proposal attempts reached';
+      rejectProposal(reply.validationError, reply.responseAudit?.finishReason === 'length' || /truncat/i.test(reply.validationError));
+      if (record.status === 'failed') {
         await options.onUpdate?.(cloneRecord(record));
         break;
-      }
-
-      feedback.push(`Validation error: ${reply.validationError}`);
-      retryCount++;
-
-      if (retryCount >= maxProposalRetries) {
-        record.errors.push(`Proposal rejected after ${maxProposalRetries} correction attempts: ${reply.validationError}`);
-        feedback = [];
-        retryCount = 0;
-        experimentCount++;
       }
 
       await options.onUpdate?.(cloneRecord(record));
@@ -411,20 +421,10 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       const parseError = err instanceof Error ? err.message : 'Invalid experiment structure';
       finishAttempt('invalid_plan', { error: parseError });
 
-      if (maxProposalAttempts !== undefined && record.proposalAttempts!.length >= maxProposalAttempts) {
-        record.stopReason = 'Maximum proposal attempts reached';
+      rejectProposal(parseError);
+      if (record.status === 'failed') {
         await options.onUpdate?.(cloneRecord(record));
         break;
-      }
-
-      feedback.push(`Validation error: ${parseError}`);
-      retryCount++;
-
-      if (retryCount >= maxProposalRetries) {
-        record.errors.push(`Proposal rejected after ${maxProposalRetries} correction attempts: ${parseError}`);
-        feedback = [];
-        retryCount = 0;
-        experimentCount++;
       }
 
       await options.onUpdate?.(cloneRecord(record));
@@ -566,8 +566,8 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     }
 
     // Check if proposal cap reached
-    if (maxProposalAttempts !== undefined && record.proposalAttempts!.length >= maxProposalAttempts) {
-      record.stopReason = 'Maximum proposal attempts reached';
+    if (experimentCount < maxExperiments && record.proposalAttempts!.length >= maxProposalAttempts) {
+      failAttemptLimit();
       break;
     }
   }
