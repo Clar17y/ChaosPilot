@@ -51,7 +51,9 @@ import {
   type WorkspaceView,
 } from './workspace.ts';
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
-import { activeUnattributedViolations, detailVisibility, evidenceHeading, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
+import { activeUnattributedViolations, detailVisibility, evidenceHeading, liveActivity, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
+import { buildStageProjection, formatRecordedValue, visiblePositionForTracePosition, type StageFrame, type StageProjection } from './replay-stage.ts';
+import { StagePacketAnimator } from './stage-animation.ts';
 import {
   effectiveWorkspaceSystemId,
   executeDeferredStop,
@@ -123,9 +125,21 @@ let reproUseRerun = false;
 let reproRerunSteps: PlaybackStep[] = [];
 let reproRerunUnattributed: Violation[] = [];
 type ExperimentReplayReport = ReplayReport & { scope?: string; experimentPosition?: number };
+let reproStage: StageProjection | null = null;
+let lastStageRenderKey = '';
+const packetAnimator = new StagePacketAnimator({
+  request: (fn) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : 0),
+  cancel: (h) => { if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(h); },
+  now: () => (typeof performance !== 'undefined' ? performance.now() : Date.now()),
+  isHidden: () => typeof document !== 'undefined' && document.hidden,
+  prefersReducedMotion: () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  onProgress: (t) => { const packet = document.getElementById('repro-packet') as unknown as SVGCircleElement | null; if (!packet) return; if (t < 0 || t >= 1) { packet.setAttribute('opacity', '0'); return; } packet.setAttribute('cx', String(167 + (833 - 167) * t)); packet.setAttribute('opacity', '1'); },
+});
+function cancelStagePacket(): void { packetAnimator.cancel(); }
+function animateStagePacket(): void { packetAnimator.start(); }
 function effectiveSteps(): PlaybackStep[] { if (!reproModel) return []; if (reproUseRerun) return reproRerunSteps; return reproShowFull ? reproModel.allSteps : reproModel.steps; }
 function clearFreshView(): void { reproUseRerun = false; reproRerunSteps = []; reproRerunUnattributed = []; }
-function onReproRunChanged(rec?: InvestigationRecord | null): void { reproPlayback.stop(); clearFreshView(); reproShowFull = false; selectedExperimentIndex = reproSession.applyDefaultFindingSelection(rec ?? currentInvestigationRecord); }
+function onReproRunChanged(rec?: InvestigationRecord | null): void { reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ''; clearFreshView(); reproShowFull = false; selectedExperimentIndex = reproSession.applyDefaultFindingSelection(rec ?? currentInvestigationRecord); }
 
 // DOM Elements - Controls
 const targetSelect = document.getElementById('target-select') as HTMLSelectElement;
@@ -220,7 +234,7 @@ function announce(message: string): void {
 
 function showView(view: WorkspaceView, focusHeading = true): void {
   if (view !== 'investigations') {
-    reproPlayback.stop();
+    reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = '';
     reproSession.invalidateFresh();
     clearFreshView();
     renderReproduction();
@@ -502,7 +516,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { reproPlayback.stop(); reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -717,6 +731,13 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
 
   updateProvenanceBadge(rec.mode);
   updateStatusPill(rec.status);
+  {
+    const activity = liveActivity({ recordStatus: rec.status, serverStatus: serverRunStatus, pendingProposals: (rec.proposalAttempts ?? []).filter(a => a.status === 'pending').length, experiments: rec.experiments.length, findings: rec.findings.length, isActive: isInvestigationActive && rec.id === activeRecordId });
+    const host = document.getElementById('live-activity');
+    if (host) { host.classList.toggle('is-active', activity.live); host.classList.toggle('is-terminal', activity.terminal); host.dataset.tone = activity.tone; host.classList.toggle('is-completed', activity.tone === 'completed'); host.classList.toggle('is-failed', activity.tone === 'failed'); host.classList.toggle('is-cancelled', activity.tone === 'cancelled'); }
+    const label = document.getElementById('live-activity-label'); if (label) label.textContent = activity.label;
+    const detail = document.getElementById('live-activity-detail'); if (detail) detail.textContent = activity.detail;
+  }
   metricStatus.textContent = rec.status.toUpperCase();
   metricExperiments.textContent = `${rec.experiments.length} executed`;
   metricFindings.textContent = `${rec.findings.length}`;
@@ -991,7 +1012,7 @@ function renderExperiments(experiments: ExperimentRecord[]): void {
     item.append(left, right);
 
     item.addEventListener('click', () => {
-      reproPlayback.stop();
+      reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = '';
       reproSession.clearFinding();
       reproSession.selectExperiment(i);
       clearFreshView(); reproShowFull = false;
@@ -1148,7 +1169,7 @@ function reproEl<T extends HTMLElement>(id: string): T | null { return document.
 function clearReproductionDetail(): void { const facts = reproEl('repro-generic-facts'); if (facts) facts.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.add('hidden'); reproEl('repro-credit-wrap')?.classList.add('hidden'); const credit = reproEl('repro-credit'); if (credit) credit.textContent = NO_STEP_CREDIT_TEXT; reproEl('repro-exposure-bar')?.classList.add('hidden'); const legend = reproEl('repro-exposure-legend'); if (legend) legend.textContent = ''; const unattr = reproEl('repro-unattributed'); if (unattr) { unattr.classList.add('hidden'); unattr.textContent = ''; } }
 
 function resetReproductionSelection(): void {
-  reproPlayback.stop();
+  reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = '';
   reproSession.clear();
   clearFreshView(); reproShowFull = false;
   reproModel = null;
@@ -1159,17 +1180,25 @@ function renderReproduction(): void {
   if (rec && reproSession.syncToRun(rec.id)) { onReproRunChanged(rec); }
   if (reproSession.selectedFinding && rec && (resolveExperimentPosition(rec, reproSession.selectedFinding) !== selectedExperimentIndex || !rec.findings.some(f => f.id === reproSession.selectedFinding!.id))) reproSession.clearFinding();
   reproModel = rec ? buildReproductionModel(rec, selectedExperimentIndex, reproSession.selectedFinding) : null;
+  if (rec && reproModel) {
+    const source = reproUseRerun && reproSession.freshReport
+      ? reproSession.freshReport.outcomes?.[0]?.replayedResult
+      : rec.experiments[selectedExperimentIndex]?.result;
+    reproStage = buildStageProjection(source?.trace ?? [], source?.violations ?? [], stateKindForRecord(rec), reproSession.selectedFinding?.violation ?? null);
+  } else reproStage = null;
   const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
   const reproEyebrow = reproEl('repro-eyebrow');
-  if (reproEyebrow) reproEyebrow.textContent = reproUseRerun ? 'Fresh rerun evidence · playback of the completed rerun' : waitingForSave ? 'Investigation in progress or saving · recorded playback only' : 'Recorded evidence · recorded playback only';
+  if (reproEyebrow) reproEyebrow.textContent = waitingForSave ? 'Recorded experiments · investigation in progress' : 'Recorded evidence';
+  const sourceIndicator = reproEl('repro-source-indicator');
+  if (sourceIndicator) sourceIndicator.textContent = reproUseRerun ? 'Fresh rerun recording' : 'Original recording';
   const reproDescription = reproEl('repro-description');
   if (reproDescription) reproDescription.textContent = reproUseRerun ? 'Step through the trace recorded by the just-completed rerun of this experiment. Playing these rerun steps does not execute the target or contact a model. The original recording is still available.' : waitingForSave ? 'Step through the trace recorded so far. This investigation may not have been saved yet. Playing recorded steps does not execute the target or contact a model.' : 'Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.';
   const freshEl = reproEl('repro-fresh-status');
   if (freshEl) freshEl.textContent = waitingForSave
     ? 'Wait for this investigation to finish and be saved before rerunning it.'
-    : describeFreshReplay(reproSession.fresh);
+    : reproSession.fresh.kind === 'idle' ? 'Rerun to check reproduction.' : describeFreshReplay(reproSession.fresh);
   const rerunBtn = reproEl<HTMLButtonElement>('btn-repro-rerun');
-  if (rerunBtn) rerunBtn.disabled = !rec || waitingForSave || reproSession.fresh.kind === 'pending';
+  if (rerunBtn) rerunBtn.disabled = !reproModel || waitingForSave || reproSession.fresh.kind === 'pending';
   // Evidence summary (pinned rule only; never fabricated)
   const evHeading = reproEl('repro-evidence-heading');
   if (evHeading) evHeading.textContent = evidenceHeading(reproUseRerun);
@@ -1254,7 +1283,7 @@ function renderReproduction(): void {
         const sub = document.createElement('span'); sub.className = 'repro-tl-sub';
         sub.textContent = step.isGroup ? `Grouped: ${step.groupCount} entries, expand full trace to inspect` : step.isViolation ? 'Error: rule violation recorded at this action' : step.kind === 'scheduled' ? 'Scheduled: not yet processed' : step.kind === 'rejected' ? 'Recorded rejection' : step.kind === 'processed' ? 'Processed: state after this entry' : step.outcome;
         btn.append(t, sub);
-        btn.addEventListener('click', () => { reproPlayback.select(step.position); });
+        btn.addEventListener('click', () => { cancelStagePacket(); reproPlayback.select(step.position); });
         li.appendChild(btn);
         timeline.appendChild(li);
       });
@@ -1267,6 +1296,145 @@ function renderReproduction(): void {
   }
   body?.classList.toggle('hidden', !(effSteps.length>0));
   renderReproductionDetail();
+}
+
+function stageEl(tag: string, className: string, text?: string): HTMLElement { const el = document.createElement(tag); el.className = className; if (text !== undefined) el.textContent = text; return el; }
+function appendComparison(host: HTMLElement, label: string, before: unknown, after: unknown, beforeLabel: string, afterLabel: string): void {
+  const row = stageEl('div', 'repro-comparison');
+  const field = stageEl('span', 'repro-comparison-field', label.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\./g, ' · '));
+  field.title = label;
+  row.appendChild(field);
+  const b = stageEl('div', ''); const bs = stageEl('small', '', beforeLabel); const bv = stageEl('strong', '', formatRecordedValue(before)); b.append(bs, bv);
+  const a = stageEl('div', ''); const as = stageEl('small', '', afterLabel); const av = stageEl('strong', '', formatRecordedValue(after)); a.append(as, av);
+  row.append(b, stageEl('span', 'repro-comparison-arrow', '→'), a);
+  host.appendChild(row);
+}
+function renderStageLens(host: HTMLElement, frame: StageFrame): void {
+  const v = frame.visual;
+  if (v.kind === 'not-recorded') { host.appendChild(stageEl('p', '', 'State was not recorded for this entry.')); return; }
+  if (v.kind === 'capacity' && v.credit) {
+    const c = v.credit;
+    host.appendChild(stageEl('p', 'repro-lens-label', 'Credit exposure · used + reserved'));
+    host.appendChild(stageEl('div', 'repro-lens-big', formatRecordedValue(c.total ?? undefined)));
+    const bar = c.bar;
+    if (bar && bar.mode === 'signed') {
+      // Signed geometry: each component drawn from a zero origin; negative
+      // values extend left and are never stacked as positive area.
+      for (const seg of bar.segments) {
+        const row = stageEl('div', 'repro-signed-row');
+        row.appendChild(stageEl('span', 'repro-signed-label', `${seg.label}: ${formatRecordedValue(seg.value)}`));
+        const track = stageEl('div', 'repro-signed-track'); track.setAttribute('aria-hidden', 'true');
+        const zero = stageEl('span', 'repro-zero'); zero.style.left = `${bar.zeroPct}%`; track.appendChild(zero);
+        const el = stageEl('span', `repro-seg repro-seg-${seg.label}${seg.negative ? ' repro-seg-negative' : ''}`); el.style.left = `${seg.left}%`; el.style.width = `${seg.width}%`; track.appendChild(el);
+        row.appendChild(track); host.appendChild(row);
+      }
+      if (bar.limitPct !== null) host.appendChild(stageEl('p', '', `Credit limit ${formatRecordedValue(c.limit ?? undefined)}`));
+    } else if (bar) {
+      const stack = stageEl('div', 'repro-stack'); stack.setAttribute('aria-hidden', 'true');
+      for (const seg of bar.segments) { const el = stageEl('span', `repro-seg repro-seg-${seg.label}`); el.style.left = `${seg.left}%`; el.style.width = `${seg.width}%`; stack.appendChild(el); }
+      if (bar.limitPct !== null) { const marker = stageEl('span', 'repro-limit-marker'); marker.style.left = `${Math.max(0, Math.min(100, bar.limitPct))}%`; marker.appendChild(stageEl('span', '', `Limit ${formatRecordedValue(c.limit ?? undefined)}`)); stack.appendChild(marker); }
+      host.appendChild(stack);
+    } else {
+      host.appendChild(stageEl('p', '', 'Some credit values were not recorded.'));
+    }
+    const legend = stageEl('div', 'repro-legend');
+    legend.setAttribute('aria-label', `Used ${formatRecordedValue(c.used ?? undefined)}, reserved ${formatRecordedValue(c.reserved ?? undefined)}, total ${formatRecordedValue(c.total ?? undefined)}, limit ${formatRecordedValue(c.limit ?? undefined)} on a fixed whole-trace scale`);
+    for (const [cls, text] of [['repro-seg-used', `Used: ${formatRecordedValue(c.used ?? undefined)}`], ['repro-seg-reserved', `Reserved: ${formatRecordedValue(c.reserved ?? undefined)}`]] as [string, string][]) { const item = stageEl('span', ''); const sw = stageEl('span', 'repro-sw'); sw.style.background = cls === 'repro-seg-used' ? '#39d5e8' : '#f5c86b'; item.append(sw, document.createTextNode(text)); legend.appendChild(item); }
+    legend.appendChild(stageEl('span', '', `Total: ${formatRecordedValue(c.total ?? undefined)} · Limit: ${formatRecordedValue(c.limit ?? undefined)}`));
+    host.appendChild(legend);
+    for (const row of v.comparison) appendComparison(host, row.label, row.before, row.after, 'Expected', 'Observed');
+    return;
+  }
+  if (v.kind === 'stock') {
+    host.appendChild(stageEl('p', 'repro-lens-label', 'Inventory balance'));
+    for (const r of v.stockRows) {
+      const rowEl = stageEl('div', 'repro-stock-row');
+      rowEl.setAttribute('aria-label', `SKU ${r.sku}: received ${formatRecordedValue(r.received ?? undefined)}, on hand ${formatRecordedValue(r.onHand ?? undefined)}, reserved remaining ${formatRecordedValue(r.reservedRemaining ?? undefined)}, available ${formatRecordedValue(r.available ?? undefined)}${r.overReserved ? ', over-reserved' : ''}`);
+      rowEl.append(stageEl('strong', '', r.sku), stageEl('span', '', `Received ${formatRecordedValue(r.received ?? undefined)}`), stageEl('span', '', `On hand ${formatRecordedValue(r.onHand ?? undefined)}`), stageEl('span', '', `Reserved ${formatRecordedValue(r.reservedRemaining ?? undefined)}`), stageEl('span', '', `Available ${formatRecordedValue(r.available ?? undefined)}${r.overReserved ? ' (over-reserved)' : ''}`));
+      host.appendChild(rowEl);
+    }
+    for (const row of v.comparison) appendComparison(host, row.label, row.before, row.after, 'Expected', 'Observed');
+    return;
+  }
+  if (v.kind === 'version') {
+    host.appendChild(stageEl('p', 'repro-lens-label', 'Version change'));
+    if (!v.versionChanges.length) host.appendChild(stageEl('p', '', 'No recorded version change at this entry.'));
+    for (const row of v.versionChanges) appendComparison(host, `${row.label}${row.regressed ? ' · moved backwards' : ''}`, row.before, row.after, 'Before', 'After');
+    return;
+  }
+  if (v.kind === 'lifecycle') {
+    host.appendChild(stageEl('p', 'repro-lens-label', 'Status & quantities'));
+    if (!v.statusChanges.length && !v.quantities.length) host.appendChild(stageEl('p', '', 'No recorded status change at this entry.'));
+    for (const d of v.statusChanges) appendComparison(host, d.path, d.before, d.after, 'Before', 'After');
+    for (const d of v.quantities) appendComparison(host, d.path, d.before, d.after, 'Before', 'After');
+    return;
+  }
+  if (v.kind === 'identity') {
+    host.appendChild(stageEl('p', 'repro-lens-label', 'Event deliveries'));
+    host.appendChild(stageEl('div', 'repro-lens-big', v.occurrences === null ? 'not recorded' : `${v.occurrences}×`));
+    host.appendChild(stageEl('p', '', v.eventIdentity ? `Deliveries so far · ${v.eventIdentity}` : 'No event identity recorded.'));
+    host.appendChild(stageEl('p', '', v.stateChanged === null ? 'State change unknown' : v.stateChanged ? 'State changed' : 'State unchanged'));
+    for (const c of v.conflicts) appendComparison(host, `Conflicting field: ${c.field}`, c.recordedValue, c.eventValue, c.recordedLabel, 'This event');
+    return;
+  }
+  host.appendChild(stageEl('p', 'repro-lens-label', 'Recorded state change'));
+  if (!v.comparison.length) host.appendChild(stageEl('p', '', frame.stateStatus === 'first-recorded' ? 'First recorded state · earlier values unavailable' : 'No recorded state change at this entry.'));
+  for (const row of v.comparison) appendComparison(host, row.label, row.before, row.after, 'Before', 'After');
+  if (v.changeCount > v.comparison.length) host.appendChild(stageEl('p', '', `${v.changeCount} recorded field changes in total; complete state is in the recorded evidence below.`));
+  if (v.negativeChanges.length) host.appendChild(stageEl('p', '', `Signed negative recorded value: ${v.negativeChanges.map(d => `${d.path} = ${formatRecordedValue(d.after)}`).join(', ')}`));
+}
+function renderStage(step: PlaybackStep | undefined, eff: PlaybackStep[]): void {
+  const set = (id: string, text: string) => { const el = reproEl(id); if (el) el.textContent = text; };
+  const changeNode = reproEl('repro-stage-change-node'); const marker = reproEl('repro-stage-marker'); const banner = reproEl('repro-stage-banner'); const lens = reproEl('repro-stage-lens');
+  const scrubber = reproEl<HTMLInputElement>('repro-scrubber'); const jump = reproEl<HTMLButtonElement>('btn-repro-jump');
+  if (scrubber) {
+    // The range includes the controller's before-first position, so the first
+    // step remains reachable immediately after opening or resetting a replay.
+    scrubber.max = String(Math.max(-1, eff.length - 1));
+    scrubber.value = String(reproPlayback.position);
+    scrubber.disabled = eff.length === 0;
+    scrubber.setAttribute('aria-valuetext', eff.length === 0 ? 'No recorded steps'
+      : reproPlayback.position < 0 ? 'No step selected' : `Step ${reproPlayback.position + 1} of ${eff.length}`);
+  }
+  const jumpTarget = reproStage ? (visiblePositionForTracePosition(eff, reproStage.findingTracePosition) ?? visiblePositionForTracePosition(eff, reproStage.groupFindingTracePosition)) : null;
+  if (jump) jump.disabled = jumpTarget === null;
+  if (lens) lens.textContent = '';
+  changeNode?.classList.remove('is-violation', 'is-group'); marker?.classList.remove('is-on', 'is-group'); banner?.classList.remove('is-violation', 'is-group');
+  if (!step) {
+    cancelStagePacket(); lastStageRenderKey = '';
+    set('repro-stage-event', '—'); set('repro-stage-system', reproModel?.systemLabel.replace(/^System:\s*/, '') ?? 'Recorded system'); set('repro-stage-change', '—');
+    if (marker) marker.textContent = ''; if (banner) banner.textContent = eff.length ? 'No step selected yet. Play or step to show the first recorded entry.' : 'No trace entries recorded.';
+    if (lens) lens.appendChild(stageEl('p', '', 'No recorded state is shown before the first step.'));
+    return;
+  }
+  set('repro-stage-system', reproModel?.systemLabel.replace(/^System:\s*/, '') ?? 'Recorded system');
+  if (step.isGroup) {
+    cancelStagePacket(); lastStageRenderKey = '';
+    set('repro-stage-event', step.title); set('repro-stage-change', 'Grouped summary');
+    if (banner) banner.textContent = 'Grouped entries — show complete trace to inspect each one.';
+    if (lens) { lens.appendChild(stageEl('p', 'repro-lens-label', 'Grouped recorded entries')); lens.appendChild(stageEl('p', '', step.detail)); }
+    return;
+  }
+  // Resolve the visual frame against the same trace this step belongs to,
+  // via its raw tracePosition — never via the visible-sequence index.
+  const frame = reproStage?.frames[step.tracePosition];
+  if (!frame) { cancelStagePacket(); lastStageRenderKey = ''; set('repro-stage-event', step.title); set('repro-stage-change', step.stateText); return; }
+  const outcome = step.outcome?.replace(/^delivered:/, '').replace(/[_-]+/g, ' ');
+  set('repro-stage-event', `${frame.eventName} · ${outcome ? outcome.charAt(0).toUpperCase() + outcome.slice(1) : 'Recorded'}`);
+  set('repro-stage-change', !frame.stateKnown ? 'State not recorded' : frame.stateStatus === 'first-recorded' ? 'First recorded state' : frame.diffs.length ? `${frame.diffs.length} recorded field change${frame.diffs.length === 1 ? '' : 's'}` : 'No recorded state change');
+  const deduped = [...new Map([...frame.violationsHere, ...frame.groupViolations].map(v => [`${v.invariant}|${v.message}`, v])).values()];
+  if (frame.isViolation) {
+    changeNode?.classList.add('is-violation'); marker?.classList.add('is-on');
+    if (marker) marker.textContent = '✕ Finding recorded here';
+    if (banner) { banner.classList.add('is-violation'); banner.textContent = `Finding recorded here: ${deduped.map(v => v.message).join(' · ')}`; }
+  } else if (frame.isGroupFinding) {
+    changeNode?.classList.add('is-group'); marker?.classList.add('is-on', 'is-group');
+    if (marker) marker.textContent = '! Finding at this action';
+    if (banner) { banner.classList.add('is-group'); banner.textContent = `Finding at this action: ${deduped.map(v => v.message).join(' · ')}`; }
+  } else if (banner) banner.textContent = 'No violation recorded';
+  if (lens) renderStageLens(lens, frame);
+  const stageKey = `${reproSession.renderedKey}|${reproPlayback.position}|${reproUseRerun ? 'rerun' : 'original'}`;
+  if (stageKey !== lastStageRenderKey) { lastStageRenderKey = stageKey; animateStagePacket(); }
 }
 
 function renderReproductionDetail(): void {
@@ -1324,6 +1492,7 @@ function renderReproductionDetail(): void {
     reproEl('repro-exposure-bar')?.classList.add('hidden');
     set('repro-exposure-legend', '');
     set('repro-action', 'not recorded'); set('repro-outcome', 'not recorded'); set('repro-payload', 'not recorded'); set('repro-state', 'not recorded');
+    renderStage(undefined, eff);
     return;
   }
   const explanation = explainStep(step, step.violations);
@@ -1387,6 +1556,10 @@ function renderReproductionDetail(): void {
   set('repro-outcome', step.outcome || 'not recorded');
   set('repro-payload', step.payloadText);
   set('repro-state', step.stateText);
+  renderStage(step, eff);
+  const resetBtn = reproEl<HTMLButtonElement>('btn-repro-reset');
+  if (resetBtn) resetBtn.disabled = eff.length === 0;
+  if (playBtn) playBtn.disabled = eff.length === 0;
 }
 
 function openReproductionForFinding(finding: Finding, focusPlayer = true): void {
@@ -1417,8 +1590,6 @@ async function rerunSavedInvestigation(): Promise<void> {
   const seq = reproSession.beginFresh(runId, position, findingId);
   clearFreshView();
   renderReproduction();
-  const btn = reproEl<HTMLButtonElement>('btn-repro-rerun');
-  const trigger = btn ?? undefined;
   try {
     const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/experiments/${encodeURIComponent(String(position))}/replay`, { method: 'POST' });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || `HTTP ${res.status}`); }
@@ -1427,8 +1598,6 @@ async function rerunSavedInvestigation(): Promise<void> {
     const rerunTrace = buildRerunTrace(report); reproRerunSteps = rerunTrace.steps; reproRerunUnattributed = rerunTrace.unattributedViolations;
     reproUseRerun = false;
     renderReproduction();
-    lastFocusedElement = trigger ?? null;
-    showReplayReport(report);
   } catch (e) {
     if (!reproSession.settleFreshError(seq, runId, e instanceof Error ? e.message : String(e), position, findingId)) return;
     renderReproduction();
@@ -2142,20 +2311,41 @@ tabButtons.forEach((btn, index) => {
 activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
 // Reproduction player controls (recorded playback only)
-reproEl<HTMLButtonElement>('btn-repro-prev')?.addEventListener('click', () => reproPlayback.previous());
-reproEl<HTMLButtonElement>('btn-repro-next')?.addEventListener('click', () => reproPlayback.next());
-reproEl<HTMLButtonElement>('btn-repro-reset')?.addEventListener('click', () => reproPlayback.reset());
+reproEl<HTMLButtonElement>('btn-repro-prev')?.addEventListener('click', () => { cancelStagePacket(); reproPlayback.previous(); });
+reproEl<HTMLButtonElement>('btn-repro-next')?.addEventListener('click', () => { cancelStagePacket(); reproPlayback.next(); });
+reproEl<HTMLButtonElement>('btn-repro-reset')?.addEventListener('click', () => { cancelStagePacket(); lastStageRenderKey = ''; reproPlayback.reset(); });
 reproEl<HTMLButtonElement>('btn-repro-play')?.addEventListener('click', () => {
-  if (reproPlayback.playing) reproPlayback.pause();
+  if (reproPlayback.playing) { reproPlayback.pause(); cancelStagePacket(); }
   else reproPlayback.play();
   renderReproductionDetail();
 });
 reproEl<HTMLButtonElement>('btn-repro-rerun')?.addEventListener('click', () => { void rerunSavedInvestigation(); });
-reproEl<HTMLButtonElement>('btn-repro-toggle-trace')?.addEventListener('click', () => { reproShowFull = !reproShowFull; reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
-reproEl<HTMLButtonElement>('btn-repro-show-original')?.addEventListener('click', () => { reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
-reproEl<HTMLButtonElement>('btn-repro-show-rerun')?.addEventListener('click', () => { if (!reproSession.freshReport) return; reproUseRerun = true; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-report')?.addEventListener('click', () => {
+  if (!reproSession.freshReport) return;
+  lastFocusedElement = reproEl<HTMLButtonElement>('btn-repro-report');
+  // The session retains the endpoint report through a narrower evidence type.
+  showReplayReport(reproSession.freshReport as ExperimentReplayReport);
+});
+reproEl<HTMLButtonElement>('btn-repro-jump')?.addEventListener('click', () => {
+  if (!reproStage) return;
+  const eff = effectiveSteps();
+  const target = visiblePositionForTracePosition(eff, reproStage.findingTracePosition) ?? visiblePositionForTracePosition(eff, reproStage.groupFindingTracePosition);
+  if (target !== null) { cancelStagePacket(); reproPlayback.select(target); }
+});
+reproEl<HTMLInputElement>('repro-scrubber')?.addEventListener('input', (event) => {
+  const value = Number((event.target as HTMLInputElement).value);
+  if (Number.isFinite(value)) { cancelStagePacket(); reproPlayback.select(value); }
+});
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const onReduced = (event: MediaQueryListEvent) => { reproPlayback.handleReducedMotion(event.matches); if (event.matches) cancelStagePacket(); renderReproductionDetail(); };
+  if (typeof reduced.addEventListener === 'function') reduced.addEventListener('change', onReduced);
+}
+reproEl<HTMLButtonElement>('btn-repro-toggle-trace')?.addEventListener('click', () => { cancelStagePacket(); lastStageRenderKey = ''; reproShowFull = !reproShowFull; reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-original')?.addEventListener('click', () => { cancelStagePacket(); lastStageRenderKey = ''; reproUseRerun = false; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
+reproEl<HTMLButtonElement>('btn-repro-show-rerun')?.addEventListener('click', () => { if (!reproSession.freshReport) return; cancelStagePacket(); lastStageRenderKey = ''; reproUseRerun = true; reproSession.renderedKey=''; reproPlayback.setCount(effectiveSteps().length); renderReproduction(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { reproPlayback.stop(); renderReproductionDetail(); }
+  if (document.hidden) { reproPlayback.handleHidden(); cancelStagePacket(); renderReproductionDetail(); }
 });
 activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
 
