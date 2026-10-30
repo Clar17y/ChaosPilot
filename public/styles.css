@@ -1081,3 +1081,7 @@ button{font:inherit}
 @media (max-width:900px){.repro-evidence{padding:var(--space-2)}.repro-view-controls{flex-direction:column;align-items:stretch}}
 @media (max-width:900px){.repro-body{grid-template-columns:1fr}.repro-compare{grid-template-columns:1fr}}
 @media (prefers-reduced-motion: reduce){.reproduction-card *{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+
+#explanation-report-panel .row{display:flex;flex-wrap:wrap;gap:8px}#explanation-report-status{margin-top:10px}.provenance-details>summary{cursor:pointer;padding:4px 0}@media print{#explanation-report-panel{display:none}}
+
+.opened-finding{padding:18px 0;border-bottom:1px solid var(--border,#d9deeb)}.opened-finding h3{margin-bottom:8px}.opened-finding p{max-width:85ch}

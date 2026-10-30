@@ -35,6 +35,12 @@ The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable 
 
 At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. The current prompt and larger request limits have not been evaluated in a new live comparison.
 
+## Findings reports (saved HTML)
+
+In **Findings & reproductions**, the opened run's findings are shown first; prior runs and verbose provenance are collapsed below. For a saved terminal run with findings, **Create report with Muse** calls Muse through the existing Meta API (shared key, model, limits and budget ledger; it incurs usage), while **Create offline scripted report** makes no model call, incurs no usage and is explicitly labelled not Muse. Either action saves a self-contained, printable HTML report under `runs/reports/` covering every recorded finding — hypothesis/why tested, recorded action/trace sequence, expected vs observed, and the recorded replay/clean-control status — with missing, legacy, ambiguous or truncated evidence stated rather than invented. View/download later makes no model call; stale reports (evidence changed) and reports for deleted runs are never served as current. Model narration is labelled interpretation and is rendered escaped in a static template; expected/observed/replay facts come only from the record.
+
+Report generation makes one request, with no automatic retry. Evidence must fit the configured serialized request limit; it is never silently shortened. Reports bind to the complete saved record. Atomic publication shares a run mutation lock with saving/deletion, and a generation lease prevents duplicate requests across server instances. If a process crashes, inspect the corresponding `.mutation.lock` or `.html.generation.lock` under the run/report directory and confirm the owner has stopped before removing that lock and retrying. An existing lock is never broken automatically. Offline mock reports demonstrate recorded scripted behavior, not autonomous model discovery.
+
 ## Live Meta configuration
 
 Copy `.env.example` to `.env` and set `MODEL_API_KEY` locally. Do not put credentials in browser fields, exported experiments, Git or chat. The server reads configuration; the browser does not receive the key.

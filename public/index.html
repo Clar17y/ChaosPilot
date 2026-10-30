@@ -467,14 +467,28 @@
             </div>
           </header>
           <section class="card">
-            <h2>Saved runs with findings</h2>
-            <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
-          </section>
-          <section class="card">
             <h2>Findings in the currently opened run</h2>
             <p class="muted">Open a run from Investigations to inspect its findings, replay and clean comparison in detail.</p>
             <div id="findings-opened-summary"><p class="muted">No run is currently opened.</p></div>
           </section>
+          <section class="card" id="explanation-report-panel" aria-labelledby="explanation-report-title">
+            <h2 id="explanation-report-title">Saved findings report (HTML)</h2>
+            <p>Creates a polished, self-contained HTML report for the <strong>currently opened, saved terminal run</strong>, covering every recorded finding: what was tested and why, the recorded action sequence, expected vs observed, and the recorded replay / clean-control status.</p>
+            <p class="note"><strong>Model disclosure:</strong> “Create report with Muse” calls Muse through the Meta API and <strong>incurs usage charged to the shared budget</strong>. “Offline scripted report” calls no model, incurs no usage, and is explicitly not Muse. Viewing or downloading an already-saved report makes no model call.</p>
+            <div class="row">
+              <button id="btn-report-meta" class="btn btn-primary" type="button">Create report with Muse (Meta API — incurs usage)</button>
+              <button id="btn-report-offline" class="btn btn-secondary" type="button">Create offline scripted report (no model call)</button>
+              <button id="btn-report-refresh" class="btn btn-secondary" type="button">Refresh report status</button>
+              <button id="btn-report-view" class="btn btn-secondary" type="button">View saved report</button>
+              <button id="btn-report-download" class="btn btn-secondary" type="button">Download saved report</button>
+            </div>
+            <p id="explanation-report-status" class="muted" role="status" aria-live="polite">No run is currently opened.</p>
+          </section>
+          <details class="card provenance-details">
+            <summary><h2 style="display:inline">Prior runs and verbose provenance</h2></summary>
+            <p class="muted">Earlier saved runs with findings. Identifiers are kept accessible here and in each run’s details, without crowding the opened run’s findings.</p>
+            <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
+          </details>
         </section>
 
       </main>

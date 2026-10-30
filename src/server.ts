@@ -31,7 +31,13 @@ import {
   createSystemSnapshot,
   validateSystemId,
   validateSystemBrief,
+  saveFindingReport,
+  getFindingReport,
+  withFindingReportGeneration,
+  findingReportFilename,
 } from './storage.ts';
+import { buildRunEvidence, generateReport, type ExplanationMode, type ExplanationTransport } from './explanations/index.ts';
+import { metaExplanationTransport } from './explanations/meta-transport.ts';
 import {
   SystemIntegrityError,
   SystemConflictError,
@@ -55,6 +61,7 @@ export interface ServerOptions {
   systemsDir?: string;
   investigationRunner?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
   providerFactory?: (kind: ProviderKind) => ExperimentProvider;
+  explanationTransport?: ExplanationTransport;
   publicDir?: string;
   distDir?: string;
 }
@@ -99,6 +106,8 @@ export class ChaosPilotServer {
   private distDir: string;
   private runnerOverride?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
   private providerFactoryOverride?: (kind: ProviderKind) => ExperimentProvider;
+  private explanationTransportOverride?: ExplanationTransport;
+  private explanationInFlight = new Set<string>();
 
   constructor(options: ServerOptions = {}) {
     this.runsDir = options.runsDir || 'runs';
@@ -107,6 +116,7 @@ export class ChaosPilotServer {
     this.distDir = options.distDir || path.resolve(process.cwd(), 'dist');
     this.runnerOverride = options.investigationRunner;
     this.providerFactoryOverride = options.providerFactory;
+    this.explanationTransportOverride = options.explanationTransport;
   }
 
   public getActiveInvestigation(): ActiveInvestigationState | null {
@@ -916,6 +926,75 @@ export class ChaosPilotServer {
           return;
         }
 
+        // Finding explanation report: status / generate / retrieve (exact saved run only)
+        const reportMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/explanation-report$/);
+        const reportStatusMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/explanation-report\/status$/);
+        if ((method === 'GET' && (reportStatusMatch || reportMatch)) || (method === 'POST' && reportMatch)) {
+          const id = (reportStatusMatch ?? reportMatch)![1]!;
+          if (!validateRunId(id)) { this.sendJson(res, 400, { error: 'Invalid run ID' }); return; }
+          const record = await getRun(id, this.runsDir);
+          if (!record) { this.sendJson(res, 404, { error: 'Run not found. A saved report is never served for a deleted or missing run.' }); return; }
+          const saved = await getFindingReport(id, this.runsDir);
+          const refreshed = await getRun(id, this.runsDir);
+          if (!refreshed) { this.sendJson(res, 404, { error: 'Run no longer exists.' }); return; }
+          const current = buildRunEvidence(refreshed);
+          const stale = Boolean(saved && saved.meta.evidenceHash !== current.evidenceHash);
+          if (method === 'GET' && reportStatusMatch) {
+            this.sendJson(res, 200, { exists: Boolean(saved), stale, inFlight: this.explanationInFlight.has(id), terminal: refreshed.status !== 'running', status: refreshed.status, findingsCount: refreshed.findings.length, ...(saved ? { generatedAt: saved.meta.generatedAt, mode: saved.meta.mode, model: saved.meta.model, evidenceHash: saved.meta.evidenceHash } : {}), runId: id, currentEvidenceHash: current.evidenceHash });
+            return;
+          }
+          if (method === 'GET' && reportMatch) {
+            if (!saved) { this.sendJson(res, 404, { error: 'No saved findings report for this run yet.' }); return; }
+            if (stale) { this.sendJson(res, 409, { error: 'Saved report is stale: the run evidence has changed since it was generated. Create a new report; stale evidence is not presented as current.' }); return; }
+            const download = url.searchParams.get('download') === '1';
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(saved.html), 'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff', ...(download ? { 'Content-Disposition': `attachment; filename="${findingReportFilename(id)}"` } : { 'Content-Disposition': `inline; filename="${findingReportFilename(id)}"` }) });
+            res.end(saved.html);
+            return;
+          }
+          // POST generate
+          if (record.status === 'running' || (this.activeInvestigation?.id === id)) { this.sendJson(res, 409, { error: 'Run is still running and has not been saved as a terminal run. Wait for it to finish before creating a report.' }); return; }
+          if (!record.findings.length) { this.sendJson(res, 400, { error: 'This run has no recorded findings, so no findings report can be created. No finding was fabricated.' }); return; }
+          if (this.explanationInFlight.has(id)) { this.sendJson(res, 409, { error: 'A findings report is already being generated for this run.' }); return; }
+          const ct = req.headers['content-type'] || '';
+          if (!ct.toLowerCase().includes('application/json')) { this.sendJson(res, 415, { error: 'Content-Type must be application/json' }); return; }
+          const { data, error, status } = await this.readJsonBody(req);
+          if (error) { this.sendJson(res, status || 400, { error }); return; }
+          const mode = ((data ?? {}) as Record<string, unknown>).mode;
+          if (mode !== 'meta' && mode !== 'offline') { this.sendJson(res, 400, { error: 'mode must be "meta" (calls Muse via the Meta API and incurs usage) or "offline" (scripted, no model call).' }); return; }
+          // Body consumption yields: claim again after it, before any model call.
+          if (this.explanationInFlight.has(id)) { this.sendJson(res, 409, { error: 'A findings report is already being generated for this run.' }); return; }
+          this.explanationInFlight.add(id);
+          const controller = new AbortController();
+          const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Report request disconnected', 'AbortError')); };
+          res.once?.('close', disconnected);
+          try {
+            await withFindingReportGeneration(id, this.runsDir, async () => {
+              // Source may have changed while the request body or generation lease was read.
+              const source = await getRun(id, this.runsDir);
+              if (!source || source.status === 'running' || !source.findings.length || buildRunEvidence(source).evidenceHash !== current.evidenceHash) throw new Error('Run was deleted or run evidence changed. Reload the saved run before creating a report.');
+              let transport: ExplanationTransport | undefined;
+              if (mode === 'meta') {
+                transport = this.explanationTransportOverride ?? metaExplanationTransport();
+              }
+              const generatedAt = new Date().toISOString();
+              const generated = await generateReport(source, { mode: mode as ExplanationMode, transport, signal: controller.signal, generatedAt });
+              // Recheck exact run/evidence before saving; protects existing report on failure/staleness.
+              const again = await getRun(id, this.runsDir);
+              if (!again) { this.sendJson(res, 409, { error: 'Run was deleted while the report was generating. No report was saved.' }); return; }
+              if (buildRunEvidence(again).evidenceHash !== current.evidenceHash) { this.sendJson(res, 409, { error: 'Run evidence changed while the report was generating. No report was saved; create it again from the current evidence.' }); return; }
+              const meta = { runId: id, evidenceHash: generated.evidence.evidenceHash, generatedAt, mode: mode as ExplanationMode, model: generated.model, findingIds: generated.evidence.findings.map(f => f.findingId) };
+              controller.signal.throwIfAborted();
+              await saveFindingReport(id, generated.html, meta, this.runsDir, controller.signal);
+              this.sendJson(res, 201, { ...meta, findingsCount: meta.findingIds.length, usage: generated.usage ?? null });
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const statusCode = /already being generated|deleted|evidence changed/.test(msg) ? 409 : /Missing MODEL_API_KEY/.test(msg) ? 503 : /exceeds maximum|oversize/.test(msg) ? 413 : 422;
+            this.sendJson(res, statusCode, { error: msg });
+          } finally { res.off?.('close', disconnected); this.explanationInFlight.delete(id); }
+          return;
+        }
+
         // DELETE /api/runs/:id - Delete run
         if (method === 'DELETE' && runMatch && runMatch[1]) {
           const id = runMatch[1];
@@ -923,6 +1002,7 @@ export class ChaosPilotServer {
             this.sendJson(res, 400, { error: 'Invalid run ID' });
             return;
           }
+          if (this.explanationInFlight.has(id)) { this.sendJson(res, 409, { error: 'A findings report is being generated for this run. Wait for it to finish before deleting the run.' }); return; }
           const deleted = await deleteRun(id, this.runsDir);
           if (!deleted) {
             this.sendJson(res, 404, { error: 'Run not found' });

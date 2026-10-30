@@ -58,7 +58,7 @@ export class MetaProvider implements ExperimentProvider {
       throw new Error(`Unsupported model: ${this.model}. Supported models: ${Object.keys(MODEL_PRICING).join(', ')}`);
     }
 
-    this.apiKey = options.apiKey || process.env['MODEL_API_KEY'];
+    this.apiKey = options.apiKey ?? process.env['MODEL_API_KEY'];
     this.baseUrl = (options.baseUrl || 'https://api.meta.ai/v1').replace(/\/+$/, '');
     this.reasoningEffort = options.reasoningEffort ?? process.env['META_REASONING_EFFORT'] ?? 'low';
     if (!['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(this.reasoningEffort)) {
@@ -138,19 +138,21 @@ export class MetaProvider implements ExperimentProvider {
     return buildInvestigationPrompt(context);
   }
 
+  private serializeChat(systemMessage: string, userMessage: string) {
+    const system = this.sanitize(systemMessage);
+    const user = this.sanitize(userMessage);
+    const serializedPayload = canonicalJson({
+      model: this.model,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      max_tokens: this.maxOutputTokens, reasoning_effort: this.reasoningEffort,
+      temperature: 0.2, response_format: { type: 'json_object' }
+    });
+    return { systemMessage: system, userMessage: user, serializedPayload, promptBytes: Buffer.byteLength(serializedPayload, 'utf-8') };
+  }
+
   /** Pure preparation shared by preflight and propose: no ledger access or network I/O. */
   public prepareRequest(context: ProviderContext) {
-    const serialize = (prompt: { systemMessage: string; userMessage: string }) => {
-      const systemMessage = this.sanitize(prompt.systemMessage);
-      const userMessage = this.sanitize(prompt.userMessage);
-      const serializedPayload = canonicalJson({
-        model: this.model,
-        messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: userMessage }],
-        max_tokens: this.maxOutputTokens, reasoning_effort: this.reasoningEffort,
-        temperature: 0.2, response_format: { type: 'json_object' }
-      });
-      return { systemMessage, userMessage, serializedPayload, promptBytes: Buffer.byteLength(serializedPayload, 'utf-8') };
-    };
+    const serialize = (prompt: { systemMessage: string; userMessage: string }) => this.serializeChat(prompt.systemMessage, prompt.userMessage);
     let prepared = serialize(this.serializePrompt(context));
     let historyCompaction: ProviderRequestAudit['historyCompaction'];
     // Keep the original prompt when it fits. Otherwise summarize, then drop oldest
@@ -162,42 +164,16 @@ export class MetaProvider implements ExperimentProvider {
     return { ...prepared, historyCompaction, maxPromptBytes: this.maxPromptBytes, maxOutputTokens: this.maxOutputTokens };
   }
 
-  public async propose(
-    context: ProviderContext,
+  /** One accounting and deadline boundary for investigation and explanation requests. */
+  private async sendChat(
+    args: { serializedPayload: string; requestAudit: ProviderRequestAudit },
     signal?: AbortSignal,
     onRequestAudit?: RequestAuditCallback
-  ): Promise<ProviderReply> {
-    // 1. Pre-aborted check
-    if (signal?.aborted) {
-      throw this.auditedError(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'), false);
-    }
-
-    // 2. Missing API key check (refuse before any reservation or request)
-    if (!this.apiKey || this.apiKey.trim().length === 0) {
-      throw this.auditedError(new Error('Missing MODEL_API_KEY environment variable. Application limits do not control whole Meta account.'), false);
-    }
-
-    // 3. Serialize and validate prompt bounds
-    const { systemMessage, userMessage, serializedPayload, promptBytes, historyCompaction } = this.prepareRequest(context);
-
-    if (promptBytes > this.maxPromptBytes) {
-      throw this.auditedError(new Error(`Prompt size (${promptBytes} bytes) exceeds maximum allowed size (${this.maxPromptBytes} bytes), even after available history compaction. Shorten the system brief or select a smaller source bundle, or explicitly raise CHAOSPILOT_MAX_PROMPT_BYTES within your budget. No request was sent.`), false);
-    }
-
-    const promptHash = computePromptHash(systemMessage, userMessage);
-    const requestHash = crypto.createHash('sha256').update(serializedPayload, 'utf-8').digest('hex');
-
-    const requestAudit: ProviderRequestAudit = {
-      promptVersion: getPromptIdentity(context.systemBrief?.brief.adapterId).promptVersion,
-      promptTemplateHash: getPromptIdentity(context.systemBrief?.brief.adapterId).promptTemplateHash,
-      promptHash,
-      requestHash,
-      systemMessage,
-      userMessage,
-      configuration: this.configuration,
-      ...(historyCompaction ? { historyCompaction } : {})
-    };
-
+  ): Promise<{
+    content: string | undefined; hasChoice: boolean; contentIsText: boolean;
+    finishReason: string | undefined; usage: Usage; responseAudit: ProviderResponseAudit;
+  }> {
+    const { serializedPayload, requestAudit } = args;
     let reservationId: string | undefined;
     let requestSent = false;
     let timeoutTimer: NodeJS.Timeout | undefined;
@@ -268,6 +244,8 @@ export class MetaProvider implements ExperimentProvider {
 
         // Keep deadline active through complete body consumption and JSON parsing
         responseData = await response.json() as typeof responseData;
+        // Fetch implementations may return late despite cancellation. Keep known usage,
+        // but never consume the resulting narration/proposal after cancellation.
         const visible = responseData?.choices?.[0];
         const visibleContent = typeof visible?.message?.content === 'string' ? this.sanitize(visible.message.content) : undefined;
         responseAudit = {
@@ -320,59 +298,15 @@ export class MetaProvider implements ExperimentProvider {
       reservationId = undefined;
 
       const choice = responseData?.choices?.[0];
-      const finishReason = choice?.finish_reason;
       const rawContent = choice?.message?.content;
-      const sanitizedContent = typeof rawContent === 'string' ? this.sanitize(rawContent) : rawContent;
-
-      let experiment: Experiment | null = null;
-      let validationError: string | undefined;
-      let summary = '';
-
-      if (!choice) {
-        validationError = 'Model response did not include a completion choice';
-        summary = 'Missing completion choice';
-      } else if (finishReason === 'length') {
-        validationError = 'Model response was truncated due to max_tokens limit';
-        summary = 'Model response truncated by token limit';
-      } else if (rawContent !== undefined && rawContent !== null && typeof rawContent !== 'string') {
-        validationError = 'Model response content must be text containing a JSON object';
-        summary = 'Unexpected response content type';
-      } else if (sanitizedContent === undefined || sanitizedContent === null || (typeof sanitizedContent === 'string' && sanitizedContent.trim() === '')) {
-        if (finishReason === 'stop') {
-          // Intentional stop with no experiment
-          summary = 'Model completed proposals with empty response';
-        } else {
-          validationError = 'Model returned empty response content without intentional stop';
-          summary = 'Empty model response';
-        }
-      } else {
-        try {
-          const parsed = typeof sanitizedContent === 'string' ? JSON.parse(sanitizedContent) : sanitizedContent;
-          if (parsed && typeof parsed === 'object' && parsed.done === true && typeof parsed.summary === 'string') {
-            summary = this.sanitize(parsed.summary);
-          } else if (parsed && typeof parsed === 'object' && typeof parsed.hypothesis === 'string' && Array.isArray(parsed.steps)) {
-            experiment = parsed;
-            summary = this.sanitize(parsed.hypothesis);
-          } else {
-            validationError = 'Model response did not match Experiment structure: missing hypothesis string or steps array';
-            summary = 'Malformed experiment structure';
-          }
-        } catch (parseErr) {
-          validationError = `Failed to parse JSON content from model response: ${parseErr instanceof Error ? this.sanitize(parseErr.message) : String(parseErr)}`;
-          summary = 'Malformed JSON in model response';
-        }
-      }
-
-      responseAudit.validationError = validationError ? this.sanitize(validationError) : undefined;
-
+      if (combinedSignal?.aborted) throw combinedSignal.reason;
       return {
-        experiment,
+        content: typeof rawContent === 'string' ? this.sanitize(rawContent) : undefined,
+        hasChoice: Boolean(choice),
+        contentIsText: typeof rawContent === 'string' || rawContent == null,
+        finishReason: choice?.finish_reason,
         usage,
-        summary: this.sanitize(summary),
-        validationError: validationError ? this.sanitize(validationError) : undefined,
-        requestAudit,
-        responseAudit,
-        requestSent: true
+        responseAudit
       };
     } catch (err: unknown) {
       if (timeoutTimer) {
@@ -396,5 +330,116 @@ export class MetaProvider implements ExperimentProvider {
       }
       throw this.auditedError(failure, requestSent, requestAudit, responseAudit, knownUsage);
     }
+  }
+
+  /** Synthesis uses the same transport, limits and ledger as investigation proposals. */
+  public async completeText(systemMessage: string, userMessage: string, signal?: AbortSignal): Promise<{
+    content: string; usage: Usage; finishReason?: string; model: string;
+  }> {
+    if (signal?.aborted) throw this.auditedError(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'), false);
+    if (!this.apiKey?.trim()) throw this.auditedError(new Error('Missing MODEL_API_KEY environment variable. Application limits do not control whole Meta account.'), false);
+    const { systemMessage: sys, userMessage: usr, serializedPayload, promptBytes } = this.serializeChat(systemMessage, userMessage);
+    if (promptBytes > this.maxPromptBytes) throw this.auditedError(new Error(`Prompt size (${promptBytes} bytes) exceeds maximum allowed size (${this.maxPromptBytes} bytes). No request was sent. Raise CHAOSPILOT_MAX_PROMPT_BYTES only within your budget; no evidence is dropped.`), false);
+    const requestAudit: ProviderRequestAudit = {
+      promptVersion: 'finding-explanation-1',
+      promptTemplateHash: crypto.createHash('sha256').update(sys, 'utf8').digest('hex'),
+      promptHash: computePromptHash(sys, usr),
+      requestHash: crypto.createHash('sha256').update(serializedPayload, 'utf8').digest('hex'),
+      systemMessage: sys, userMessage: usr, configuration: this.configuration
+    };
+    const sent = await this.sendChat({ serializedPayload, requestAudit }, signal);
+    if (sent.finishReason !== 'stop') throw this.auditedError(new Error('Model response was truncated or did not finish normally; saved report was not changed'), true, requestAudit, sent.responseAudit, sent.usage);
+    if (!sent.content?.trim()) throw this.auditedError(new Error('Model returned empty response content'), true, requestAudit, sent.responseAudit, sent.usage);
+    return { content: sent.content, usage: sent.usage, finishReason: sent.finishReason, model: this.model };
+  }
+
+  public async propose(
+    context: ProviderContext,
+    signal?: AbortSignal,
+    onRequestAudit?: RequestAuditCallback
+  ): Promise<ProviderReply> {
+    // 1. Pre-aborted check
+    if (signal?.aborted) {
+      throw this.auditedError(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'), false);
+    }
+
+    // 2. Missing API key check (refuse before any reservation or request)
+    if (!this.apiKey || this.apiKey.trim().length === 0) {
+      throw this.auditedError(new Error('Missing MODEL_API_KEY environment variable. Application limits do not control whole Meta account.'), false);
+    }
+
+    // 3. Serialize and validate prompt bounds
+    const { systemMessage, userMessage, serializedPayload, promptBytes, historyCompaction } = this.prepareRequest(context);
+
+    if (promptBytes > this.maxPromptBytes) {
+      throw this.auditedError(new Error(`Prompt size (${promptBytes} bytes) exceeds maximum allowed size (${this.maxPromptBytes} bytes), even after available history compaction. Shorten the system brief or select a smaller source bundle, or explicitly raise CHAOSPILOT_MAX_PROMPT_BYTES within your budget. No request was sent.`), false);
+    }
+
+    const promptHash = computePromptHash(systemMessage, userMessage);
+    const requestHash = crypto.createHash('sha256').update(serializedPayload, 'utf-8').digest('hex');
+
+    const requestAudit: ProviderRequestAudit = {
+      promptVersion: getPromptIdentity(context.systemBrief?.brief.adapterId).promptVersion,
+      promptTemplateHash: getPromptIdentity(context.systemBrief?.brief.adapterId).promptTemplateHash,
+      promptHash,
+      requestHash,
+      systemMessage,
+      userMessage,
+      configuration: this.configuration,
+      ...(historyCompaction ? { historyCompaction } : {})
+    };
+
+    const sent = await this.sendChat({ serializedPayload, requestAudit }, signal, onRequestAudit);
+    const { usage, responseAudit, finishReason, content: sanitizedContent } = sent;
+    let experiment: Experiment | null = null;
+    let validationError: string | undefined;
+    let summary = '';
+
+    if (!sent.hasChoice) {
+      validationError = 'Model response did not include a completion choice';
+      summary = 'Missing completion choice';
+    } else if (finishReason === 'length') {
+      validationError = 'Model response was truncated due to max_tokens limit';
+      summary = 'Model response truncated by token limit';
+    } else if (!sent.contentIsText) {
+      validationError = 'Model response content must be text containing a JSON object';
+      summary = 'Unexpected response content type';
+    } else if (sanitizedContent === undefined || sanitizedContent === null || (typeof sanitizedContent === 'string' && sanitizedContent.trim() === '')) {
+      if (finishReason === 'stop') {
+        // Intentional stop with no experiment
+        summary = 'Model completed proposals with empty response';
+      } else {
+        validationError = 'Model returned empty response content without intentional stop';
+        summary = 'Empty model response';
+      }
+    } else {
+      try {
+        const parsed = typeof sanitizedContent === 'string' ? JSON.parse(sanitizedContent) : sanitizedContent;
+        if (parsed && typeof parsed === 'object' && parsed.done === true && typeof parsed.summary === 'string') {
+          summary = this.sanitize(parsed.summary);
+        } else if (parsed && typeof parsed === 'object' && typeof parsed.hypothesis === 'string' && Array.isArray(parsed.steps)) {
+          experiment = parsed;
+          summary = this.sanitize(parsed.hypothesis);
+        } else {
+          validationError = 'Model response did not match Experiment structure: missing hypothesis string or steps array';
+          summary = 'Malformed experiment structure';
+        }
+      } catch (parseErr) {
+        validationError = `Failed to parse JSON content from model response: ${parseErr instanceof Error ? this.sanitize(parseErr.message) : String(parseErr)}`;
+        summary = 'Malformed JSON in model response';
+      }
+    }
+
+    responseAudit.validationError = validationError ? this.sanitize(validationError) : undefined;
+
+    return {
+      experiment,
+      usage,
+      summary: this.sanitize(summary),
+      validationError: validationError ? this.sanitize(validationError) : undefined,
+      requestAudit,
+      responseAudit,
+      requestSent: true
+    };
   }
 }
