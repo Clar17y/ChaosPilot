@@ -1613,9 +1613,7 @@ textarea.form-input { min-height: 96px; resize: vertical; line-height: 1.6; }
 
 .repro-provenance-items span { min-width: 0; overflow-wrap: anywhere; }
 
-.repro-body {
-  display: block;
-}
+.repro-body{display:block}
 
 .repro-source {
   font-size: 13px;
