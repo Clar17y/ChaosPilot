@@ -433,18 +433,30 @@ export function stepFacts(entry: TraceEntry): string[] {
   return facts;
 }
 
-/** Build steps for any trace/violation set; used for original and fresh rerun traces. */
-export function buildTraceSteps(trace: TraceEntry[], violations: Violation[]): { steps: PlaybackStep[]; unattributedViolations: Violation[] } {
+export interface ViolationAttribution {
+  byPosition: Map<number, Violation[]>;
+  unattributed: Violation[];
+}
+
+/** Unique-match attribution shared by trace steps and the stage projection:
+ * a violation is pinned only when exactly one entry matches it. */
+export function attributeViolations(trace: TraceEntry[], violations: Violation[]): ViolationAttribution {
   const attributed = new Set<Violation>();
-  const byPos = new Map<number, Violation[]>();
+  const byPosition = new Map<number, Violation[]>();
   for (const violation of violations ?? []) {
     const matches: number[] = [];
-    trace.forEach((entry, position) => { if (violationMatchesEntry(violation, entry)) matches.push(position); });
+    (trace ?? []).forEach((entry, position) => { if (violationMatchesEntry(violation, entry)) matches.push(position); });
     if (matches.length !== 1) continue;
     const position = matches[0]!;
-    byPos.set(position, [...(byPos.get(position) ?? []), violation]);
+    byPosition.set(position, [...(byPosition.get(position) ?? []), violation]);
     attributed.add(violation);
   }
+  return { byPosition, unattributed: (violations ?? []).filter(v => !attributed.has(v)) };
+}
+
+/** Build steps for any trace/violation set; used for original and fresh rerun traces. */
+export function buildTraceSteps(trace: TraceEntry[], violations: Violation[]): { steps: PlaybackStep[]; unattributedViolations: Violation[] } {
+  const { byPosition: byPos, unattributed: unattributedViolations } = attributeViolations(trace, violations);
   const steps: PlaybackStep[] = trace.map((entry, position) => {
     const kind = classifyStep(entry);
     const credit = creditFromState(entry.state);
@@ -460,7 +472,7 @@ export function buildTraceSteps(trace: TraceEntry[], violations: Violation[]): {
       payloadType: typeof p?.type === 'string' ? p.type : null,
     };
   });
-  return { steps, unattributedViolations: (violations ?? []).filter(v => !attributed.has(v)) };
+  return { steps, unattributedViolations };
 }
 
 /** Group only consecutive scheduled/other entries with no violation; processed/rejected/violation entries stay individual. */
@@ -573,44 +585,7 @@ export function buildReproductionModel(
   const result = expRec.result;
   const violations = result.violations ?? [];
   const trace = result.trace ?? [];
-  const attributed = new Set<Violation>();
-  const violationsByPosition = new Map<number, Violation[]>();
-  for (const violation of violations) {
-    const matches: number[] = [];
-    trace.forEach((entry, position) => {
-      if (violationMatchesEntry(violation, entry)) matches.push(position);
-    });
-    if (matches.length !== 1) continue;
-    const position = matches[0]!;
-    violationsByPosition.set(position, [...(violationsByPosition.get(position) ?? []), violation]);
-    attributed.add(violation);
-  }
-  const steps: PlaybackStep[] = trace.map((entry, position) => {
-    const kind = classifyStep(entry);
-    const credit = creditFromState(entry.state);
-    const here = violationsByPosition.get(position) ?? [];
-    return {
-      position,
-      tracePosition: position,
-      actionIndex: entry.step,
-      time: entry.time,
-      action: entry.action,
-      kind,
-      kindLabel: KIND_LABEL[kind],
-      outcome: entry.outcome ?? '',
-      payloadText: entry.payload !== undefined ? safeText(entry.payload) : (entry.messageId ?? 'not recorded'),
-      messageId: entry.messageId ?? null,
-      title: stepTitle(entry, credit),
-      detail: stepDetail(kind),
-      credit,
-      stateText: entry.state !== undefined && entry.state !== null ? safeText(entry.state) : 'not recorded',
-      violations: here,
-      isViolation: here.length > 0,
-      facts: stepFacts(entry),
-      payloadType: typeof payloadRecord(entry)?.type === 'string' ? (payloadRecord(entry)!.type as string) : null,
-    };
-  });
-  const unattributedViolations = violations.filter(v => !attributed.has(v));
+  const { steps, unattributedViolations } = buildTraceSteps(trace, violations);
   const story = unattributedViolations.length ? null : creditAdmissionStory(trace, steps, result.valid, finding);
   const grouped = story ? null : groupUnimportantSteps(steps);
   const playbackSteps = story ?? grouped ?? steps;
@@ -711,6 +686,7 @@ export class PlaybackController {
   position = -1;
   playing = false;
   private timer: unknown = null;
+  private generation = 0;
   constructor(
     private count: number,
     private onChange: () => void = () => {},
@@ -758,16 +734,22 @@ export class PlaybackController {
     if (this.count === 0 || this.playing) return;
     if (this.atEnd) this.position = -1;
     this.playing = true;
+    const gen = ++this.generation;
     this.timer = this.timers.set(() => {
+      // A callback queued before pause/seek/reset/switch must be inert.
+      if (!this.playing || gen !== this.generation) return;
       this.next();
       if (this.atEnd) this.pause();
     }, this.intervalMs);
     this.onChange();
   }
   pause(): void {
+    this.generation++;
     this.playing = false;
     if (this.timer !== null) { this.timers.clear(this.timer); this.timer = null; }
   }
+  handleHidden(): void { if (this.playing) this.pause(); }
+  handleReducedMotion(matches: boolean): void { if (matches) this.pause(); }
   /** Pause without notifying; used when the owning selection/view goes away. */
   stop(): void { this.pause(); }
   dispose(): void { this.pause(); }

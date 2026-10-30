@@ -341,73 +341,96 @@
               <div class="metric-box"><span class="metric-label">Confirmed Findings</span><span id="metric-findings" class="metric-value highlight">0</span></div>
               <div class="metric-box"><span class="metric-label">Reported Tokens / Estimated Cost</span><span id="metric-usage" class="metric-value">0 in / 0 out ($0.00)</span></div>
             </div>
+            <section class="live-activity" id="live-activity" role="status" aria-label="Investigation activity"><span class="live-activity-dot" id="live-activity-dot" aria-hidden="true"></span><strong id="live-activity-label">No active investigation</strong> <span id="live-activity-detail"></span></section>
             <section class="card reproduction-card" id="reproduction-player" aria-labelledby="repro-title">
               <div class="repro-head">
                 <div>
-                  <p class="eyebrow" id="repro-eyebrow">Recorded evidence · recorded playback only</p>
-                  <h2 id="repro-title" tabindex="-1">Reproduction timeline</h2>
-                  <p class="muted" id="repro-description">Step through the recorded trace from this investigation to see how the issue unfolded. Playing recorded steps does not execute the target or contact a model.</p>
+                  <p class="eyebrow" id="repro-eyebrow">Recorded evidence</p>
+                  <h2 id="repro-title" tabindex="-1">Visual replay</h2>
+                  <p class="repro-source" id="repro-source-indicator" role="status">Original recording</p>
                 </div>
                 <div class="repro-rerun">
                   <button type="button" class="btn btn-primary" id="btn-repro-rerun">Rerun this experiment</button>
                   <p id="repro-fresh-status" class="input-hint" role="status"></p>
                 </div>
               </div>
-              <details class="repro-provenance" id="repro-provenance">
-                <summary>Run and source provenance</summary>
-                <div class="repro-provenance-items" id="repro-provenance-items"></div>
-              </details>
-              <section id="repro-evidence" class="repro-evidence" aria-label="Evidence summary">
-                <h3 id="repro-evidence-heading">Original finding summary (historical)</h3>
-                <div id="repro-evidence-body"></div>
-              </section>
               <div class="repro-view-controls" role="group" aria-label="Trace view controls">
                 <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-toggle-trace" aria-expanded="false">Show complete original trace</button>
                 <span id="repro-trace-mode" class="input-hint" role="status"></span>
                 <span id="repro-rerun-controls" class="hidden">
                   <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-show-original">Show original recording</button>
                   <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-show-rerun">Show fresh rerun trace</button>
+                  <button type="button" class="btn btn-secondary btn-xs" id="btn-repro-report">Rerun details</button>
                 </span>
               </div>
               <p id="repro-invalid" class="note warn hidden"></p>
               <div id="repro-empty" class="empty-state">Select a finding or experiment to open its recorded reproduction.</div>
               <div id="repro-body" class="repro-body hidden">
-                <ol id="repro-timeline" class="repro-timeline" aria-label="Recorded steps"></ol>
                 <div class="repro-detail">
+                  <section class="repro-stage" id="repro-stage" aria-label="Recorded event, system and observed state">
+                    <svg class="repro-stage-track" viewBox="0 0 1000 22" preserveAspectRatio="none" role="img" aria-label="Packet path between the recorded event, system and observed state nodes"><line x1="167" y1="11" x2="833" y2="11" stroke="currentColor" stroke-width="2"/><circle id="repro-packet" cx="167" cy="11" r="7" opacity="0"/></svg>
+                    <div class="repro-stage-nodes">
+                      <div class="repro-stage-node"><span class="repro-stage-dot" aria-hidden="true"></span><small>Recorded event</small><span class="repro-stage-value" id="repro-stage-event">-</span></div>
+                      <div class="repro-stage-node"><span class="repro-stage-dot repro-stage-dot-system" aria-hidden="true"></span><small>System</small><span class="repro-stage-value" id="repro-stage-system">Recorded</span></div>
+                      <div class="repro-stage-node" id="repro-stage-change-node"><span class="repro-stage-dot repro-stage-dot-change" aria-hidden="true"></span><small>Observed state</small><span class="repro-stage-value" id="repro-stage-change">-</span><span class="repro-stage-marker" id="repro-stage-marker" role="status"></span></div>
+                    </div>
+                    <p class="repro-stage-banner" id="repro-stage-banner" role="status">No violation recorded</p>
+                    <div class="repro-stage-lens" id="repro-stage-lens" aria-label="Recorded evidence for this step"></div>
+                  </section>
                   <div class="repro-controls" role="group" aria-label="Recorded playback controls">
                     <button type="button" class="btn btn-secondary" id="btn-repro-prev">Previous step</button>
                     <button type="button" class="btn btn-primary" id="btn-repro-play" aria-pressed="false">Play recorded steps</button>
                     <button type="button" class="btn btn-secondary" id="btn-repro-next">Next step</button>
                     <button type="button" class="btn btn-secondary" id="btn-repro-reset">Reset</button>
+                    <button type="button" class="btn btn-secondary" id="btn-repro-jump">Jump to recorded finding</button>
+                    <label class="repro-scrubber-label">Step <input type="range" id="repro-scrubber" min="-1" max="-1" value="-1" step="1" aria-label="Scrub recorded steps" aria-valuetext="No recorded steps" disabled></label>
                   </div>
                   <p id="repro-step-count" class="repro-step-count" aria-live="polite"></p>
-                  <h3 id="repro-step-title">Before the first recorded step</h3>
-                  <p id="repro-step-kind" class="muted"></p>
-                  <p id="repro-step-detail"></p>
-                  <div class="repro-compare">
-                    <div id="repro-expected" class="repro-expected hidden"><h4 id="repro-expected-label"></h4><p id="repro-expected-text"></p></div>
-                    <div id="repro-observed" class="repro-observed"><h4>Observed behaviour (from recorded trace)</h4><p id="repro-observed-text"></p></div>
-                  </div>
-                  <div id="repro-generic-facts-wrap">
-                    <h4>Recorded facts for this entry</h4>
-                    <ul id="repro-generic-facts"></ul>
-                  </div>
-                  <div id="repro-credit-wrap">
-                  <h4>Credit exposure after this step (recorded state)</h4>
-                  <div id="repro-credit" class="repro-credit"></div>
-                  <div id="repro-exposure-bar" class="repro-bar hidden" aria-hidden="true"><span id="repro-bar-used"></span><span id="repro-bar-reserved"></span></div>
-                  <p id="repro-exposure-legend" class="muted"></p>
-                  </div>
-                  <details class="contract-details"><summary>Recorded action, payload and state for this entry</summary>
-                    <p><strong>Action:</strong> <span id="repro-action"></span></p>
-                    <p><strong>Outcome:</strong> <span id="repro-outcome"></span></p>
-                    <h4>Payload</h4><pre id="repro-payload" class="code-block"></pre>
-                    <h4>Recorded state</h4><pre id="repro-state" class="code-block"></pre>
+                  <details class="repro-step-details" id="repro-step-details">
+                    <summary>Step details</summary>
+                    <h3 id="repro-step-title">Before the first recorded step</h3>
+                    <p id="repro-step-kind" class="muted"></p>
+                    <p id="repro-step-detail"></p>
+                    <p class="input-hint">A finding is detected at the recorded entry where its check failed; detection is not by itself proof that entry caused it. Colour is used only for recorded violations, always with text; accepted, duplicate or rejected outcomes alone stay neutral.</p>
+                    <div class="repro-compare">
+                      <div id="repro-expected" class="repro-expected hidden"><h4 id="repro-expected-label"></h4><p id="repro-expected-text"></p></div>
+                      <div id="repro-observed" class="repro-observed"><h4>Observed behaviour (from recorded trace)</h4><p id="repro-observed-text"></p></div>
+                    </div>
+                    <div id="repro-generic-facts-wrap">
+                      <h4>Recorded facts for this entry</h4>
+                      <ul id="repro-generic-facts"></ul>
+                    </div>
+                    <div id="repro-credit-wrap">
+                      <h4>Credit exposure after this step (recorded state)</h4>
+                      <div id="repro-credit" class="repro-credit"></div>
+                      <div id="repro-exposure-bar" class="repro-bar hidden" aria-hidden="true"><span id="repro-bar-used"></span><span id="repro-bar-reserved"></span></div>
+                      <p id="repro-exposure-legend" class="muted"></p>
+                    </div>
+                    <details class="contract-details"><summary>Recorded action, payload and state for this entry</summary>
+                      <p><strong>Action:</strong> <span id="repro-action"></span></p>
+                      <p><strong>Outcome:</strong> <span id="repro-outcome"></span></p>
+                      <h4>Payload</h4><pre id="repro-payload" class="code-block"></pre>
+                      <h4>Recorded state</h4><pre id="repro-state" class="code-block"></pre>
+                    </details>
+                    <p id="repro-unattributed" class="note warn hidden"></p>
                   </details>
-                  <p id="repro-unattributed" class="note warn hidden"></p>
-                  <p class="input-hint">Playback is distinct from real execution. Colour is used only for rule compliance or violation, always with text; acceptance, duplication or rejection by itself is shown neutrally.</p>
+                  <details class="repro-timeline-details" id="repro-timeline-details">
+                    <summary>Recorded steps</summary>
+                    <ol id="repro-timeline" class="repro-timeline" aria-label="Recorded steps"></ol>
+                  </details>
                 </div>
               </div>
+              <details class="repro-evidence-wrap" id="repro-evidence-wrap">
+                <summary>Finding summary</summary>
+                <section id="repro-evidence" class="repro-evidence" aria-label="Evidence summary">
+                  <h3 id="repro-evidence-heading">Original finding summary (historical)</h3>
+                  <div id="repro-evidence-body"></div>
+                </section>
+              </details>
+              <details class="repro-provenance" id="repro-provenance">
+                <summary>Run and source provenance</summary>
+                <div class="repro-provenance-items" id="repro-provenance-items"></div>
+              </details>
             </section>
             <div class="tabs-container">
               <div class="tabs-nav" role="tablist" aria-label="Run detail">
@@ -467,14 +490,28 @@
             </div>
           </header>
           <section class="card">
-            <h2>Saved runs with findings</h2>
-            <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
-          </section>
-          <section class="card">
             <h2>Findings in the currently opened run</h2>
             <p class="muted">Open a run from Investigations to inspect its findings, replay and clean comparison in detail.</p>
             <div id="findings-opened-summary"><p class="muted">No run is currently opened.</p></div>
           </section>
+          <section class="card" id="explanation-report-panel" aria-labelledby="explanation-report-title">
+            <h2 id="explanation-report-title">Saved findings report (HTML)</h2>
+            <p>Creates a polished, self-contained HTML report for the <strong>currently opened, saved terminal run</strong>, covering every recorded finding: what was tested and why, the recorded action sequence, expected vs observed, and the recorded replay / clean-control status.</p>
+            <p class="note"><strong>Model disclosure:</strong> “Create report with Muse” calls Muse through the Meta API and <strong>incurs usage charged to the shared budget</strong>. “Offline scripted report” calls no model, incurs no usage, and is explicitly not Muse. Viewing or downloading an already-saved report makes no model call.</p>
+            <div class="row">
+              <button id="btn-report-meta" class="btn btn-primary" type="button">Create report with Muse (Meta API — incurs usage)</button>
+              <button id="btn-report-offline" class="btn btn-secondary" type="button">Create offline scripted report (no model call)</button>
+              <button id="btn-report-refresh" class="btn btn-secondary" type="button">Refresh report status</button>
+              <button id="btn-report-view" class="btn btn-secondary" type="button">View saved report</button>
+              <button id="btn-report-download" class="btn btn-secondary" type="button">Download saved report</button>
+            </div>
+            <p id="explanation-report-status" class="muted" role="status" aria-live="polite">No run is currently opened.</p>
+          </section>
+          <details class="card provenance-details">
+            <summary><h2 style="display:inline">Prior runs and verbose provenance</h2></summary>
+            <p class="muted">Earlier saved runs with findings. Identifiers are kept accessible here and in each run’s details, without crowding the opened run’s findings.</p>
+            <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
+          </details>
         </section>
 
       </main>
