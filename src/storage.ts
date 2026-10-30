@@ -10,6 +10,7 @@ import {
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as crypto from 'node:crypto';
+import { evidenceHashOf } from './explanations/index.ts';
 import { canonicalJson, compareSemanticReplay, computeContractHash, computeLegacyRawContractHash } from './evidence.ts';
 import { assertAdapterVariant, resolveAdapter } from './adapters/index.ts';
 import { resolveExperimentPositionForIndex } from './experiment-identity.ts';
@@ -226,18 +227,20 @@ export async function saveRun(record: InvestigationRecord, runsDir = 'runs'): Pr
     throw new Error(`Cannot save run: Invalid run ID "${record.id}"`);
   }
 
-  await fs.mkdir(runsDir, { recursive: true });
-  const finalPath = resolveRunPath(runsDir, record.id);
-  const tempPath = path.join(
-    runsDir,
-    `.tmp-${record.id}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.tmp`
-  );
+  return withRunMutation(record.id, runsDir, async () => {
+    await fs.mkdir(runsDir, { recursive: true });
+    const finalPath = resolveRunPath(runsDir, record.id);
+    const tempPath = path.join(
+      runsDir,
+      `.tmp-${record.id}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.tmp`
+    );
 
-  const serialized = JSON.stringify(record, null, 2);
-  await fs.writeFile(tempPath, serialized, 'utf8');
-  await fs.rename(tempPath, finalPath);
+    const serialized = JSON.stringify(record, null, 2);
+    await fs.writeFile(tempPath, serialized, 'utf8');
+    await fs.rename(tempPath, finalPath);
 
-  return finalPath;
+    return finalPath;
+  });
 }
 
 /**
@@ -339,15 +342,108 @@ export async function listRuns(runsDir = 'runs'): Promise<RunSummary[]> {
  */
 export async function deleteRun(id: string, runsDir = 'runs'): Promise<boolean> {
   if (!validateRunId(id)) return false;
-  try {
-    const filePath = resolveRunPath(runsDir, id);
-    await fs.unlink(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+  return withRunMutation(id, runsDir, async () => {
+    try {
+      const filePath = resolveRunPath(runsDir, id);
+      await fs.unlink(filePath);
+      await deleteFindingReport(id, runsDir).catch(() => false);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
+export interface FindingReportMeta {
+  runId: string;
+  evidenceHash: string;
+  generatedAt: string;
+  mode: 'meta' | 'offline';
+  model: string;
+  findingIds: string[];
+}
+
+function reportsDir(runsDir: string): string { return path.join(path.resolve(runsDir), 'reports'); }
+function resolveReportPath(runsDir: string, id: string): string {
+  if (!validateRunId(id)) throw new Error('Invalid run ID');
+  return path.join(reportsDir(runsDir), `${id}.html`);
+}
+export function findingReportFilename(id: string): string {
+  if (!validateRunId(id)) throw new Error('Invalid run ID');
+  return `chaospilot-findings-${id}.html`;
+}
+
+/** Cross-process mutation guard. Never break an existing lock or guess its owner died. */
+async function withRunMutation<T>(id: string, runsDir: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!validateRunId(id)) throw new Error('Invalid run ID');
+  signal?.throwIfAborted();
+  await fs.mkdir(runsDir, { recursive: true });
+  const lockPath = path.join(path.resolve(runsDir), `.${id}.mutation.lock`);
+  let handle: fs.FileHandle | undefined;
+  for (let attempt = 0; !handle; attempt++) {
+    signal?.throwIfAborted();
+    try { handle = await fs.open(lockPath, 'wx'); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (attempt >= 100) throw new Error('Run storage is busy. Retry after the current write finishes; if interrupted, inspect the run mutation lock.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }
+  try { signal?.throwIfAborted(); return await action(); }
+  finally { await handle.close(); await fs.unlink(lockPath); }
+}
+
+/** A generation lease prevents duplicate billable calls across server instances. */
+export async function withFindingReportGeneration<T>(id: string, runsDir: string, action: () => Promise<T>): Promise<T> {
+  if (!validateRunId(id)) throw new Error('Invalid run ID');
+  await fs.mkdir(reportsDir(runsDir), { recursive: true });
+  const lockPath = `${resolveReportPath(runsDir, id)}.generation.lock`;
+  let handle: fs.FileHandle;
+  try { handle = await fs.open(lockPath, 'wx'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('A findings report is already being generated for this run. Retry after it finishes; if interrupted, inspect the generation lock.');
+    throw error;
+  }
+  try { return await action(); }
+  finally { await handle.close(); await fs.unlink(lockPath); }
+}
+
+/** Metadata travels inside the same HTML artifact: a single rename publishes both. */
+export async function saveFindingReport(id: string, html: string, meta: FindingReportMeta, runsDir = 'runs', signal?: AbortSignal): Promise<void> {
+  if (!validateRunId(id) || meta.runId !== id) throw new Error('Invalid finding report identity');
+  await withRunMutation(id, runsDir, async () => {
+    const current = await getRun(id, runsDir);
+    signal?.throwIfAborted();
+    if (!current || current.status === 'running' || !current.findings.length || evidenceHashOf(current) !== meta.evidenceHash) {
+      throw new Error('Run was deleted or run evidence changed before publication. No report was saved. Create it again from the current saved run.');
+    }
+    await fs.mkdir(reportsDir(runsDir), { recursive: true });
+    const finalPath = resolveReportPath(runsDir, id);
+    const tempPath = `${finalPath}.tmp-${crypto.randomBytes(12).toString('hex')}`;
+    const metadata = Buffer.from(JSON.stringify(meta), 'utf8').toString('base64');
+    try {
+      await fs.writeFile(tempPath, `<!-- chaospilot-report:${metadata} -->\n${html}`, { encoding: 'utf8', flag: 'wx', signal });
+      signal?.throwIfAborted();
+      await fs.rename(tempPath, finalPath);
+    } finally { await fs.rm(tempPath, { force: true }); }
+  }, signal);
+}
+export async function getFindingReport(id: string, runsDir = 'runs'): Promise<{ html: string; meta: FindingReportMeta } | null> {
+  if (!validateRunId(id)) return null;
+  try {
+    const artifact = await fs.readFile(resolveReportPath(runsDir, id), 'utf8');
+    const match = /^<!-- chaospilot-report:([A-Za-z0-9+/=]+) -->\n/.exec(artifact);
+    if (!match) return null;
+    const meta = JSON.parse(Buffer.from(match[1]!, 'base64').toString('utf8')) as FindingReportMeta;
+    if (!meta || meta.runId !== id || typeof meta.evidenceHash !== 'string' || !Array.isArray(meta.findingIds)) return null;
+    return { html: artifact.slice(match[0].length), meta };
+  } catch { return null; }
+}
+export async function deleteFindingReport(id: string, runsDir = 'runs'): Promise<boolean> {
+  if (!validateRunId(id)) return false;
+  try { await fs.unlink(resolveReportPath(runsDir, id)); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
 
 
 /**

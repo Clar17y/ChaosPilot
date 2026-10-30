@@ -22,11 +22,13 @@ import {
   explainStep,
   fmtCredit,
   isCreditAdmissionViolation,
+  pinnedRuleText,
   PlaybackController,
   resolveExperimentPosition,
   type PlaybackStep,
   type ReproductionModel,
 } from './reproduction-player.ts';
+import { conciseFindingTitle, recordedDifferences } from './finding-story.ts';
 import {
   effectiveAdapterId,
   executableCheckCount,
@@ -52,6 +54,7 @@ import {
   type WorkspaceView,
 } from './workspace.ts';
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
+import { FindingExplanationSession, reportStatusToUi, reportStateText } from './finding-explanations.ts';
 import { activeUnattributedViolations, detailVisibility, evidenceHeading, liveActivity, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
 import { buildStageProjection, formatRecordedValue, visiblePositionForTracePosition, type StageFrame, type StageProjection } from './replay-stage.ts';
 import { StagePacketAnimator } from './stage-animation.ts';
@@ -119,6 +122,7 @@ let latestLiveRecord: InvestigationRecord | null = null;
 // Reproduction player state (recorded playback only; fresh replay is separate).
 // Run-scoped: see ReproductionSession for reset/preserve and late-result rules.
 const reproSession = new ReproductionSession();
+const reportSession = new FindingExplanationSession();
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
 let reproModel: ReproductionModel | null = null;
 let reproShowFull = false;
@@ -442,6 +446,7 @@ function renderWorkspaceSummaries(): void {
 }
 
 function renderFindingsView(): void {
+  if (reportSession.syncToEvidence(currentInvestigationRecord)) { void refreshReportStatus(); } else { renderReportPanel(); }
   const container = document.getElementById('findings-view-container');
   if (container) {
     container.textContent = '';
@@ -492,13 +497,84 @@ function renderFindingsView(): void {
       p.textContent = `Opened run ${rec.id} has no findings.`;
       opened.appendChild(p);
     } else {
-      const idp = document.createElement('p'); idp.className = 'muted'; idp.textContent = `Opened run ${rec.id} · system ${rec.systemBrief?.brief.id ?? 'unavailable'} · brief revision ${rec.systemBrief?.brief.revision ?? 'unavailable'}`; opened.appendChild(idp); for (const f of rec.findings) {
-        const p = document.createElement('p');
-        p.textContent = `${f.title}: ${f.violation.invariant} · observed category: ${findingCategoryLabel(f)} · replay ${f.reproduced ? 'verified' : 'not verified'} · clean comparison ${f.cleanControlPassed ? 'passed' : 'not passed'}`;
-        opened.appendChild(p);
+      const provenance = document.createElement('details');
+      const summary = document.createElement('summary'); summary.textContent = 'Opened run identity and provenance';
+      const ids = document.createElement('p'); ids.className = 'muted';
+      ids.textContent = `Run ${rec.id} · system ${rec.systemBrief?.brief.id ?? 'legacy / unavailable'} · brief revision ${rec.systemBrief?.brief.revision ?? 'unavailable'} · ${rec.provider}/${rec.mode} · ${rec.model} · source ${rec.sourceHash}`;
+      provenance.append(summary, ids); opened.appendChild(provenance);
+      for (const [index, f] of rec.findings.entries()) {
+        const card = document.createElement('article'); card.className = 'opened-finding';
+        const title = document.createElement('h3'); title.textContent = conciseFindingTitle(f);
+        const why = document.createElement('p'); why.textContent = `What was tested: ${f.hypothesis || 'No hypothesis was recorded.'}`;
+        const rule = pinnedRuleText(rec, f.violation?.invariant ?? null);
+        const expected = document.createElement('p'); expected.textContent = `Expected: ${rule.ruleText ?? rule.ruleLabel}`;
+        const observed = document.createElement('p'); observed.textContent = `Observed: ${f.violation?.message || 'No violation description was recorded.'}`;
+        const differences = recordedDifferences(f.violation);
+        const comparison = document.createElement('p');
+        comparison.textContent = differences.rows.slice(0, 2).map(row => `${row.label}: expected ${row.expected}, observed ${row.observed}`).join(' · ');
+        const status = document.createElement('p'); status.className = 'muted';
+        status.textContent = `Recorded reproduction: ${f.reproduced === true ? 'verified' : f.reproduced === false ? 'not verified' : 'unknown'} · Clean control: ${f.cleanControlPassed === true ? 'passed' : f.cleanControlPassed === false ? 'not passed' : 'unknown'}`;
+        const go = document.createElement('button'); go.type = 'button'; go.className = 'btn btn-secondary btn-xs'; go.textContent = 'Inspect recorded reproduction'; go.setAttribute('aria-label', `Go to reproduction for finding: ${f.title}`);
+        go.addEventListener('click', () => { showView('investigations'); openReproductionForFinding(f); });
+        const explain = document.createElement('button'); explain.type = 'button'; explain.className = 'btn btn-primary btn-xs'; explain.textContent = 'Explain this finding';
+        explain.setAttribute('aria-label', `Explain finding ${index + 1}: ${conciseFindingTitle(f)}`);
+        explain.addEventListener('click', () => {
+          if (reportSession.state.kind === 'saved') { openSavedReport(false, index + 1); return; }
+          document.getElementById('explanation-report-panel')?.scrollIntoView({ block: 'start' });
+          document.getElementById('btn-report-meta')?.focus();
+          announce('Choose how to create a report explaining every finding in this run.');
+        });
+        card.append(title, why, expected, observed);
+        if (comparison.textContent) card.appendChild(comparison);
+        card.append(status, explain, go); opened.appendChild(card);
       }
     }
   }
+}
+
+function renderReportPanel(): void {
+  const statusEl = document.getElementById('explanation-report-status');
+  const rec = currentInvestigationRecord;
+  const scope = rec ? inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()) : null;
+  const identity = rec ? `${rec.variant} · ${scope === 'legacy' ? 'Legacy / system unavailable' : rec.systemBrief?.brief.name ?? rec.systemBrief?.brief.id ?? 'system unavailable'}${scope === 'other' ? ' (another system)' : ''}` : '';
+  const canAct = Boolean(rec && rec.status !== 'running' && rec.findings.length && !['loading', 'unavailable'].includes(reportSession.state.kind));
+  for (const id of ['btn-report-meta', 'btn-report-offline']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = !canAct || reportSession.state.kind === 'generating'; }
+  const saved = reportSession.state.kind === 'saved';
+  for (const id of ['btn-report-view', 'btn-report-download']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = !saved; }
+  if (statusEl) statusEl.textContent = !rec ? 'No run is currently opened.' : `${identity}: ${reportStateText(reportSession.state)}`;
+  document.getElementById('explanation-report-panel')?.setAttribute('aria-busy', String(['loading', 'generating'].includes(reportSession.state.kind)));
+}
+async function refreshReportStatus(): Promise<void> {
+  const rec = currentInvestigationRecord;
+  if (!rec) { reportSession.resetForRun(null); renderReportPanel(); return; }
+  reportSession.syncToRun(rec.id);
+  if (rec.status === 'running') { reportSession.state = reportStatusToUi({ terminal: false, findingsCount: rec.findings.length }); renderReportPanel(); return; }
+  const token = reportSession.begin(rec.id, 'loading'); renderReportPanel();
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report/status`);
+    const data = res.ok ? await res.json() : null;
+    if (!reportSession.settle(token, rec.id, reportStatusToUi(data))) return;
+    if (reportSession.state.kind === 'generating') setTimeout(() => { if (reportSession.isCurrent(token, rec.id)) void refreshReportStatus(); }, 1000);
+  } catch { if (!reportSession.settle(token, rec.id, { kind: 'error', message: 'Could not check for a saved report.' })) return; }
+  renderReportPanel();
+}
+async function createReport(mode: 'meta' | 'offline'): Promise<void> {
+  const rec = currentInvestigationRecord; if (!rec) return;
+  if (reportSession.state.kind === 'generating' || rec.status === 'running' || !rec.findings.length) return;
+  const token = reportSession.begin(rec.id, 'generating'); renderReportPanel();
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `Report creation failed (${res.status})`);
+    if (!reportSession.settle(token, rec.id, { kind: 'saved', generatedAt: String(data.generatedAt ?? ''), mode: String(data.mode ?? mode), model: String(data.model ?? '') })) return;
+    announce('Findings report saved. You can view or download it again without a model call.');
+  } catch (e) { if (!reportSession.settle(token, rec.id, { kind: 'error', message: e instanceof Error ? e.message : String(e) })) return; }
+  renderReportPanel();
+}
+function openSavedReport(download: boolean, findingNumber?: number): void {
+  const rec = currentInvestigationRecord; if (!rec || reportSession.state.kind !== 'saved') return;
+  const fragment = !download && findingNumber !== undefined ? `#finding-${findingNumber}` : '';
+  window.open(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report${download ? '?download=1' : ''}${fragment}`, '_blank', 'noopener');
 }
 
 function updateActiveOtherSystemNotice(): void {
@@ -2151,6 +2227,11 @@ btnStop.addEventListener('click', () => { void handleStop(); }); btnStopGlobal?.
 btnRefreshHistory.addEventListener('click', () => {
   loadHistory();
 });
+document.getElementById('btn-report-refresh')?.addEventListener('click', () => { void refreshReportStatus(); });
+document.getElementById('btn-report-meta')?.addEventListener('click', () => { void createReport('meta'); });
+document.getElementById('btn-report-offline')?.addEventListener('click', () => { void createReport('offline'); });
+document.getElementById('btn-report-view')?.addEventListener('click', () => openSavedReport(false));
+document.getElementById('btn-report-download')?.addEventListener('click', () => openSavedReport(true));
 
 alertClose.addEventListener('click', () => {
   hideAlert();
