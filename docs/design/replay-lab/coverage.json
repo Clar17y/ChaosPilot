@@ -1,0 +1,3905 @@
+{
+ "identity": {
+  "baseHead": "1e021a852fb3e004f757c5ff7f0d23cdb9ca9ec2",
+  "hashes": {
+   "replay-core.mjs": "1312c534db3642636ee84a3ea74c0c1cc962ee9239931f20648f4117d85f9010",
+   "generate.mjs": "d1d00ff40122d4a68037829ce4322357b6699153e75f2e01b56bbaea194f80a2",
+   "replay-ui.js": "5ca195b02d7a7a5226703ebb3a964c4230abf4be1c3736b18abff97ec3fefcf4",
+   "replay-template.html": "27b9d75c982206b1fad02e16dd8d94a82634ca4c47355b0233f5f7d79f3c4860",
+   "cases.json": "b2bed2d6aaeae3c961cac36fd0f419626a90e58ee63ab56b74a3f79859945a6b",
+   "replay-lab.html": "86fe2b0a2ff63525cb60faf254ba9e28afe96a89123a53dafb4c2faa31e672a4"
+  },
+  "fragmentBytes": 216994,
+  "caseCount": 32
+ },
+ "cases": [
+  {
+   "id": "trading-candidate-a",
+   "origin": "known-recipe",
+   "invariant": "execution_idempotency",
+   "traceEntries": 11,
+   "violationsRecorded": 2,
+   "violationInvariants": [
+    "venue_execution_integrity",
+    "execution_idempotency"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    10
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "identity"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 10,
+     "step": 10,
+     "lens": "identity",
+     "visualKind": "identity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "eventIdentity": "exec-idemp-1",
+      "occurrences": 2,
+      "outcome": "delivered:processed",
+      "stateChanged": true,
+      "conflicts": []
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 20,
+     "usedCredit": 80,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 2,
+       "filledQuantity": 8,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-idemp-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 1
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 80,
+    "reserved": 20,
+    "total": 100,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-a-clean",
+   "origin": "clean-control",
+   "invariant": "execution_idempotency",
+   "traceEntries": 11,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 60,
+     "usedCredit": 40,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-idemp-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 1
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 40,
+    "reserved": 60,
+    "total": 100,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-b",
+   "origin": "known-recipe",
+   "invariant": "credit_non_negative",
+   "traceEntries": 11,
+   "violationsRecorded": 3,
+   "violationInvariants": [
+    "credit_exposure_consistency",
+    "credit_non_negative"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    8,
+    10
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 8,
+     "step": 8,
+     "lens": "capacity",
+     "visualKind": "capacity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "used": 0,
+      "reserved": 0,
+      "total": 0,
+      "limit": 1000,
+      "scaleMax": 1000
+     }
+    },
+    {
+     "frame": 10,
+     "step": 10,
+     "lens": "capacity",
+     "visualKind": "capacity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "used": 40,
+      "reserved": -40,
+      "total": 0,
+      "limit": 1000,
+      "scaleMax": 1000
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": -40,
+     "usedCredit": 40,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 0,
+       "filledQuantity": 4,
+       "cancelledQuantity": 6,
+       "cancellationRequested": false,
+       "status": "CANCELLED",
+       "cancelledAt": 0
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 0,
+       "filledQuantity": 4,
+       "cancelledQuantity": 6,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": [
+      {
+       "orderId": "ord-1",
+       "cancelledQuantity": 6,
+       "occurredAt": 0
+      }
+     ]
+    },
+    "logicalTime": 5
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 40,
+    "reserved": -40,
+    "total": 0,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-b-clean",
+   "origin": "clean-control",
+   "invariant": "credit_non_negative",
+   "traceEntries": 11,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "lifecycle"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 0,
+     "usedCredit": 40,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 0,
+       "filledQuantity": 4,
+       "cancelledQuantity": 6,
+       "cancellationRequested": false,
+       "status": "CANCELLED",
+       "cancelledAt": 0
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 0,
+       "filledQuantity": 4,
+       "cancelledQuantity": 6,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": [
+      {
+       "orderId": "ord-1",
+       "cancelledQuantity": 6,
+       "occurredAt": 0
+      }
+     ]
+    },
+    "logicalTime": 5
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 40,
+    "reserved": 0,
+    "total": 40,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-c",
+   "origin": "known-recipe",
+   "invariant": "credit_limit_respected",
+   "traceEntries": 10,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "credit_limit_respected"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    9
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "lifecycle"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 9,
+     "step": 9,
+     "lens": "capacity",
+     "visualKind": "capacity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "used": 100,
+      "reserved": 100,
+      "total": 200,
+      "limit": 100,
+      "scaleMax": 200
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q-1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 100
+     },
+     "reservedCredit": 100,
+     "usedCredit": 100,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q-1",
+       "price": 100,
+       "initialQuantity": 1,
+       "remainingQuantity": 0,
+       "filledQuantity": 1,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "FILLED"
+      },
+      "ord-2": {
+       "orderId": "ord-2",
+       "quoteId": "q-1",
+       "price": 100,
+       "initialQuantity": 1,
+       "remainingQuantity": 1,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 1,
+       "remainingQuantity": 0,
+       "filledQuantity": 1,
+       "cancelledQuantity": 0,
+       "price": 100
+      },
+      "ord-2": {
+       "orderId": "ord-2",
+       "initialQuantity": 1,
+       "remainingQuantity": 1,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 1,
+       "price": 100,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 100,
+    "used": 100,
+    "reserved": 100,
+    "total": 200,
+    "exceeds": true,
+    "scaleMax": 200
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-c-clean",
+   "origin": "clean-control",
+   "invariant": "credit_limit_respected",
+   "traceEntries": 10,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "lifecycle"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q-1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 100
+     },
+     "reservedCredit": 0,
+     "usedCredit": 100,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q-1",
+       "price": 100,
+       "initialQuantity": 1,
+       "remainingQuantity": 0,
+       "filledQuantity": 1,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "FILLED"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 1,
+       "remainingQuantity": 0,
+       "filledQuantity": 1,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 1,
+       "price": 100,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 100,
+    "used": 100,
+    "reserved": 0,
+    "total": 100,
+    "exceeds": false,
+    "scaleMax": 100
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-d",
+   "origin": "known-recipe",
+   "invariant": "version_monotonicity",
+   "traceEntries": 4,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "version_monotonicity"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    3
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "version"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 3,
+     "step": 3,
+     "lens": "version",
+     "visualKind": "version",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "changes": [
+       {
+        "path": "quote.version",
+        "field": "version",
+        "before": 2,
+        "after": 1,
+        "regressed": true
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q-v1",
+      "version": 1,
+      "price": 80
+     },
+     "credit": null,
+     "reservedCredit": 0,
+     "usedCredit": 0,
+     "orders": {}
+    },
+    "venue": {
+     "orders": {},
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": null,
+    "used": 0,
+    "reserved": 0,
+    "total": 0,
+    "exceeds": null
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-d-clean",
+   "origin": "clean-control",
+   "invariant": "version_monotonicity",
+   "traceEntries": 4,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q-v2",
+      "version": 2,
+      "price": 100
+     },
+     "credit": null,
+     "reservedCredit": 0,
+     "usedCredit": 0,
+     "orders": {}
+    },
+    "venue": {
+     "orders": {},
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": null,
+    "used": 0,
+    "reserved": 0,
+    "total": 0,
+    "exceeds": null
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-e",
+   "origin": "known-recipe",
+   "invariant": "version_monotonicity",
+   "traceEntries": 4,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "version_monotonicity"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    3
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "version"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 3,
+     "step": 3,
+     "lens": "version",
+     "visualKind": "version",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "changes": [
+       {
+        "path": "credit.version",
+        "field": "version",
+        "before": 2,
+        "after": 1,
+        "regressed": true
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": null,
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 0,
+     "usedCredit": 0,
+     "orders": {}
+    },
+    "venue": {
+     "orders": {},
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 0,
+    "reserved": 0,
+    "total": 0,
+    "exceeds": false,
+    "scaleMax": 2000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-e-clean",
+   "origin": "clean-control",
+   "invariant": "version_monotonicity",
+   "traceEntries": 4,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": null,
+     "credit": {
+      "version": 2,
+      "limit": 2000
+     },
+     "reservedCredit": 0,
+     "usedCredit": 0,
+     "orders": {}
+    },
+    "venue": {
+     "orders": {},
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 2000,
+    "used": 0,
+    "reserved": 0,
+    "total": 0,
+    "exceeds": false,
+    "scaleMax": 2000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-f",
+   "origin": "known-recipe",
+   "invariant": "credit_exposure_consistency",
+   "traceEntries": 10,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "credit_exposure_consistency"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    9
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 9,
+     "step": 9,
+     "lens": "capacity",
+     "visualKind": "capacity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "used": 30,
+      "reserved": 30,
+      "total": 60,
+      "limit": 1000,
+      "scaleMax": 1000
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 30,
+     "usedCredit": 30,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 3,
+       "filledQuantity": 7,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 3,
+       "filledQuantity": 7,
+       "cancelledQuantity": 0,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      },
+      {
+       "executionId": "exec-2",
+       "orderId": "ord-1",
+       "quantity": 3,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 30,
+    "reserved": 30,
+    "total": 60,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-f-clean",
+   "origin": "clean-control",
+   "invariant": "credit_exposure_consistency",
+   "traceEntries": 10,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 10
+     },
+     "credit": {
+      "version": 1,
+      "limit": 1000
+     },
+     "reservedCredit": 30,
+     "usedCredit": 70,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 10,
+       "initialQuantity": 10,
+       "remainingQuantity": 3,
+       "filledQuantity": 7,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 3,
+       "filledQuantity": 7,
+       "cancelledQuantity": 0,
+       "price": 10
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 10,
+       "occurredAt": 0
+      },
+      {
+       "executionId": "exec-2",
+       "orderId": "ord-1",
+       "quantity": 3,
+       "price": 10,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 1000,
+    "used": 70,
+    "reserved": 30,
+    "total": 100,
+    "exceeds": false,
+    "scaleMax": 1000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-g",
+   "origin": "known-recipe",
+   "invariant": "input_integrity_no_mutation",
+   "traceEntries": 8,
+   "violationsRecorded": 2,
+   "violationInvariants": [
+    "input_integrity_no_mutation",
+    "venue_execution_integrity"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    7
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "identity"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 7,
+     "step": 7,
+     "lens": "identity",
+     "visualKind": "identity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "eventIdentity": "exec-1",
+      "occurrences": 1,
+      "outcome": "delivered:processed",
+      "stateChanged": true,
+      "conflicts": [
+       {
+        "field": "price",
+        "eventValue": 120,
+        "recordedPath": "Order ord-1 locked price",
+        "recordedValue": 100
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 0,
+     "usedCredit": 500,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 5,
+       "remainingQuantity": 0,
+       "filledQuantity": 5,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "FILLED"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 5,
+       "remainingQuantity": 5,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 500,
+    "reserved": 0,
+    "total": 500,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-g-clean",
+   "origin": "clean-control",
+   "invariant": "input_integrity_no_mutation",
+   "traceEntries": 8,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 500,
+     "usedCredit": 0,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 5,
+       "remainingQuantity": 5,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 5,
+       "remainingQuantity": 5,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 0,
+    "reserved": 500,
+    "total": 500,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-h",
+   "origin": "known-recipe",
+   "invariant": "execution_idempotency",
+   "traceEntries": 10,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "execution_idempotency"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    9
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "identity"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 9,
+     "step": 9,
+     "lens": "identity",
+     "visualKind": "identity",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "eventIdentity": "exec-1",
+      "occurrences": 2,
+      "outcome": "delivered:processed",
+      "stateChanged": false,
+      "conflicts": [
+       {
+        "field": "quantity",
+        "eventValue": 6,
+        "recordedPath": "Previous delivery",
+        "recordedValue": 4
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 600,
+     "usedCredit": 400,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 10,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 400,
+    "reserved": 600,
+    "total": 1000,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-h-clean",
+   "origin": "clean-control",
+   "invariant": "execution_idempotency",
+   "traceEntries": 10,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 600,
+     "usedCredit": 400,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 10,
+       "filledQuantity": 0,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 400,
+    "reserved": 600,
+    "total": 1000,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-i",
+   "origin": "known-recipe",
+   "invariant": "lifecycle_consistency",
+   "traceEntries": 8,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "lifecycle_consistency"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    7
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff",
+    "lifecycle"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 7,
+     "step": 7,
+     "lens": "lifecycle",
+     "visualKind": "lifecycle",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "statusChanges": [
+       {
+        "path": "orders.ord-1.status",
+        "before": "OPEN",
+        "after": "FILLED",
+        "kind": "changed"
+       }
+      ],
+      "quantities": [
+       {
+        "path": "orders.ord-1.filledQuantity",
+        "before": 0,
+        "after": 4,
+        "kind": "changed"
+       },
+       {
+        "path": "orders.ord-1.remainingQuantity",
+        "before": 10,
+        "after": 6,
+        "kind": "changed"
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 600,
+     "usedCredit": 400,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "FILLED"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 100,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 400,
+    "reserved": 600,
+    "total": 1000,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "trading-candidate-i-clean",
+   "origin": "clean-control",
+   "invariant": "lifecycle_consistency",
+   "traceEntries": 8,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "capacity",
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "quote": {
+      "id": "q1",
+      "version": 1,
+      "price": 100
+     },
+     "credit": {
+      "version": 1,
+      "limit": 10000
+     },
+     "reservedCredit": 600,
+     "usedCredit": 400,
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "quoteId": "q1",
+       "price": 100,
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "cancellationRequested": false,
+       "status": "OPEN"
+      }
+     }
+    },
+    "venue": {
+     "orders": {
+      "ord-1": {
+       "orderId": "ord-1",
+       "initialQuantity": 10,
+       "remainingQuantity": 6,
+       "filledQuantity": 4,
+       "cancelledQuantity": 0,
+       "price": 100
+      }
+     },
+     "executions": [
+      {
+       "executionId": "exec-1",
+       "orderId": "ord-1",
+       "quantity": 4,
+       "price": 100,
+       "occurredAt": 0
+      }
+     ],
+     "cancels": []
+    },
+    "logicalTime": 0
+   },
+   "lastFrameCredit": {
+    "limit": 10000,
+    "used": 400,
+    "reserved": 600,
+    "total": 1000,
+    "exceeds": false,
+    "scaleMax": 10000
+   },
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-a",
+   "origin": "known-recipe",
+   "invariant": "stock_conservation",
+   "traceEntries": 8,
+   "violationsRecorded": 2,
+   "violationInvariants": [
+    "inventory_transition_consistency",
+    "stock_conservation"
+   ],
+   "categories": [
+    "reservation_availability"
+   ],
+   "attributedFindingFrames": [
+    6
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 6,
+     "step": 5,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 10,
+        "reservedRemaining": 14,
+        "available": -4,
+        "overReserved": true
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 10
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 7,
+       "shipped": 0,
+       "cancelled": 0
+      },
+      "r2": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 7,
+       "shipped": 0,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "r2": "[\"reservations\",[\"id\",\"r2\"],[\"quantity\",7],[\"reservationId\",\"r2\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r2",
+       "reservationId": "r2",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 10,
+     "reservedRemaining": 14,
+     "available": -4
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-a-clean",
+   "origin": "clean-control",
+   "invariant": "stock_conservation",
+   "traceEntries": 8,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 10
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 7,
+       "shipped": 0,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r2",
+       "reservationId": "r2",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 10,
+     "reservedRemaining": 7,
+     "available": 3
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-b",
+   "origin": "known-recipe",
+   "invariant": "stock_conservation",
+   "traceEntries": 10,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "inventory_transition_consistency"
+   ],
+   "categories": [
+    "cancellation_release"
+   ],
+   "attributedFindingFrames": [],
+   "groupFrames": [
+    7,
+    8,
+    9
+   ],
+   "actionFindingFrame": 9,
+   "unattributedViolations": [
+    "transition-6"
+   ],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 7,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 8,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 9,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 8
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 5,
+       "shipped": 2,
+       "cancelled": 5
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "s2": "[\"shipments\",[\"id\",\"s2\"],[\"quantity\",2],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]",
+      "c1": "[\"reservations\",[\"id\",\"c1\"],[\"reservationId\",\"r1\"],[\"type\",\"cancel\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "s2",
+       "reservationId": "r1",
+       "quantity": 2
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "reservations",
+      "payload": {
+       "type": "cancel",
+       "id": "c1",
+       "reservationId": "r1"
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 8,
+     "reservedRemaining": 5,
+     "available": 3
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-b-clean",
+   "origin": "clean-control",
+   "invariant": "stock_conservation",
+   "traceEntries": 10,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 8
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 0,
+       "shipped": 2,
+       "cancelled": 5
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "s2": "[\"shipments\",[\"id\",\"s2\"],[\"quantity\",2],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]",
+      "c1": "[\"reservations\",[\"id\",\"c1\"],[\"reservationId\",\"r1\"],[\"type\",\"cancel\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "s2",
+       "reservationId": "r1",
+       "quantity": 2
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "reservations",
+      "payload": {
+       "type": "cancel",
+       "id": "c1",
+       "reservationId": "r1"
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 8,
+     "reservedRemaining": 0,
+     "available": 8
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-c",
+   "origin": "known-recipe",
+   "invariant": "inventory_transition_consistency",
+   "traceEntries": 10,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "inventory_transition_consistency"
+   ],
+   "categories": [
+    "duplicate_shipment"
+   ],
+   "attributedFindingFrames": [],
+   "groupFrames": [
+    7,
+    8,
+    9
+   ],
+   "actionFindingFrame": 9,
+   "unattributedViolations": [
+    "transition-6"
+   ],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 7,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 6,
+        "reservedRemaining": 6,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 8,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 2,
+        "reservedRemaining": 2,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 9,
+     "step": 6,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 2,
+        "reservedRemaining": 2,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 2
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 10,
+       "remaining": 2,
+       "shipped": 8,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",10],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "f1": "[\"shipments\",[\"id\",\"f1\"],[\"quantity\",4],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r1",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r1",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 2,
+     "reservedRemaining": 2,
+     "available": 0
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-c-clean",
+   "origin": "clean-control",
+   "invariant": "inventory_transition_consistency",
+   "traceEntries": 10,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "stock",
+    "identity"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 6
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 10,
+       "remaining": 6,
+       "shipped": 4,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",10],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "f1": "[\"shipments\",[\"id\",\"f1\"],[\"quantity\",4],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r1",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r1",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 6,
+     "reservedRemaining": 6,
+     "available": 0
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-d",
+   "origin": "known-recipe",
+   "invariant": "inventory_transition_consistency",
+   "traceEntries": 17,
+   "violationsRecorded": 5,
+   "violationInvariants": [
+    "inventory_transition_consistency"
+   ],
+   "categories": [
+    "cancellation_release",
+    "duplicate_shipment"
+   ],
+   "attributedFindingFrames": [],
+   "groupFrames": [
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+   ],
+   "actionFindingFrame": 16,
+   "unattributedViolations": [
+    "transition-9",
+    "transition-9-2",
+    "transition-9-3",
+    "transition-9-4",
+    "transition-9-5"
+   ],
+   "lensesUsed": [
+    "diff",
+    "stock"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 8,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 10,
+        "reservedRemaining": 0,
+        "available": 10,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 9,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 10,
+        "reservedRemaining": 7,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 10,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 11,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 12,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       },
+       {
+        "sku": "other",
+        "received": 10,
+        "onHand": 10,
+        "reservedRemaining": 0,
+        "available": 10,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 13,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       },
+       {
+        "sku": "other",
+        "received": 10,
+        "onHand": 10,
+        "reservedRemaining": 10,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 14,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       },
+       {
+        "sku": "other",
+        "received": 10,
+        "onHand": 6,
+        "reservedRemaining": 6,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 15,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       },
+       {
+        "sku": "other",
+        "received": 10,
+        "onHand": 2,
+        "reservedRemaining": 2,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    },
+    {
+     "frame": 16,
+     "step": 9,
+     "lens": "stock",
+     "visualKind": "stock",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "rows": [
+       {
+        "sku": "item",
+        "received": 10,
+        "onHand": 8,
+        "reservedRemaining": 5,
+        "available": 3,
+        "overReserved": false
+       },
+       {
+        "sku": "other",
+        "received": 10,
+        "onHand": 2,
+        "reservedRemaining": 2,
+        "available": 0,
+        "overReserved": false
+       }
+      ]
+     }
+    }
+   ],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 8
+      },
+      "other": {
+       "received": 10,
+       "onHand": 2
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 5,
+       "shipped": 2,
+       "cancelled": 5
+      },
+      "r2": {
+       "sku": "other",
+       "quantity": 10,
+       "remaining": 2,
+       "shipped": 8,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "sh1": "[\"shipments\",[\"id\",\"sh1\"],[\"quantity\",2],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]",
+      "c1": "[\"reservations\",[\"id\",\"c1\"],[\"reservationId\",\"r1\"],[\"type\",\"cancel\"]]",
+      "s2": "[\"stock\",[\"id\",\"s2\"],[\"quantity\",10],[\"sku\",\"other\"],[\"type\",\"stock\"]]",
+      "r2": "[\"reservations\",[\"id\",\"r2\"],[\"quantity\",10],[\"reservationId\",\"r2\"],[\"sku\",\"other\"],[\"type\",\"reserve\"]]",
+      "f1": "[\"shipments\",[\"id\",\"f1\"],[\"quantity\",4],[\"reservationId\",\"r2\"],[\"type\",\"ship\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "sh1",
+       "reservationId": "r1",
+       "quantity": 2
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "reservations",
+      "payload": {
+       "type": "cancel",
+       "id": "c1",
+       "reservationId": "r1"
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     },
+     {
+      "id": "m5",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s2",
+       "sku": "other",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 4
+     },
+     {
+      "id": "m6",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r2",
+       "reservationId": "r2",
+       "sku": "other",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 5
+     },
+     {
+      "id": "m7",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r2",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 6
+     },
+     {
+      "id": "m8",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r2",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 7
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 8,
+     "reservedRemaining": 5,
+     "available": 3
+    },
+    {
+     "sku": "other",
+     "received": 10,
+     "onHand": 2,
+     "reservedRemaining": 2,
+     "available": 0
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "inventory-candidate-d-clean",
+   "origin": "clean-control",
+   "invariant": "inventory_transition_consistency",
+   "traceEntries": 17,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "stock",
+    "identity"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {
+    "target": {
+     "stock": {
+      "item": {
+       "received": 10,
+       "onHand": 8
+      },
+      "other": {
+       "received": 10,
+       "onHand": 6
+      }
+     },
+     "reservations": {
+      "r1": {
+       "sku": "item",
+       "quantity": 7,
+       "remaining": 0,
+       "shipped": 2,
+       "cancelled": 5
+      },
+      "r2": {
+       "sku": "other",
+       "quantity": 10,
+       "remaining": 6,
+       "shipped": 4,
+       "cancelled": 0
+      }
+     },
+     "accepted": {
+      "s1": "[\"stock\",[\"id\",\"s1\"],[\"quantity\",10],[\"sku\",\"item\"],[\"type\",\"stock\"]]",
+      "r1": "[\"reservations\",[\"id\",\"r1\"],[\"quantity\",7],[\"reservationId\",\"r1\"],[\"sku\",\"item\"],[\"type\",\"reserve\"]]",
+      "sh1": "[\"shipments\",[\"id\",\"sh1\"],[\"quantity\",2],[\"reservationId\",\"r1\"],[\"type\",\"ship\"]]",
+      "c1": "[\"reservations\",[\"id\",\"c1\"],[\"reservationId\",\"r1\"],[\"type\",\"cancel\"]]",
+      "s2": "[\"stock\",[\"id\",\"s2\"],[\"quantity\",10],[\"sku\",\"other\"],[\"type\",\"stock\"]]",
+      "r2": "[\"reservations\",[\"id\",\"r2\"],[\"quantity\",10],[\"reservationId\",\"r2\"],[\"sku\",\"other\"],[\"type\",\"reserve\"]]",
+      "f1": "[\"shipments\",[\"id\",\"f1\"],[\"quantity\",4],[\"reservationId\",\"r2\"],[\"type\",\"ship\"]]"
+     }
+    },
+    "logicalTime": 0,
+    "messages": [
+     {
+      "id": "m1",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s1",
+       "sku": "item",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 0
+     },
+     {
+      "id": "m2",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r1",
+       "reservationId": "r1",
+       "sku": "item",
+       "quantity": 7
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 1
+     },
+     {
+      "id": "m3",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "sh1",
+       "reservationId": "r1",
+       "quantity": 2
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 2
+     },
+     {
+      "id": "m4",
+      "channel": "reservations",
+      "payload": {
+       "type": "cancel",
+       "id": "c1",
+       "reservationId": "r1"
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 3
+     },
+     {
+      "id": "m5",
+      "channel": "stock",
+      "payload": {
+       "type": "stock",
+       "id": "s2",
+       "sku": "other",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 4
+     },
+     {
+      "id": "m6",
+      "channel": "reservations",
+      "payload": {
+       "type": "reserve",
+       "id": "r2",
+       "reservationId": "r2",
+       "sku": "other",
+       "quantity": 10
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 5
+     },
+     {
+      "id": "m7",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r2",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 6
+     },
+     {
+      "id": "m8",
+      "channel": "shipments",
+      "payload": {
+       "type": "ship",
+       "id": "f1",
+       "reservationId": "r2",
+       "quantity": 4
+      },
+      "due": 0,
+      "delivered": true,
+      "sequence": 7
+     }
+    ]
+   },
+   "lastFrameCredit": null,
+   "lastFrameStock": [
+    {
+     "sku": "item",
+     "received": 10,
+     "onHand": 8,
+     "reservedRemaining": 0,
+     "available": 8
+    },
+    {
+     "sku": "other",
+     "received": 10,
+     "onHand": 6,
+     "reservedRemaining": 6,
+     "available": 0
+    }
+   ],
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-unknown-fields",
+   "origin": "synthetic",
+   "invariant": "unfamiliar_invariant_xyz",
+   "traceEntries": 2,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "unfamiliar_invariant_xyz"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    1
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 1,
+     "step": 2,
+     "lens": "diff",
+     "visualKind": "diff",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "changes": [
+       {
+        "path": "target.widget.nested.alpha",
+        "before": 1,
+        "after": 2,
+        "kind": "changed"
+       }
+      ],
+      "stateStatus": "recorded"
+     }
+    }
+   ],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-missing-state",
+   "origin": "synthetic",
+   "invariant": null,
+   "traceEntries": 3,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-ambiguous",
+   "origin": "synthetic",
+   "invariant": "execution_idempotency",
+   "traceEntries": 3,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "execution_idempotency"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [
+    1,
+    2
+   ],
+   "actionFindingFrame": 2,
+   "unattributedViolations": [
+    "sv2"
+   ],
+   "lensesUsed": [
+    "diff",
+    "identity"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 1,
+     "step": 2,
+     "lens": "identity",
+     "visualKind": "identity",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "eventIdentity": null,
+      "occurrences": 0,
+      "outcome": "delivered:processed",
+      "stateChanged": true,
+      "conflicts": []
+     }
+    },
+    {
+     "frame": 2,
+     "step": 2,
+     "lens": "identity",
+     "visualKind": "identity",
+     "isViolation": false,
+     "isGroupFinding": true,
+     "visual": {
+      "eventIdentity": null,
+      "occurrences": 0,
+      "outcome": "delivered:processed",
+      "stateChanged": true,
+      "conflicts": []
+     }
+    }
+   ],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-empty",
+   "origin": "synthetic",
+   "invariant": null,
+   "traceEntries": 0,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [],
+   "findingFrameDetails": [],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-duplicate-neutral",
+   "origin": "synthetic",
+   "invariant": null,
+   "traceEntries": 2,
+   "violationsRecorded": 0,
+   "violationInvariants": [],
+   "categories": [],
+   "attributedFindingFrames": [],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff",
+    "identity"
+   ],
+   "findingFrameDetails": [],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  },
+  {
+   "id": "synthetic-two-entities",
+   "origin": "synthetic",
+   "invariant": "balance_non_negative",
+   "traceEntries": 1,
+   "violationsRecorded": 1,
+   "violationInvariants": [
+    "balance_non_negative"
+   ],
+   "categories": [],
+   "attributedFindingFrames": [
+    0
+   ],
+   "groupFrames": [],
+   "actionFindingFrame": null,
+   "unattributedViolations": [],
+   "lensesUsed": [
+    "diff"
+   ],
+   "findingFrameDetails": [
+    {
+     "frame": 0,
+     "step": 1,
+     "lens": "diff",
+     "visualKind": "diff",
+     "isViolation": true,
+     "isGroupFinding": false,
+     "visual": {
+      "changes": [
+       {
+        "path": "target.accounts.acct-a.balance",
+        "after": -5,
+        "kind": "first-recorded"
+       },
+       {
+        "path": "target.accounts.acct-b.balance",
+        "after": 25,
+        "kind": "first-recorded"
+       }
+      ],
+      "stateStatus": "first-recorded"
+     }
+    }
+   ],
+   "finalSnapshot": {},
+   "lastFrameCredit": null,
+   "lastFrameStock": null,
+   "executedChecks": [
+    {
+     "check": "frame credit/stock projections equal independently recomputed views of the raw entry state",
+     "status": "passed"
+    },
+    {
+     "check": "missing-state frames carry no diffs and a not-recorded visual",
+     "status": "passed"
+    },
+    {
+     "check": "unique-attribution frames are exactly the frames marked isViolation",
+     "status": "passed"
+    },
+    {
+     "check": "group frames are exactly the unattributed violations recorded steps",
+     "status": "passed"
+    }
+   ],
+   "claims": [
+    "descriptive only (not executed here): values in frames are projected from trace entry state/payload only",
+    "descriptive only: only uniquely attributed violations mark a frame; shared-action findings stay group-level",
+    "focused-test assertions live in replay-lab.test.mjs and run via node --test"
+   ]
+  }
+ ]
+}

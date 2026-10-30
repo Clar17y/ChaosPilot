@@ -1,0 +1,13 @@
+{
+  "baseHead": "1e021a852fb3e004f757c5ff7f0d23cdb9ca9ec2",
+  "hashes": {
+    "replay-core.mjs": "1312c534db3642636ee84a3ea74c0c1cc962ee9239931f20648f4117d85f9010",
+    "generate.mjs": "d1d00ff40122d4a68037829ce4322357b6699153e75f2e01b56bbaea194f80a2",
+    "replay-ui.js": "5ca195b02d7a7a5226703ebb3a964c4230abf4be1c3736b18abff97ec3fefcf4",
+    "replay-template.html": "27b9d75c982206b1fad02e16dd8d94a82634ca4c47355b0233f5f7d79f3c4860",
+    "cases.json": "b2bed2d6aaeae3c961cac36fd0f419626a90e58ee63ab56b74a3f79859945a6b",
+    "replay-lab.html": "86fe2b0a2ff63525cb60faf254ba9e28afe96a89123a53dafb4c2faa31e672a4"
+  },
+  "fragmentBytes": 216994,
+  "caseCount": 32
+}
