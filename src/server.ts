@@ -47,6 +47,14 @@ import {
   SystemLockTimeoutError,
   SystemLockReleaseError,
 } from './systems/index.ts';
+import {
+  listCatalogItems,
+  runFunctionalBaselines,
+  saveFunctionalRun,
+  getFunctionalRun,
+  listFunctionalRuns,
+  validateFunctionalRunId,
+} from './functional/index.ts';
 
 export interface ActiveInvestigationState {
   id: string;
@@ -860,6 +868,121 @@ export class ChaosPilotServer {
             id: this.activeInvestigation.id,
             message: 'Stop signal dispatched. Preserving prior observations.',
           });
+          return;
+        }
+
+        // --- Functional Baselines API Routes ---
+
+        // GET /api/functional/catalog - List allowlisted functional baseline scenarios
+        if (method === 'GET' && pathname === '/api/functional/catalog') {
+          this.sendJson(res, 200, listCatalogItems());
+          return;
+        }
+
+        // GET /api/functional/runs - List persisted functional runs
+        if (method === 'GET' && pathname === '/api/functional/runs') {
+          try {
+            const runs = await listFunctionalRuns(this.runsDir);
+            this.sendJson(res, 200, runs);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+          }
+          return;
+        }
+
+        // GET /api/functional/runs/:id - Get specific functional run
+        const functionalRunMatch = pathname.match(/^\/api\/functional\/runs\/([a-zA-Z0-9_-]+)$/);
+        if (method === 'GET' && functionalRunMatch && functionalRunMatch[1]) {
+          const id = functionalRunMatch[1];
+          if (!validateFunctionalRunId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid functional run ID' });
+            return;
+          }
+          const record = await getFunctionalRun(id, this.runsDir);
+          if (!record) {
+            this.sendJson(res, 404, { error: 'Functional run not found' });
+            return;
+          }
+          this.sendJson(res, 200, record);
+          return;
+        }
+
+        // POST /api/functional/run - Execute functional baselines deterministically
+        if (method === 'POST' && pathname === '/api/functional/run') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set(['systemId', 'expectedRevision', 'variant']);
+          if (Object.keys(body).some(key => !allowedKeys.has(key))
+            || typeof body.systemId !== 'string' || !validateSystemId(body.systemId)
+            || body.systemId !== body.systemId.trim()
+            || typeof body.variant !== 'string' || !body.variant
+            || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) {
+            this.sendJson(res, 400, { error: 'Required selection: valid systemId, variant and positive expectedRevision; unknown fields are not allowed' });
+            return;
+          }
+          const systemId = body.systemId;
+          const variant = body.variant as TargetVariant;
+
+          let brief: SystemBrief | null = null;
+          try {
+            brief = await getSystemBrief(systemId, this.systemsDir);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+            return;
+          }
+
+          if (!brief) {
+            this.sendJson(res, 404, { error: `System brief "${systemId}" not found` });
+            return;
+          }
+
+          if (typeof body.expectedRevision === 'number' && brief.revision !== body.expectedRevision) {
+            this.sendJson(res, 409, {
+              error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}`,
+            });
+            return;
+          }
+
+          if (brief.adapterId !== 'synthetic-trading') {
+            this.sendJson(res, 400, {
+              error: `Cannot run functional baselines: System brief "${brief.name}" uses adapter "${brief.adapterId}". Functional baselines are only supported for the "synthetic-trading" adapter.`,
+            });
+            return;
+          }
+
+          try {
+            assertAdapterVariant(brief.adapterId, variant);
+          } catch (err) {
+            this.sendJson(res, 400, {
+              error: err instanceof Error ? err.message : `Unsupported variant "${variant}" for synthetic-trading`,
+            });
+            return;
+          }
+
+          try {
+            const systemSnapshot = await createSystemSnapshot(brief);
+            const record = await runFunctionalBaselines({ variant, systemSnapshot });
+            await saveFunctionalRun(record, this.runsDir);
+            this.sendJson(res, 201, record);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: `Functional execution failed: ${msg}` });
+          }
           return;
         }
 

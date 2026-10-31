@@ -96,8 +96,8 @@ describe('workspace scoping of inspection and capabilities', () => {
     expect(hasRunDetail('run-1')).toBe(true);
   });
 
-  it('exposes the six real workspace views', () => {
-    expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings']);
+  it('exposes the seven real workspace views', () => {
+    expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings', 'functional']);
   });
 
   it('blocks launch while starting, saving, or missing a selected system', () => {

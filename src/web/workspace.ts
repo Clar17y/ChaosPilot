@@ -1,9 +1,13 @@
 import type { RunSummary } from '../storage.ts';
+import type {
+  FunctionalRunStatus,
+  FunctionalRunSummary,
+} from '../functional/types.ts';
 
-export type WorkspaceView = 'overview' | 'brief' | 'capabilities' | 'prepare' | 'investigations' | 'findings';
+export type WorkspaceView = 'overview' | 'brief' | 'capabilities' | 'prepare' | 'investigations' | 'findings' | 'functional';
 
 export const WORKSPACE_VIEWS: readonly WorkspaceView[] = [
-  'overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings',
+  'overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings', 'functional',
 ];
 
 export interface RunPartition {
@@ -587,4 +591,65 @@ export class RequestSequencer {
   invalidate(): void {
     this.current += 1;
   }
+}
+
+// --- Functional Baselines UI Helpers & State ---
+
+export interface FunctionalGuardState {
+  isSystemSavePending?: boolean;
+  snapshotState?: SnapshotLoadState;
+  targetState?: TargetLoadState;
+  isFunctionalRunPending: boolean;
+  isDraftMode: boolean;
+  hasUnsavedSystemEdits: boolean;
+  selectedAdapterId: string | null;
+  hasSelectedSystem: boolean;
+  selectedVariant?: string | null;
+  allowedVariants?: readonly string[];
+}
+
+export function functionalExecutionBlockedReason(state: FunctionalGuardState): string | null {
+  if (state.isSystemSavePending) return 'SAVING SYSTEM PROFILE';
+  if (state.snapshotState !== undefined && state.snapshotState !== 'ready') return 'SYSTEM CONTRACT NOT CONFIRMED';
+  if (state.targetState !== undefined && state.targetState !== 'ready') return 'TARGET LIST NOT CONFIRMED';
+  if (state.isFunctionalRunPending) return 'RUNNING FUNCTIONAL BASELINES';
+  if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE RUNNING';
+  if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE RUNNING';
+  if (!state.hasSelectedSystem) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId !== 'synthetic-trading') {
+    return 'FUNCTIONAL BASELINES ONLY SUPPORT SYNTHETIC-TRADING';
+  }
+  if (state.allowedVariants !== undefined) {
+    if (!state.allowedVariants.length) return 'NO TARGET AVAILABLE FOR SELECTED SYSTEM';
+    if (!state.selectedVariant || !state.allowedVariants.includes(state.selectedVariant)) {
+      return 'TARGET NOT AVAILABLE FOR SELECTED SYSTEM';
+    }
+  }
+  return null;
+}
+
+export function functionalRunOutcomeLabel(status: FunctionalRunStatus): string {
+  switch (status) {
+    case 'pass': return 'Passed';
+    case 'fail': return 'Failed';
+    case 'inconclusive': return 'Inconclusive';
+    case 'invalid': return 'Invalid harness input';
+    default: return String(status);
+  }
+}
+
+export function partitionFunctionalRuns(
+  runs: readonly FunctionalRunSummary[],
+  selectedSystemId: string | null,
+): { scoped: FunctionalRunSummary[]; other: FunctionalRunSummary[] } {
+  const scoped: FunctionalRunSummary[] = [];
+  const other: FunctionalRunSummary[] = [];
+  for (const r of runs) {
+    if (selectedSystemId !== null && r.systemBrief.id === selectedSystemId) {
+      scoped.push(r);
+    } else {
+      other.push(r);
+    }
+  }
+  return { scoped, other };
 }
