@@ -1,7 +1,7 @@
 import * as http from 'node:http';
 import { MetaProvider } from './providers/meta.ts';
 import { readSystemBriefFile, resolveSystemPath } from './systems/index.ts';
-import { resolveAdapter, assertAdapterVariant, listRegisteredAdapters } from './adapters/index.ts';
+import { resolveAdapter, assertAdapterVariant, listRegisteredAdapters, type AdapterRegistration } from './adapters/index.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,21 @@ import {
   listFunctionalRuns,
   validateFunctionalRunId,
 } from './functional/index.ts';
+import {
+  previewRegressionFromFinding,
+  captureRegressionFromFinding,
+  runSavedRegression,
+  listRegressionDefinitions,
+  getRegressionDefinitionDetail,
+  listRegressionRuns,
+  getRegressionRun,
+  validateRegressionId,
+  validateRegressionRunId,
+  RegressionValidationError,
+  RegressionNotFoundError,
+  RegressionConflictError,
+  RegressionUnavailableError,
+} from './regressions/index.ts';
 
 export interface ActiveInvestigationState {
   id: string;
@@ -72,6 +87,7 @@ export interface ServerOptions {
   providerFactory?: (kind: ProviderKind) => ExperimentProvider;
   explanationTransport?: ExplanationTransport;
   challengeTransport?: ExplanationTransport;
+  regressionAdapterResolver?: (adapterId: string) => AdapterRegistration;
   publicDir?: string;
   distDir?: string;
 }
@@ -118,6 +134,7 @@ export class ChaosPilotServer {
   private providerFactoryOverride?: (kind: ProviderKind) => ExperimentProvider;
   private explanationTransportOverride?: ExplanationTransport;
   private challengeTransportOverride?: ExplanationTransport;
+  private regressionAdapterResolverOverride?: (adapterId: string) => AdapterRegistration;
   private explanationInFlight = new Set<string>();
 
   constructor(options: ServerOptions = {}) {
@@ -129,6 +146,7 @@ export class ChaosPilotServer {
     this.providerFactoryOverride = options.providerFactory;
     this.explanationTransportOverride = options.explanationTransport;
     this.challengeTransportOverride = options.challengeTransport;
+    this.regressionAdapterResolverOverride = options.regressionAdapterResolver;
   }
 
   public getActiveInvestigation(): ActiveInvestigationState | null {
@@ -982,6 +1000,398 @@ export class ChaosPilotServer {
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             this.sendJson(res, 500, { error: `Functional execution failed: ${msg}` });
+          }
+          return;
+        }
+
+        // --- Regression Tests API Routes ---
+
+        // POST /api/regressions/preview - Preview reviewed regression expectations from a confirmed finding
+        if (method === 'POST' && pathname === '/api/regressions/preview') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON regression preview request object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set([
+            'runId',
+            'findingId',
+            'expectedRunRevision',
+            'expectedEvidenceHash',
+          ]);
+          if (
+            Object.keys(body).some(key => !allowedKeys.has(key)) ||
+            typeof body.runId !== 'string' ||
+            body.runId !== body.runId.trim() ||
+            !validateRunId(body.runId) ||
+            typeof body.findingId !== 'string' ||
+            body.findingId !== body.findingId.trim() ||
+            body.findingId.length === 0 ||
+            body.findingId.length > 256 ||
+            (body.expectedRunRevision !== undefined &&
+              (typeof body.expectedRunRevision !== 'string' ||
+                !body.expectedRunRevision.trim() ||
+                body.expectedRunRevision.length > 256)) ||
+            (body.expectedEvidenceHash !== undefined &&
+              (typeof body.expectedEvidenceHash !== 'string' ||
+                !/^[a-f0-9]{64}$/.test(body.expectedEvidenceHash)))
+          ) {
+            this.sendJson(res, 400, {
+              error:
+                'Required fields: valid runId and findingId; optional expectedRunRevision and expectedEvidenceHash; unknown fields are not allowed',
+            });
+            return;
+          }
+          if (this.activeInvestigation?.id === body.runId) {
+            this.sendJson(res, 409, { error: 'Wait for the terminal run to finish saving' });
+            return;
+          }
+          const controller = new AbortController();
+          const disconnected = () => {
+            if (!res.writableEnded) {
+              controller.abort(
+                new DOMException('Regression preview cancelled by client disconnect', 'AbortError'),
+              );
+            }
+          };
+          res.once?.('close', disconnected);
+          try {
+            const preview = await previewRegressionFromFinding(body.runId, body.findingId, {
+              runsDir: this.runsDir,
+              expectedRunRevision: body.expectedRunRevision as string | undefined,
+              expectedEvidenceHash: body.expectedEvidenceHash as string | undefined,
+              signal: controller.signal,
+              adapterResolver: this.regressionAdapterResolverOverride,
+            });
+            this.sendJson(res, 200, preview);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof RegressionNotFoundError) {
+              this.sendJson(res, 404, { error: msg });
+            } else if (err instanceof RegressionConflictError || controller.signal.aborted) {
+              this.sendJson(res, 409, { error: msg });
+            } else if (msg.includes('Run storage is busy')) {
+              this.sendJson(res, 503, { error: msg });
+            } else if (err instanceof RegressionValidationError) {
+              this.sendJson(res, 400, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: msg });
+            }
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
+        // GET /api/regressions/definitions - List saved regression definitions
+        if (method === 'GET' && pathname === '/api/regressions/definitions') {
+          try {
+            const definitions = await listRegressionDefinitions(this.runsDir);
+            this.sendJson(res, 200, definitions);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+          }
+          return;
+        }
+
+        // GET /api/regressions/definitions/:id - Get specific regression definition and its run history
+        const regressionDefMatch = pathname.match(/^\/api\/regressions\/definitions\/([^/]+)$/);
+        if (method === 'GET' && regressionDefMatch && regressionDefMatch[1]) {
+          let id = regressionDefMatch[1];
+          try {
+            id = decodeURIComponent(id);
+          } catch {
+            this.sendJson(res, 400, { error: 'Invalid regression definition ID' });
+            return;
+          }
+          if (!validateRegressionId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid regression definition ID' });
+            return;
+          }
+          const detail = await getRegressionDefinitionDetail(id, this.runsDir);
+          if (!detail) {
+            this.sendJson(res, 404, { error: 'Regression definition not found' });
+            return;
+          }
+          this.sendJson(res, 200, detail);
+          return;
+        }
+
+        // POST /api/regressions/definitions - Save an immutable reviewed regression definition
+        if (method === 'POST' && pathname === '/api/regressions/definitions') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON regression capture object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set([
+            'runId',
+            'findingId',
+            'expectedRunRevision',
+            'expectedEvidenceHash',
+            'reviewToken',
+            'definitionId',
+            'contentHash',
+            'reviewed',
+          ]);
+          if (
+            Object.keys(body).some(key => !allowedKeys.has(key)) ||
+            typeof body.runId !== 'string' ||
+            body.runId !== body.runId.trim() ||
+            !validateRunId(body.runId) ||
+            typeof body.findingId !== 'string' ||
+            body.findingId !== body.findingId.trim() ||
+            body.findingId.length === 0 ||
+            body.findingId.length > 256 ||
+            typeof body.expectedRunRevision !== 'string' ||
+            !body.expectedRunRevision.trim() ||
+            body.expectedRunRevision.length > 256 ||
+            typeof body.expectedEvidenceHash !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(body.expectedEvidenceHash) ||
+            typeof body.reviewToken !== 'string' ||
+            !/^rev-[a-f0-9]{64}$/.test(body.reviewToken) ||
+            typeof body.definitionId !== 'string' ||
+            !validateRegressionId(body.definitionId) ||
+            (body.contentHash !== undefined &&
+              (typeof body.contentHash !== 'string' || !/^[a-f0-9]{64}$/.test(body.contentHash))) ||
+            typeof body.reviewed !== 'boolean'
+          ) {
+            this.sendJson(res, 400, {
+              error:
+                'Required fields: valid runId, findingId, expectedRunRevision, expectedEvidenceHash, reviewToken, definitionId, and boolean reviewed; unknown or client-supplied expectation fields are not allowed',
+            });
+            return;
+          }
+          if (body.reviewed !== true) {
+            this.sendJson(res, 400, {
+              error:
+                'Explicit engineer review consent (reviewed: true) is required before saving a regression definition',
+            });
+            return;
+          }
+          if (this.activeInvestigation?.id === body.runId) {
+            this.sendJson(res, 409, { error: 'Wait for the terminal run to finish saving' });
+            return;
+          }
+          const controller = new AbortController();
+          const disconnected = () => {
+            if (!res.writableEnded) {
+              controller.abort(
+                new DOMException('Regression save cancelled by client disconnect', 'AbortError'),
+              );
+            }
+          };
+          res.once?.('close', disconnected);
+          try {
+            const definition = await captureRegressionFromFinding(
+              {
+                runId: body.runId,
+                findingId: body.findingId,
+                expectedRunRevision: body.expectedRunRevision,
+                expectedEvidenceHash: body.expectedEvidenceHash,
+                reviewToken: body.reviewToken,
+                definitionId: body.definitionId,
+                contentHash: body.contentHash as string | undefined,
+                reviewed: true,
+              },
+              {
+                runsDir: this.runsDir,
+                signal: controller.signal,
+                adapterResolver: this.regressionAdapterResolverOverride,
+              },
+            );
+            this.sendJson(res, 201, definition);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof RegressionNotFoundError) {
+              this.sendJson(res, 404, { error: msg });
+            } else if (err instanceof RegressionConflictError || controller.signal.aborted) {
+              this.sendJson(res, 409, { error: msg });
+            } else if (err instanceof RegressionUnavailableError) {
+              this.sendJson(res, 422, { error: msg });
+            } else if (err instanceof RegressionValidationError) {
+              this.sendJson(res, 400, { error: msg });
+            } else if (msg.includes('Run storage is busy')) {
+              this.sendJson(res, 503, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: msg });
+            }
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
+        // GET /api/regressions/runs - List saved regression runs
+        if (method === 'GET' && pathname === '/api/regressions/runs') {
+          const definitionIdParam = url.searchParams.get('definitionId');
+          if (definitionIdParam !== null && !validateRegressionId(definitionIdParam)) {
+            this.sendJson(res, 400, { error: 'Invalid regression definition ID filter' });
+            return;
+          }
+          try {
+            const runs = await listRegressionRuns(
+              this.runsDir,
+              definitionIdParam ?? undefined,
+            );
+            this.sendJson(res, 200, runs);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+          }
+          return;
+        }
+
+        // GET /api/regressions/runs/:id - Get specific regression run
+        const regressionRunMatch = pathname.match(/^\/api\/regressions\/runs\/([^/]+)$/);
+        if (method === 'GET' && regressionRunMatch && regressionRunMatch[1]) {
+          let id = regressionRunMatch[1];
+          try {
+            id = decodeURIComponent(id);
+          } catch {
+            this.sendJson(res, 400, { error: 'Invalid regression run ID' });
+            return;
+          }
+          if (!validateRegressionRunId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid regression run ID' });
+            return;
+          }
+          const record = await getRegressionRun(id, this.runsDir);
+          if (!record) {
+            this.sendJson(res, 404, { error: 'Regression run not found' });
+            return;
+          }
+          this.sendJson(res, 200, record);
+          return;
+        }
+
+        // POST /api/regressions/run - Execute a saved regression definition against an explicitly selected target
+        if (method === 'POST' && pathname === '/api/regressions/run') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON regression run request object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set([
+            'definitionId',
+            'variant',
+            'systemId',
+            'expectedRevision',
+          ]);
+          if (
+            Object.keys(body).some(key => !allowedKeys.has(key)) ||
+            typeof body.definitionId !== 'string' ||
+            !validateRegressionId(body.definitionId) ||
+            typeof body.variant !== 'string' ||
+            body.variant !== body.variant.trim() ||
+            !body.variant ||
+            (body.systemId !== undefined &&
+              (typeof body.systemId !== 'string' ||
+                body.systemId !== body.systemId.trim() ||
+                !validateSystemId(body.systemId))) ||
+            (body.expectedRevision !== undefined &&
+              (!Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1))
+          ) {
+            this.sendJson(res, 400, {
+              error:
+                'Required fields: valid definitionId and variant; optional systemId and positive expectedRevision; unknown fields are not allowed',
+            });
+            return;
+          }
+
+          if (body.systemId !== undefined) {
+            let brief: SystemBrief | null = null;
+            try {
+              brief = await getSystemBrief(body.systemId, this.systemsDir);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              this.sendJson(res, 500, { error: msg });
+              return;
+            }
+            if (!brief) {
+              this.sendJson(res, 404, { error: `System brief "${body.systemId}" not found` });
+              return;
+            }
+            if (
+              body.expectedRevision !== undefined &&
+              brief.revision !== body.expectedRevision
+            ) {
+              this.sendJson(res, 409, {
+                error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}`,
+              });
+              return;
+            }
+          }
+
+          const controller = new AbortController();
+          const disconnected = () => {
+            if (!res.writableEnded) {
+              controller.abort(
+                new DOMException('Regression run cancelled by client disconnect', 'AbortError'),
+              );
+            }
+          };
+          res.once?.('close', disconnected);
+          try {
+            const runRecord = await runSavedRegression(
+              {
+                definitionId: body.definitionId,
+                variant: body.variant as TargetVariant,
+                systemId: body.systemId as string | undefined,
+              },
+              {
+                runsDir: this.runsDir,
+                signal: controller.signal,
+                adapterResolver: this.regressionAdapterResolverOverride,
+              },
+            );
+            this.sendJson(res, 201, runRecord);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof RegressionNotFoundError) {
+              this.sendJson(res, 404, { error: msg });
+            } else if (err instanceof RegressionConflictError || controller.signal.aborted) {
+              this.sendJson(res, 409, { error: msg });
+            } else if (err instanceof RegressionUnavailableError) {
+              this.sendJson(res, 422, { error: msg });
+            } else if (err instanceof RegressionValidationError) {
+              this.sendJson(res, 400, { error: msg });
+            } else {
+              this.sendJson(res, 500, { error: `Regression execution failed: ${msg}` });
+            }
+          } finally {
+            res.off?.('close', disconnected);
           }
           return;
         }

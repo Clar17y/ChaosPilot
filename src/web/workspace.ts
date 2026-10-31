@@ -3,6 +3,10 @@ import type {
   FunctionalRunStatus,
   FunctionalRunSummary,
 } from '../functional/types.ts';
+import type {
+  RegressionDefinitionSummary,
+  RegressionRunSummary,
+} from '../regressions/types.ts';
 
 export type WorkspaceView = 'overview' | 'brief' | 'capabilities' | 'prepare' | 'investigations' | 'findings' | 'functional';
 
@@ -646,6 +650,122 @@ export function partitionFunctionalRuns(
   const other: FunctionalRunSummary[] = [];
   for (const r of runs) {
     if (selectedSystemId !== null && r.systemBrief.id === selectedSystemId) {
+      scoped.push(r);
+    } else {
+      other.push(r);
+    }
+  }
+  return { scoped, other };
+}
+
+// --- Regression Capture & Execution UI Helpers & State ---
+
+export interface RegressionCaptureGuardState {
+  isSystemSavePending?: boolean;
+  isDraftMode: boolean;
+  hasUnsavedSystemEdits: boolean;
+  hasSelectedSystem: boolean;
+  selectedSystemId: string | null;
+  selectedAdapterId: string | null;
+  snapshotState?: SnapshotLoadState;
+  isCapturePending: boolean;
+  hasInspectedRun: boolean;
+  inspectedRunTerminal: boolean;
+  inspectedRunSystemId: string | null;
+  waitsForSave?: boolean;
+  hasSelectedFinding: boolean;
+  findingConfirmed?: boolean;
+}
+
+export function regressionCaptureBlockedReason(
+  state: RegressionCaptureGuardState,
+): string | null {
+  if (state.isSystemSavePending) return 'SAVING SYSTEM PROFILE';
+  if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE CAPTURING A REGRESSION';
+  if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE CAPTURING A REGRESSION';
+  if (!state.hasSelectedSystem || !state.selectedSystemId) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId !== 'synthetic-trading') {
+    return 'REGRESSION CAPTURE ONLY SUPPORTS SYNTHETIC-TRADING';
+  }
+  if (state.snapshotState !== undefined && state.snapshotState !== 'ready') {
+    return 'SYSTEM CONTRACT NOT CONFIRMED';
+  }
+  if (state.isCapturePending) return 'REGRESSION CAPTURE IN PROGRESS';
+  if (!state.hasInspectedRun) return 'OPEN A SAVED INVESTIGATION RUN';
+  if (state.waitsForSave || !state.inspectedRunTerminal) {
+    return 'WAIT FOR THE TERMINAL RUN TO FINISH SAVING';
+  }
+  if (!state.inspectedRunSystemId || state.inspectedRunSystemId !== state.selectedSystemId) {
+    return 'OPENED RUN BELONGS TO A DIFFERENT OR LEGACY SYSTEM PROFILE';
+  }
+  if (!state.hasSelectedFinding) return 'SELECT A CONFIRMED FINDING';
+  if (state.findingConfirmed === false) {
+    return 'ONLY CONFIRMED FINDINGS WITH VERIFIED REPLAY AND CLEAN CONTROL CAN BE SAVED';
+  }
+  return null;
+}
+
+export interface RegressionExecutionGuardState {
+  isSystemSavePending?: boolean;
+  snapshotState?: SnapshotLoadState;
+  targetState?: TargetLoadState;
+  isRegressionRunPending: boolean;
+  isDraftMode: boolean;
+  hasUnsavedSystemEdits: boolean;
+  selectedAdapterId: string | null;
+  hasSelectedSystem: boolean;
+  selectedVariant?: string | null;
+  allowedVariants?: readonly string[];
+  hasSelectedDefinition: boolean;
+}
+
+export function regressionExecutionBlockedReason(
+  state: RegressionExecutionGuardState,
+): string | null {
+  if (state.isSystemSavePending) return 'SAVING SYSTEM PROFILE';
+  if (state.snapshotState !== undefined && state.snapshotState !== 'ready') return 'SYSTEM CONTRACT NOT CONFIRMED';
+  if (state.targetState !== undefined && state.targetState !== 'ready') return 'TARGET LIST NOT CONFIRMED';
+  if (state.isRegressionRunPending) return 'RUNNING SAVED REGRESSION';
+  if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE RUNNING';
+  if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE RUNNING';
+  if (!state.hasSelectedSystem) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId !== 'synthetic-trading') {
+    return 'REGRESSION TESTS ONLY SUPPORT SYNTHETIC-TRADING';
+  }
+  if (state.allowedVariants !== undefined) {
+    if (!state.allowedVariants.length) return 'NO TARGET AVAILABLE FOR SELECTED SYSTEM';
+    if (!state.selectedVariant || !state.allowedVariants.includes(state.selectedVariant)) {
+      return 'TARGET NOT AVAILABLE FOR SELECTED SYSTEM';
+    }
+  }
+  if (!state.hasSelectedDefinition) return 'SELECT A SAVED REGRESSION DEFINITION';
+  return null;
+}
+
+export function partitionRegressionDefinitions(
+  definitions: readonly RegressionDefinitionSummary[],
+  selectedSystemId: string | null,
+): { scoped: RegressionDefinitionSummary[]; other: RegressionDefinitionSummary[] } {
+  const scoped: RegressionDefinitionSummary[] = [];
+  const other: RegressionDefinitionSummary[] = [];
+  for (const d of definitions) {
+    if (selectedSystemId !== null && d.origin.systemBrief.id === selectedSystemId) {
+      scoped.push(d);
+    } else {
+      other.push(d);
+    }
+  }
+  return { scoped, other };
+}
+
+export function partitionRegressionRuns(
+  runs: readonly RegressionRunSummary[],
+  selectedSystemId: string | null,
+): { scoped: RegressionRunSummary[]; other: RegressionRunSummary[] } {
+  const scoped: RegressionRunSummary[] = [];
+  const other: RegressionRunSummary[] = [];
+  for (const r of runs) {
+    if (selectedSystemId !== null && r.origin.systemBrief.id === selectedSystemId) {
       scoped.push(r);
     } else {
       other.push(r);
