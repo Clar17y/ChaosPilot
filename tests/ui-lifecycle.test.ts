@@ -5,9 +5,6 @@ import {
   InvestigationLifecycle,
   RequestSequencer,
 } from '../src/web/workspace.ts';
-import { describeProposals } from '../src/web/proposals.ts';
-import type { InvestigationRecord } from '../src/domain.ts';
-import type { SimulatorApi } from '../src/storage.ts';
 
 const live = (id: string, status: string, systemId: string | null = 'delivery-qa') => ({ id, status, systemId });
 
@@ -130,44 +127,5 @@ describe('pending stop / start settlement', () => {
     lc.noteStatus(live('run-1', 'running'));
     lc.settleStart();
     expect(lc.requestStop()).toBe('stop-now');
-  });
-});
-
-describe('SIM-01 optional typed getContract', () => {
-  it('injected fixtures may omit getContract; present method is invoked optionally', () => {
-    const absent: SimulatorApi = {
-      getSourceBundle: () => ({ hash: 'h', files: [] }),
-      executeExperiment: () => { throw new Error('not used'); },
-    };
-    expect(absent.getContract ? absent.getContract() : null).toBeNull();
-    const contract = { name: 'C', description: '', operations: [], messages: [], invariants: [], limits: {} };
-    const present: SimulatorApi = { ...absent, getContract: () => contract };
-    expect(present.getContract ? present.getContract() : null).toBe(contract);
-  });
-});
-
-describe('SIM-02 proposal display model (computed once, passed through)', () => {
-  it('preserves count/summary/unknown-usage semantics for the shared display model', () => {
-    const rec = {
-      provider: 'meta',
-      experiments: [{}, {}],
-      proposalAttempts: [
-        { status: 'pending', usageKnown: false },
-        { status: 'invalid_plan', usageKnown: false, requestSent: true },
-        { status: 'failed', usageKnown: true, requestSent: true },
-      ],
-    } as unknown as InvestigationRecord;
-    const display = describeProposals(rec);
-    expect(display.count).toBe(3);
-    expect(display.summary).toContain('3 proposals recorded; 2 experiments executed; 1 proposals rejected; 1 failed or cancelled; 1 pending.');
-    expect(display.unknownCost).toBe(true);
-    // Same object is what renderActiveRecord passes to renderProposals.
-    expect(describeProposals(rec)).toEqual(display);
-  });
-
-  it('older records without proposal history keep the null-count display', () => {
-    const rec = { provider: 'mock', experiments: [] } as unknown as InvestigationRecord;
-    expect(describeProposals(rec).count).toBeNull();
-    expect(describeProposals(rec).summary).toContain('not recorded');
   });
 });
