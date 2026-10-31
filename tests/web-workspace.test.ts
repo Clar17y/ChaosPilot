@@ -38,8 +38,8 @@ describe('workspace launch guards', () => {
     expect(launchBlockedReason({ ...withTargets, targetState: 'ready' })).toBeNull();
   });
 
-  it('exposes the six real workspace views', () => {
-    expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings']);
+  it('exposes the seven real workspace views', () => {
+    expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings', 'functional']);
   });
 });
 
