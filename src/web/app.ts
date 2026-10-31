@@ -1,3 +1,4 @@
+import { initFunctionalWorkspaceView } from './functional.ts';
 import type {
   InvestigationRecord,
   ExperimentRecord,
@@ -1899,6 +1900,13 @@ function selectedMaxExperiments(): number {
 }
 
 function updateRequestPreflight(): void {
+  functionalController.setContext({
+    systemId: selectedSystem?.id ?? null, revision: selectedSystem?.revision ?? null,
+    isDraftMode, hasUnsavedSystemEdits, isSystemSavePending,
+    hasSelectedSystem: Boolean(selectedSystem), selectedAdapterId: effectiveAdapter(),
+    snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
+    selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
+  });
   const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
     && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
     && scopedVariants().includes(targetSelect.value);
@@ -2512,6 +2520,12 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { reproPlayback.handleHidden(); cancelStagePacket(); renderReproductionDetail(); }
 });
 activateTab(tabButtons.find(b => b.classList.contains('active')) ?? tabButtons[0]!, false);
+
+const functionalController = initFunctionalWorkspaceView(variant => {
+  targetSelection.select(variant);
+  targetSelect.value = targetSelection.selection ?? '';
+  updateRunReadiness();
+});
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
 // Initialization - showView('overview', false) below

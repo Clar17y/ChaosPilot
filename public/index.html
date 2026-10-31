@@ -23,6 +23,7 @@
         <button type="button" class="nav-btn" data-view="capabilities">Capabilities &amp; checks</button>
         <button type="button" class="nav-btn" data-view="investigations">Investigations</button>
         <button type="button" class="nav-btn" data-view="findings">Findings &amp; reproductions</button>
+        <button type="button" class="nav-btn" data-view="functional">Functional tests</button>
       </nav>
       <button id="btn-prepare-nav" type="button" class="btn btn-primary rail-wide prepare-action" data-view="prepare">Prepare investigation</button>
       <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator, and <strong>inventory-reservation</strong> tests the synthetic inventory reservation system. Neither tests an arbitrary application. Other systems can be described and saved as drafts.</p>
@@ -524,6 +525,75 @@
             <p class="muted">Earlier saved runs with findings. Identifiers are kept accessible here and in each run’s details, without crowding the opened run’s findings.</p>
             <div id="findings-view-container"><p class="muted">No saved runs with findings for this system yet.</p></div>
           </details>
+        </section>
+
+        <!-- Functional tests -->
+        <section class="view hidden" id="view-functional" data-view-panel="functional">
+          <header class="view-head">
+            <div>
+              <p class="eyebrow">Deterministic functional baselines</p>
+              <h1 class="view-title" id="title-functional" tabindex="-1">Functional tests</h1>
+              <p class="muted">Allowlisted deterministic trading scenarios with explicit milestone assertions. No model calls.</p>
+            </div>
+          </header>
+
+          <div id="functional-eligibility-banner" class="alert-banner hidden" role="alert" style="margin-bottom: 16px;">
+            <span id="functional-eligibility-message"></span>
+          </div>
+
+          <div class="grid">
+            <section class="card">
+              <h2>Run configuration</h2>
+              <p class="muted">Execute the allowlisted scenario catalog against the selected target variant.</p>
+              <div class="control-group">
+                <label for="functional-system-display">Selected system</label>
+                <input type="text" id="functional-system-display" class="form-input" readonly>
+              </div>
+              <div class="control-group">
+                <label for="functional-target-select">Target variant</label>
+                <select id="functional-target-select" class="form-input"></select>
+              </div>
+              <div class="actions" style="margin-top: 16px; display: flex; align-items: center;">
+                <button type="button" class="btn btn-primary" id="btn-run-functional">Run baselines</button>
+                <span id="functional-run-status" class="muted" style="margin-left: 12px;"></span>
+              </div>
+            </section>
+
+            <section class="card">
+              <h2>Scenario catalog</h2>
+              <div id="functional-catalog-list">
+                <p class="muted">Loading catalog…</p>
+              </div>
+            </section>
+          </div>
+
+          <!-- Active / Inspected Functional Baseline Run -->
+          <section class="card hidden" id="functional-results-card" style="margin-top: 20px;">
+            <div class="rowtop">
+              <div>
+                <h2>Baseline execution results</h2>
+                <p class="muted" id="functional-run-meta"></p>
+              </div>
+              <span id="functional-run-badge" class="system-badge"></span>
+            </div>
+
+            <div class="three" style="margin: 16px 0;">
+              <div><div class="big" id="functional-stat-scenarios">0/0</div><small>scenarios passed</small></div>
+              <div><div class="big" id="functional-stat-assertions">0/0</div><small>assertions passed</small></div>
+              <div><div class="big" id="functional-stat-status">-</div><small>overall outcome</small></div>
+            </div>
+
+            <div id="functional-scenarios-container"></div>
+          </section>
+
+          <!-- Historical Saved Functional Runs -->
+          <section class="card" id="functional-history-card" style="margin-top: 20px;">
+            <h2>Saved functional baseline runs</h2>
+            <p class="muted">Historical runs for this system profile. Persisted separately under runs/functional.</p>
+            <div id="functional-history-list">
+              <p class="muted">No saved functional runs for this system yet.</p>
+            </div>
+          </section>
         </section>
 
       </main>

@@ -33,6 +33,17 @@ New browser and CLI investigations save an immutable brief, revision, contract a
 
 The [Astra workspace design](docs/design/astra/UX_DESIGN.md) and its [clickable prototype](docs/design/astra/prototype.html) guided this integration. The prototype's sample investigation data is illustrative; the application uses persisted records and real execution/replay APIs. Fields outside the saved brief schema remain design proposals.
 
+## Functional baseline tests
+
+In addition to autonomous defect discovery, engineers can run deterministic functional baselines with explicit milestone assertions. Select a saved synthetic trading profile, open **Functional tests** in the workspace navigation rail, choose a target variant, and click **Run baselines**.
+
+Baselines make **no AI model calls** and consume zero tokens or budget. They execute an allowlisted scenario catalog covering:
+1. Normal order acceptance and a complete partial-fill and cancellation lifecycle (4 units at price 10 reserve 40, partial fill of 2 units consumes 20 and leaves 20 reserved, cancel request alone retains reservation, and cancellation confirmation releases only the remainder).
+2. Used-credit admission accounting and rejection without state mutation (catching real flaws such as in `candidate-c`, where used credit is erroneously ignored during new order admission).
+3. Initial credit rejection without state mutation.
+
+Assertions explicitly classify outcomes as `pass`, `fail` (contradictory observed state, oracle violations, or failing requirement rules), `inconclusive` (missing observations, incomplete runs, or decoder exceptions), or `invalid` (simulator harness command rejected). Results pin the brief revision, target source, complete expected checks and evaluator identity under `runs/functional/<id>/record.json`, and can be reopened across server restarts. Drafts, unsaved edits, pending saves and unconfirmed targets block launch; old responses cannot replace a newer selection. Open the provenance and complete evidence drilldowns to inspect rejections, oracle violations and configured-rule outcomes. Context-only prose remains unverified. Detailed documentation is in [docs/FUNCTIONAL_TESTING.md](docs/FUNCTIONAL_TESTING.md).
+
 At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. The current prompt and larger request limits have not been evaluated in a new live comparison.
 
 ## Findings reports (saved HTML)
