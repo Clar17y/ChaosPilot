@@ -38,6 +38,7 @@ import {
 } from './storage.ts';
 import { buildRunEvidence, generateReport, type ExplanationMode, type ExplanationTransport } from './explanations/index.ts';
 import { metaExplanationTransport } from './explanations/meta-transport.ts';
+import { challengeFinding, getChallengeView } from './challenges/index.ts';
 import {
   SystemIntegrityError,
   SystemConflictError,
@@ -62,6 +63,7 @@ export interface ServerOptions {
   investigationRunner?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
   providerFactory?: (kind: ProviderKind) => ExperimentProvider;
   explanationTransport?: ExplanationTransport;
+  challengeTransport?: ExplanationTransport;
   publicDir?: string;
   distDir?: string;
 }
@@ -107,6 +109,7 @@ export class ChaosPilotServer {
   private runnerOverride?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
   private providerFactoryOverride?: (kind: ProviderKind) => ExperimentProvider;
   private explanationTransportOverride?: ExplanationTransport;
+  private challengeTransportOverride?: ExplanationTransport;
   private explanationInFlight = new Set<string>();
 
   constructor(options: ServerOptions = {}) {
@@ -117,6 +120,7 @@ export class ChaosPilotServer {
     this.runnerOverride = options.investigationRunner;
     this.providerFactoryOverride = options.providerFactory;
     this.explanationTransportOverride = options.explanationTransport;
+    this.challengeTransportOverride = options.challengeTransport;
   }
 
   public getActiveInvestigation(): ActiveInvestigationState | null {
@@ -908,6 +912,45 @@ export class ChaosPilotServer {
         }
 
         // POST /api/runs/:id/replay - Replay specific run deterministically
+        const challengeMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/challenges$/);
+        if (challengeMatch && (method === 'GET' || method === 'POST')) {
+          const id = challengeMatch[1]!;
+          if (!validateRunId(id)) { this.sendJson(res, 400, { error: 'Invalid run ID' }); return; }
+          const controller = new AbortController();
+          const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Challenge cancelled by client disconnect', 'AbortError')); };
+          res.once('close', disconnected);
+          try {
+            if (!(await getRun(id, this.runsDir))) { this.sendJson(res, 404, { error: 'Saved run not found' }); return; }
+            if (method === 'GET') {
+              const findingId = url.searchParams.get('findingId');
+              if (!findingId || findingId.length > 256) { this.sendJson(res, 400, { error: 'A unique findingId is required' }); return; }
+              this.sendJson(res, 200, await getChallengeView(id, findingId, this.runsDir));
+              return;
+            }
+            if (!(req.headers['content-type'] ?? '').toLowerCase().includes('application/json')) { this.sendJson(res, 415, { error: 'Content-Type must be application/json' }); return; }
+            const body = await this.readJsonBody(req);
+            if (body.error) { this.sendJson(res, body.status ?? 400, { error: body.error }); return; }
+            const data = body.data as Record<string, unknown> | null;
+            if (!data || Array.isArray(data) || data.mode !== 'meta' || typeof data.findingId !== 'string' || !data.findingId || data.findingId.length > 256
+              || typeof data.expectedEvidenceHash !== 'string' || !data.expectedEvidenceHash
+              || typeof data.expectedRunRevision !== 'string' || !data.expectedRunRevision
+              || (data.interpret !== undefined && typeof data.interpret !== 'boolean')
+              || Object.keys(data).some(k => !['mode', 'findingId', 'interpret', 'expectedEvidenceHash', 'expectedRunRevision'].includes(k))) {
+              this.sendJson(res, 400, { error: 'Explicit mode: meta, findingId and the selected saved evidence identity are required. interpret must be boolean. This action uses the paid Meta API.' }); return;
+            }
+            if (this.activeInvestigation?.id === id) { this.sendJson(res, 409, { error: 'Wait for the terminal run to finish saving' }); return; }
+            const result = await challengeFinding(id, data.findingId, {
+              runsDir: this.runsDir, transport: this.challengeTransportOverride, signal: controller.signal,
+              interpret: data.interpret !== false, expectedEvidenceHash: data.expectedEvidenceHash, expectedRunRevision: data.expectedRunRevision,
+            });
+            this.sendJson(res, result.status === 'completed' ? 201 : result.status === 'cancelled' ? 409 : 422, result);
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.sendJson(res, /already being generated|deleted|changed|terminal|saving/.test(msg) ? 409 : /Missing MODEL_API_KEY/.test(msg) ? 503 : 422, { error: msg });
+          } finally { res.off('close', disconnected); }
+          return;
+        }
+
         const replayMatch = pathname.match(/^\/api\/runs\/([a-zA-Z0-9_-]+)\/replay$/);
         if (method === 'POST' && replayMatch && replayMatch[1]) {
           const id = replayMatch[1];

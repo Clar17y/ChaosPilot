@@ -228,6 +228,7 @@ export async function saveRun(record: InvestigationRecord, runsDir = 'runs'): Pr
   }
 
   return withRunMutation(record.id, runsDir, async () => {
+    await advanceRunRevision(record.id, runsDir);
     await fs.mkdir(runsDir, { recursive: true });
     const finalPath = resolveRunPath(runsDir, record.id);
     const tempPath = path.join(
@@ -345,6 +346,13 @@ export async function deleteRun(id: string, runsDir = 'runs'): Promise<boolean> 
   return withRunMutation(id, runsDir, async () => {
     try {
       const filePath = resolveRunPath(runsDir, id);
+      try {
+        await fs.access(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+      await advanceRunRevision(id, runsDir);
       await fs.unlink(filePath);
       await deleteFindingReport(id, runsDir).catch(() => false);
       return true;
@@ -374,7 +382,7 @@ export function findingReportFilename(id: string): string {
 }
 
 /** Cross-process mutation guard. Never break an existing lock or guess its owner died. */
-async function withRunMutation<T>(id: string, runsDir: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export async function withRunMutation<T>(id: string, runsDir: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!validateRunId(id)) throw new Error('Invalid run ID');
   signal?.throwIfAborted();
   await fs.mkdir(runsDir, { recursive: true });
@@ -391,6 +399,22 @@ async function withRunMutation<T>(id: string, runsDir: string, action: () => Pro
   }
   try { signal?.throwIfAborted(); return await action(); }
   finally { await handle.close(); await fs.unlink(lockPath); }
+}
+
+/** Call only under withRunMutation. A tombstone survives delete/recreate of identical JSON. */
+async function advanceRunRevision(id: string, runsDir: string): Promise<void> {
+  await fs.writeFile(path.join(path.resolve(runsDir), `.${id}.revision`), crypto.randomUUID(), 'utf8');
+}
+
+/** Call under withRunMutation, alongside getRun, for a consistent saved version. */
+export async function getRunRevision(id: string, runsDir: string): Promise<string> {
+  if (!validateRunId(id)) throw new Error('Invalid run ID');
+  let revision = 'legacy';
+  try { revision = await fs.readFile(path.join(path.resolve(runsDir), `.${id}.revision`), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  // Stat also detects direct file replacement outside saveRun. In-app writes always change revision.
+  const stat = await fs.stat(resolveRunPath(runsDir, id), { bigint: true });
+  return `${revision}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}`;
 }
 
 /** A generation lease prevents duplicate billable calls across server instances. */
@@ -928,8 +952,10 @@ export async function replaySelectedExperiment(
   target: string | InvestigationRecord,
   position: unknown,
   runsDir = 'runs',
-  simulatorOverride?: SimulatorApi
+  simulatorOverride?: SimulatorApi,
+  signal?: AbortSignal,
 ): Promise<ReplayReport> {
+  signal?.throwIfAborted();
   const experimentPosition = parseExperimentPosition(position);
   if (experimentPosition === null) {
     throw new Error('Invalid experiment position: expected a nonnegative integer position.');
@@ -937,6 +963,7 @@ export async function replaySelectedExperiment(
   // Identical saved-evidence integrity, adapter selection and context gates
   // as full-run replay; only the selected experiment is executed below.
   const prep = await prepareReplay(target, runsDir, simulatorOverride);
+  signal?.throwIfAborted();
   const { record, simulator, contextChecks, gatingChecks, currentSourceHash, sourceIdentical } = prep;
   if (experimentPosition >= record.experiments.length) {
     throw new Error(

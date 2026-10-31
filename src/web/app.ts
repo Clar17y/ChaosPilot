@@ -55,6 +55,7 @@ import {
 } from './workspace.ts';
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
 import { FindingExplanationSession, reportStatusToUi, reportStateText } from './finding-explanations.ts';
+import { ChallengeSession, renderChallengePanel } from './challenges.ts';
 import { activeUnattributedViolations, detailVisibility, evidenceHeading, liveActivity, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
 import { buildStageProjection, formatRecordedValue, visiblePositionForTracePosition, type StageFrame, type StageProjection } from './replay-stage.ts';
 import { StagePacketAnimator } from './stage-animation.ts';
@@ -123,6 +124,10 @@ let latestLiveRecord: InvestigationRecord | null = null;
 // Run-scoped: see ReproductionSession for reset/preserve and late-result rules.
 const reproSession = new ReproductionSession();
 const reportSession = new FindingExplanationSession();
+const challengeSession = new ChallengeSession(() => {
+  const host = document.getElementById('challenge-panel');
+  if (host) renderChallengePanel(host, challengeSession);
+});
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
 let reproModel: ReproductionModel | null = null;
 let reproShowFull = false;
@@ -526,7 +531,28 @@ function renderFindingsView(): void {
         });
         card.append(title, why, expected, observed);
         if (comparison.textContent) card.appendChild(comparison);
-        card.append(status, explain, go); opened.appendChild(card);
+        const challenge = document.createElement('button'); challenge.type = 'button'; challenge.className = 'btn btn-secondary btn-xs';
+        challenge.textContent = 'Inspect challenge with Muse';
+        challenge.setAttribute('aria-label', `Inspect paid Muse challenge for finding ${index + 1}: ${conciseFindingTitle(f)}`);
+        challenge.addEventListener('click', () => {
+          const rec = currentInvestigationRecord;
+          if (!rec || resolveExperimentPosition(rec, f) < 0) {
+            showAlert('The experiment for this finding is not present in the opened run, so its challenge cannot be opened.');
+            return;
+          }
+          showView('investigations');
+          openReproductionForFinding(f, false);
+          const panel = document.getElementById('challenge-panel');
+          panel?.scrollIntoView({ block: 'start' });
+          const museBtn = document.getElementById('btn-challenge-muse') as HTMLButtonElement | null;
+          if (museBtn && !museBtn.disabled) {
+            museBtn.focus();
+          } else if (panel) {
+            if (!panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1');
+            panel.focus();
+          }
+        });
+        card.append(status, explain, go, challenge); opened.appendChild(card);
       }
     }
   }
@@ -594,7 +620,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -1265,6 +1291,7 @@ function reproEl<T extends HTMLElement>(id: string): T | null { return document.
 function clearReproductionDetail(): void { const facts = reproEl('repro-generic-facts'); if (facts) facts.textContent = ''; reproEl('repro-generic-facts-wrap')?.classList.add('hidden'); reproEl('repro-credit-wrap')?.classList.add('hidden'); const credit = reproEl('repro-credit'); if (credit) credit.textContent = NO_STEP_CREDIT_TEXT; reproEl('repro-exposure-bar')?.classList.add('hidden'); const legend = reproEl('repro-exposure-legend'); if (legend) legend.textContent = ''; const unattr = reproEl('repro-unattributed'); if (unattr) { unattr.classList.add('hidden'); unattr.textContent = ''; } }
 
 function resetReproductionSelection(): void {
+  challengeSession.select(null, null);
   reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = '';
   reproSession.clear();
   clearFreshView(); reproShowFull = false;
@@ -1283,6 +1310,7 @@ function renderReproduction(): void {
     reproStage = buildStageProjection(source?.trace ?? [], source?.violations ?? [], stateKindForRecord(rec), reproSession.selectedFinding?.violation ?? null);
   } else reproStage = null;
   const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
+  challengeSession.select(rec, reproSession.selectedFinding?.id ?? null, waitingForSave);
   const reproEyebrow = reproEl('repro-eyebrow');
   if (reproEyebrow) reproEyebrow.textContent = waitingForSave ? 'Recorded experiments · investigation in progress' : 'Recorded evidence';
   const sourceIndicator = reproEl('repro-source-indicator');
@@ -2228,6 +2256,9 @@ btnRefreshHistory.addEventListener('click', () => {
   loadHistory();
 });
 document.getElementById('btn-report-refresh')?.addEventListener('click', () => { void refreshReportStatus(); });
+document.getElementById('btn-challenge-muse')?.addEventListener('click', () => { void challengeSession.generate(); });
+document.getElementById('btn-challenge-cancel')?.addEventListener('click', () => { challengeSession.cancel(); });
+document.getElementById('btn-challenge-refresh')?.addEventListener('click', () => { void challengeSession.refresh(); });
 document.getElementById('btn-report-meta')?.addEventListener('click', () => { void createReport('meta'); });
 document.getElementById('btn-report-offline')?.addEventListener('click', () => { void createReport('offline'); });
 document.getElementById('btn-report-view')?.addEventListener('click', () => openSavedReport(false));

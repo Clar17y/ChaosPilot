@@ -123,6 +123,50 @@ The [known fault lab](docs/FAULT_LAB.md) adds stale market and credit updates, s
 
 ## What an experiment can do
 
+### Challenge a saved finding with Muse
+
+Open a terminal saved run, select a confirmed finding in Findings or its reproduction,
+then use **Challenge with Muse · paid Meta API**. This is an explicit paid action even
+when the original run used the offline mock. It uses the existing `MODEL_API_KEY`,
+`META_MODEL`, prompt/output limits, request deadline and shared budget ledger. There
+are no automatic retries: one proposal request produces 1–3 distinct variations;
+one optional interpretation request follows execution. The HTTP API can omit the
+interpretation with `interpret: false`.
+
+Only the registered trading and inventory adapters are supported. The saved finding,
+experiment, target, contract, original replay and clean source must be verifiable;
+legacy records without adequate provenance show an availability reason. Variations
+are limited to 100 actions and 24 KiB per experiment. All proposals are parsed before
+any variation executes. Payloads may intentionally be malformed; arbitrary tools,
+shell commands and external targets are unsupported.
+
+Each variation starts fresh on candidate, candidate replay and clean control. The
+panel shows actual step differences, hypotheses, same-invariant observations, other
+violations, replay/clean statuses and full evidence/traces. “Absent” requires a valid
+completed candidate; errors and incomplete runs do not establish absence. Muse's
+post-execution text is labelled interpretation and does not establish root cause.
+
+Challenge artifacts are saved separately under `runs/challenges/`, bound to the exact
+run version and finding. Reloading or revisiting retrieves saved evidence. Failed
+attempts retain previous completed evidence; cancellation or interpretation failure
+retains completed traces. Cancellation may leave remote usage unknown, with the
+shared ledger retaining a conservative charge allowance. Rewriting/deleting a run
+or source/context drift prevents artifacts being presented as current. A generation
+lock excludes duplicate challenges across server instances; interrupted locks require
+inspection rather than automatic removal. Original run/model histories stay intact.
+
+Offline validation (fake model responses only):
+
+```sh
+npx vitest run tests/challenges.test.ts tests/challenge-api.test.ts tests/challenge-ui.test.ts
+npm run typecheck
+npm test
+```
+
+These checks exercise actual adapter evidence and HTTP handlers; the loopback test
+reports a skip when the execution environment denies local network connections.
+They are plumbing/correctness checks, not AI discovery evidence.
+
 The model constructs structured action sequences. For trading it can publish market and credit messages, submit and cancel orders, cause simulated venue fills or cancellation confirmations, inject raw JSON, duplicate messages, choose delivery order and advance logical time. For inventory it can send stock receipts, reservations, cancellations and shipments, duplicate messages, choose delivery order and advance logical time. See the [inventory contract and walkthrough](docs/SECOND_SYSTEM.md) for its bounds and checks.
 
 The experiment envelope is validated independently of its message payloads. Intentionally malformed payloads must reach the target decoder. An invalid experiment action is recorded as a rejected experiment; it is not automatically a target defect.
