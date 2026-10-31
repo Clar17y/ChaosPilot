@@ -355,6 +355,21 @@
               <p id="challenge-status" role="status" aria-live="polite">Select a confirmed finding to challenge it.</p>
               <div id="challenge-results"></div>
             </section>
+            <section class="card regression-capture-card" id="regression-capture-panel" aria-labelledby="regression-capture-title">
+              <h3 id="regression-capture-title">Save selected finding as regression</h3>
+              <p>Convert a confirmed finding into an immutable regression definition. Proposed expected delivery decisions and business-state assertions are derived deterministically from the clean-control reference execution (no model call) and require explicit engineer review before saving.</p>
+              <div class="row" role="group" aria-label="Selected finding regression capture actions">
+                <button type="button" class="btn btn-secondary" id="btn-regression-preview" disabled>Preview regression expectations</button>
+                <label class="checkbox-label" style="display: inline-flex; align-items: center; gap: 6px;">
+                  <input type="checkbox" id="regression-review-checkbox" disabled>
+                  <span>I have reviewed the proposed clean-control reference expectations</span>
+                </label>
+                <button type="button" class="btn btn-primary" id="btn-regression-save" disabled>Save reviewed regression</button>
+                <button type="button" class="btn btn-secondary hidden" id="btn-regression-open-saved">Open in Functional tests</button>
+              </div>
+              <p id="regression-capture-status" role="status" aria-live="polite">Select a confirmed finding to preview and save it as a regression.</p>
+              <div id="regression-preview-container"></div>
+            </section>
             <section class="card reproduction-card" id="reproduction-player" aria-labelledby="repro-title">
               <div class="repro-head">
                 <div>
@@ -592,6 +607,57 @@
             <p class="muted">Historical runs for this system profile. Persisted separately under runs/functional.</p>
             <div id="functional-history-list">
               <p class="muted">No saved functional runs for this system yet.</p>
+            </div>
+          </section>
+
+          <!-- Saved Finding Regressions Suite -->
+          <section class="card" id="regression-suite-section" style="margin-top: 20px;" aria-labelledby="regression-suite-title">
+            <h2 id="regression-suite-title">Saved finding regressions</h2>
+            <p class="muted">Immutable reviewed regression definitions captured from confirmed investigation findings. Each execution selects a compatible target explicitly and records its own executing source hash (distinct from historical replay). Persisted under runs/regressions.</p>
+            <div class="grid">
+              <div>
+                <div class="control-group">
+                  <label for="regression-definition-select">Saved regression definition</label>
+                  <select id="regression-definition-select" class="form-input"></select>
+                </div>
+                <div class="control-group">
+                  <label for="regression-target-select">Target variant for execution</label>
+                  <select id="regression-target-select" class="form-input"></select>
+                </div>
+                <div class="actions" style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-primary" id="btn-run-regression" disabled>Run selected regression</button>
+                  <button type="button" class="btn btn-secondary" id="btn-inspect-regression-definition" disabled>Inspect definition</button>
+                  <span id="regression-run-status" class="muted"></span>
+                </div>
+              </div>
+              <div>
+                <h3>Definitions for selected system</h3>
+                <div id="regression-definitions-list">
+                  <p class="muted">No saved finding regressions for this system profile.</p>
+                </div>
+              </div>
+            </div>
+            <div id="regression-definition-detail-container"></div>
+          </section>
+
+          <!-- Active / Inspected Regression Execution -->
+          <section class="card hidden" id="regression-results-card" style="margin-top: 20px;">
+            <div class="rowtop">
+              <div>
+                <h2>Regression execution results</h2>
+                <p class="muted" id="regression-run-meta"></p>
+              </div>
+              <span id="regression-run-badge" class="system-badge"></span>
+            </div>
+            <div id="regression-run-results-container"></div>
+          </section>
+
+          <!-- Historical Saved Regression Runs -->
+          <section class="card" id="regression-history-card" style="margin-top: 20px;">
+            <h2>Saved regression executions</h2>
+            <p class="muted">Append-only execution history for saved finding regressions. Persisted under runs/regressions/runs.</p>
+            <div id="regression-history-list">
+              <p class="muted">No saved regression executions for this system profile.</p>
             </div>
           </section>
         </section>
