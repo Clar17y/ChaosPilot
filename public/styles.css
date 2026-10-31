@@ -1914,3 +1914,7 @@ textarea.form-input { min-height: 96px; resize: vertical; line-height: 1.6; }
 
 #explanation-report-panel .row{display:flex;flex-wrap:wrap;gap:8px}#explanation-report-status{margin-top:10px}.provenance-details>summary{cursor:pointer;padding:4px 0}@media print{#explanation-report-panel{display:none}}
 .opened-finding{padding:18px 0;border-bottom:1px solid var(--border-color)}.opened-finding h3{margin-bottom:8px}.opened-finding p{max-width:85ch}
+/* Challenge traces retain full evidence while fitting narrow and zoomed views. */
+.challenge-card pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; }
+.challenge-card article { border-top: 1px solid var(--border, #334155); margin-top: 1rem; padding-top: 1rem; }
+.challenge-card details { margin-block: .65rem; }
