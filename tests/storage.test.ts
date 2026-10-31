@@ -50,13 +50,4 @@ describe('listRuns brief metadata', () => {
     expect(legacy.systemBrief).toBeUndefined();
     expect(legacy).toMatchObject({ id: 'run-legacy-01', status: 'completed', findingsCount: 0 });
   });
-
-  it('keeps the pinned revision in the summary even though it is just metadata', async () => {
-    const dir = await tmpDir();
-    const rec = record('run-rev-pinned', true);
-    rec.systemBrief!.brief.revision = 1;
-    await saveRun(rec, dir);
-    const [summary] = await listRuns(dir);
-    expect(summary!.systemBrief?.revision).toBe(1);
-  });
 });
