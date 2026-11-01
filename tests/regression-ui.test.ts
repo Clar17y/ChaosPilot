@@ -402,6 +402,101 @@ describe('RegressionController: context/finding transitions, pending guards, and
     expect(controller.state.definitionDetail).toBeNull();
   });
 
+  it.each([false, true])('keeps a non-first regression selected across target changes and ignores stale responses (run error: %s)', async fails => {
+    const first = await createRegressionFixture();
+    const selected = await createRegressionFixture();
+    const definitions = [...first.definitions, ...selected.definitions];
+    const { controller, requests } = setupController();
+    requests[0]!.deferred.resolve(response(definitions));
+    requests[1]!.deferred.resolve(response([]));
+    await vi.waitFor(() => expect(controller.state.selectedDefinitionId).toBe(first.definition.id));
+
+    controller.selectDefinition(selected.definition.id);
+    const oldDetail = requests.at(-1)!;
+    const oldRun = controller.run();
+    const oldRunRequest = requests.at(-1)!;
+    expect(controller.state.runPending).toBe(true);
+
+    controller.setContext({ ...readyContext, selectedVariant: 'clean', targetState: 'loading' });
+    const oldListRequests = requests.slice(-2);
+    expect(controller.state.selectedDefinitionId).toBe(selected.definition.id);
+    expect(controller.state.definitions).toEqual(definitions);
+    expect(controller.state.runPending).toBe(false);
+    expect(controller.state.executionBlockedReason).not.toBeNull();
+    const requestCount = requests.length;
+    await controller.run();
+    expect(requests).toHaveLength(requestCount);
+
+    controller.setContext({ ...readyContext, selectedVariant: 'clean' });
+    const currentListRequests = requests.slice(-2);
+    currentListRequests[0]!.deferred.resolve(response(definitions));
+    currentListRequests[1]!.deferred.resolve(response([]));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(controller.state.selectedDefinitionId).toBe(selected.definition.id);
+
+    const newRun = controller.run();
+    const newRunRequest = requests.at(-1)!;
+    expect(JSON.parse(String(newRunRequest.init?.body))).toEqual({
+      definitionId: selected.definition.id,
+      systemId: readyContext.systemId,
+      expectedRevision: readyContext.revision,
+      variant: 'clean',
+    });
+
+    // Stale lists, definition details, run success/error, and finally must not
+    // replace the selection or clear the newer target's pending execution.
+    oldListRequests[0]!.deferred.resolve(response(first.definitions));
+    oldListRequests[1]!.deferred.resolve(response([]));
+    oldDetail.deferred.resolve(response(selected.detail));
+    if (fails) oldRunRequest.deferred.reject(new Error('old target failed'));
+    else oldRunRequest.deferred.resolve(response(selected.runRecord));
+    await oldRun;
+    expect(controller.state.selectedDefinitionId).toBe(selected.definition.id);
+    expect(controller.state.definitions).toEqual(definitions);
+    expect(controller.state.definitionDetail).toBeNull();
+    expect(controller.state.runRecord).toBeNull();
+    expect(controller.state.runError).toBeNull();
+    expect(controller.state.runPending).toBe(true);
+
+    newRunRequest.deferred.resolve(response(selected.passRunRecord));
+    await newRun;
+    expect(controller.state.runPending).toBe(false);
+    expect(controller.state.runRecord?.definitionId).toBe(selected.definition.id);
+    expect(controller.state.runRecord?.variant).toBe('clean');
+    expect(controller.state.runRecord?.status).toBe('pass');
+  });
+
+  it('revalidates the preserved selection against refreshed definitions and clears it outside its system/adapter scope', async () => {
+    const first = await createRegressionFixture();
+    const selected = await createRegressionFixture();
+    const definitions = [...first.definitions, ...selected.definitions];
+    for (const patch of [
+      { systemId: 'other-system' },
+      { selectedAdapterId: 'inventory-reservation' },
+      { isDraftMode: true },
+    ]) {
+      const { controller, requests } = setupController();
+      requests[0]!.deferred.resolve(response(definitions));
+      requests[1]!.deferred.resolve(response([]));
+      await vi.waitFor(() => expect(controller.state.definitions).toHaveLength(2));
+      controller.selectDefinition(selected.definition.id);
+      controller.setContext({ ...readyContext, ...patch });
+      expect(controller.state.selectedDefinitionId).toBeNull();
+      expect(controller.state.definitions).toEqual([]);
+    }
+
+    const { controller, requests } = setupController();
+    requests[0]!.deferred.resolve(response(definitions));
+    requests[1]!.deferred.resolve(response([]));
+    await vi.waitFor(() => expect(controller.state.definitions).toHaveLength(2));
+    controller.selectDefinition(selected.definition.id);
+    controller.setContext({ ...readyContext, selectedVariant: 'clean' });
+    requests.at(-2)!.deferred.resolve(response(first.definitions));
+    requests.at(-1)!.deferred.resolve(response([]));
+    await vi.waitFor(() => expect(controller.state.selectedDefinitionId).toBe(first.definition.id));
+    expect(controller.state.definitions).toEqual(first.definitions);
+  });
+
   it('coexists cleanly with FunctionalController and ChallengeSession and surfaces workspace revision differences accurately', async () => {
     const { record, finding, preview, detail, runRecord } = await createRegressionFixture();
 

@@ -126,6 +126,12 @@ export class RegressionController {
 
   setContext(context: RegressionWorkspaceContext): void {
     if (JSON.stringify(context) === JSON.stringify(this.state.context)) return;
+    // Definitions belong to the saved system/adapter, independently of the
+    // selected execution target. Keep the choice visible while refreshing it.
+    const sameDefinitionScope = context.systemId !== null &&
+      context.systemId === this.state.context?.systemId &&
+      context.selectedAdapterId === this.state.context?.selectedAdapterId &&
+      !context.isDraftMode;
     this.generation++;
     this.captureSeq++;
     this.inspectionSeq++;
@@ -141,9 +147,9 @@ export class RegressionController {
       runPending: false,
       runError: null,
       listError: null,
-      definitions: [],
+      definitions: sameDefinitionScope ? this.state.definitions : [],
       runs: [],
-      selectedDefinitionId: null,
+      selectedDefinitionId: sameDefinitionScope ? this.state.selectedDefinitionId : null,
       definitionDetail: null,
       runRecord: null,
     });
