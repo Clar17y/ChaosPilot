@@ -1,6 +1,7 @@
 import type { InvestigationRecord } from '../domain.ts';
 import type { ChallengeRecord, ChallengeView } from '../challenges/types.ts';
 import { parseApiErrorResponse, type ApiResponseLike } from './request-boundaries.ts';
+import { cleanupVerificationView, renderWatchVerificationView } from './challenge-verification.ts';
 
 type ChallengeFetch = (url: string, init?: RequestInit) => Promise<ApiResponseLike>;
 
@@ -29,6 +30,9 @@ export class ChallengeSession {
   private seq = 0;
   private controller: AbortController | null = null;
   private poll: ReturnType<typeof setTimeout> | undefined;
+  private expectedRevision: string | null = null;
+  // select() owns the immutable clone; only cache a successfully computed hash.
+  private expectedHash: string | null = null;
   constructor(private readonly changed: () => void, private readonly fetchFn: ChallengeFetch = (url, init) => fetch(url, init)) {}
 
   select(record: InvestigationRecord | null, findingId: string | null, waitsForSave = false): void {
@@ -37,6 +41,8 @@ export class ChallengeSession {
     this.seq++; this.controller?.abort(); this.controller = null; clearTimeout(this.poll);
     this.selection = selection; this.record = record ? structuredClone(record) : null;
     this.runId = record?.id ?? null; this.findingId = findingId; this.waitsForSave = waitsForSave; this.view = null;
+    this.expectedRevision = null;
+    this.expectedHash = null;
     this.state = 'idle'; this.notice = !findingId ? 'Select a confirmed finding to challenge it.' : waitsForSave ? 'Wait for the terminal run to finish saving.' : '';
     this.changed();
     if (record && findingId && !waitsForSave) void this.refresh();
@@ -44,7 +50,38 @@ export class ChallengeSession {
   private url(): string { return `/api/runs/${encodeURIComponent(this.runId!)}/challenges`; }
   private schedule(token: number): void {
     clearTimeout(this.poll);
-    if (this.view?.inFlight) this.poll = setTimeout(() => { if (this.seq === token) void this.refresh(); }, 1000);
+    if (this.view?.inFlight || this.state === 'generating') {
+      this.poll = setTimeout(() => { if (this.seq === token) void this.pollProgress(token); }, 500);
+    }
+  }
+  private async pollProgress(token: number): Promise<void> {
+    if (this.seq !== token || !this.record || !this.findingId || this.waitsForSave) return;
+    try {
+      const expectedHash = this.expectedHash;
+      const expectedRevision = this.expectedRevision ?? this.view?.runRevision;
+      if (!expectedHash || !expectedRevision) return;
+
+      const response = await this.fetchFn(`${this.url()}?findingId=${encodeURIComponent(this.findingId)}`);
+      if (this.seq !== token) return;
+      if (response.ok) {
+        const view = await response.json() as ChallengeView;
+        if (this.seq !== token) return;
+        if (
+          view &&
+          view.evidenceHash === expectedHash &&
+          view.runRevision === expectedRevision &&
+          typeof view.runRevision === 'string'
+        ) {
+          this.view = view;
+          this.changed();
+        }
+      }
+    } catch {
+      // Ignore background poll errors so active POST is not interrupted
+    }
+    if (this.seq === token && (this.state === 'generating' || this.view?.inFlight)) {
+      this.schedule(token);
+    }
   }
   async refresh(): Promise<void> {
     if (!this.record || !this.findingId || this.state === 'generating' || this.waitsForSave) return;
@@ -53,7 +90,7 @@ export class ChallengeSession {
     const clearPrompt = this.state === 'cancelled' || this.state === 'error' || this.notice.includes('Refresh');
     this.state = 'loading'; this.changed();
     try {
-      const expectedHash = await challengeRecordHash(record);
+      const expectedHash = this.expectedHash ?? await challengeRecordHash(record);
       if (token !== this.seq) return;
       const response = await this.fetchFn(`${this.url()}?findingId=${encodeURIComponent(this.findingId)}`);
       if (!response.ok) throw new Error(await parseApiErrorResponse(response));
@@ -61,12 +98,15 @@ export class ChallengeSession {
       if (token !== this.seq) return;
       if (!view || view.evidenceHash !== expectedHash || typeof view.runRevision !== 'string') {
         this.view = null;
+        this.expectedRevision = null;
         throw new Error('Saved run evidence changed. Reload the run before challenging this finding.');
       }
+      this.expectedRevision = view.runRevision;
+      this.expectedHash = expectedHash;
       this.view = view; this.state = 'ready'; if (clearPrompt) this.notice = ''; this.schedule(token);
     } catch (error) {
       if (token !== this.seq) return;
-      this.view = null; this.state = 'error'; this.notice = error instanceof Error ? error.message : String(error);
+      this.view = null; this.expectedRevision = null; this.state = 'error'; this.notice = error instanceof Error ? error.message : String(error);
     }
     this.changed();
   }
@@ -78,6 +118,7 @@ export class ChallengeSession {
     clearTimeout(this.poll);
     const controller = new AbortController(); this.controller = controller;
     this.state = 'generating'; this.notice = ''; this.changed();
+    this.schedule(token);
     try {
       const response = await this.fetchFn(this.url(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
@@ -93,12 +134,14 @@ export class ChallengeSession {
       this.notice = controller.signal.aborted ? 'Challenge cancelled. Completed evidence remains saved; remote usage may be unknown.' : error instanceof Error ? error.message : String(error);
     }
     if (token !== this.seq) return;
+    clearTimeout(this.poll);
     this.controller = null; this.state = 'ready';
     await this.refresh();
   }
   cancel(): void {
     if (this.state !== 'generating') return;
     this.controller?.abort(); this.controller = null; ++this.seq;
+    clearTimeout(this.poll);
     this.state = 'cancelled';
     this.notice = 'Challenge cancelled. Completed evidence remains saved; remote usage may be unknown. Refresh to inspect retained evidence.';
     this.changed();
@@ -126,50 +169,16 @@ export function renderChallengePanel(host: HTMLElement, session: ChallengeSessio
   ].filter(Boolean).join(' ');
   const results = find('challenge-results');
   if (!results) return;
-  const key = JSON.stringify([view?.current, view?.latestPartial, view?.latestAttempt]);
+  const key = JSON.stringify([session.runId, session.findingId, view?.current, view?.latestPartial, view?.latestAttempt, view?.inFlight, session.state]);
   if (rendered.get(results) === key) return;
-  rendered.set(results, key); results.replaceChildren();
-  const paragraph = (parent: HTMLElement, value: string) => { const p = document.createElement('p'); p.textContent = value; parent.append(p); };
-  const details = (parent: HTMLElement, label: string, value: unknown) => {
-    const d = document.createElement('details'); const s = document.createElement('summary'); s.textContent = label;
-    const pre = document.createElement('pre'); pre.textContent = JSON.stringify(value, null, 2); d.append(s, pre); parent.append(d);
-  };
-  const renderArtifact = (current: ChallengeRecord, label: string) => {
-    paragraph(results, `${label} ${current.id} · ${current.status} · ${current.startedAt}`);
-    if (current.error) paragraph(results, current.error);
-    details(results, 'Exact run, finding, experiment and source identities', current.binding);
-    current.variants.forEach((variant, i) => {
-      const article = document.createElement('article');
-      const heading = document.createElement('h4'); heading.textContent = `Variation ${i + 1}`; article.append(heading);
-      paragraph(article, `Muse proposed change: ${variant.proposedChange}`);
-      paragraph(article, `Hypothesis: ${variant.experiment.hypothesis}`);
-      paragraph(article, `Candidate: ${variant.candidateStatus} · Same invariant (${current.binding.invariant}): ${variant.sameInvariant} · Replay: ${variant.replayStatus} · Clean control: ${variant.cleanStatus}`);
-      paragraph(article, variant.reproduced ? 'Same invariant reproduced with matching replay and a verified clean comparison. This observation does not prove root cause.' : 'Same invariant reproduction with a verified clean comparison has not been established.');
-      if (variant.otherInvariants.length) paragraph(article, `Other observed invariants: ${variant.otherInvariants.join(', ')}`);
-      if (variant.clean && variant.clean.violations.length > 0) {
-        paragraph(article, `Clean control violations: ${variant.clean.violations.map(v => v.invariant).join(', ')}`);
-      }
-      for (const error of [...variant.errors, ...variant.replayMismatches]) paragraph(article, error);
-      details(article, 'Actual step differences from original experiment', variant.changes);
-      details(article, 'Experiment steps', variant.experiment.steps);
-      for (const kind of ['candidate', 'replay', 'clean'] as const) if (variant[kind]) details(article, `${kind}: full trace, snapshot, violations and rejections`, variant[kind]);
-      results.append(article);
+  cleanupVerificationView(results);
+  rendered.set(results, key);
+  results.replaceChildren();
+
+  if (view && (view.current || view.latestAttempt || view.latestPartial || pending)) {
+    renderWatchVerificationView(results, view, () => {
+      rendered.delete(results);
+      renderChallengePanel(host, session);
     });
-    paragraph(results, `Muse interpretation (${current.interpretation.status}) — interpretation, not deterministic evidence:`);
-    paragraph(results, current.interpretation.text ?? current.interpretation.error ?? 'No interpretation available.');
-    details(results, 'Challenge model requests and reported usage (null means unknown)', current.requests);
-    if (current.proposalResponse) details(results, 'Model proposal response (untrusted text)', current.proposalResponse);
-  };
-  const current = view?.current;
-  if (current) renderArtifact(current, 'Saved challenge');
-  const latestPartial = view?.latestPartial;
-  if (latestPartial && latestPartial.id !== current?.id) {
-    paragraph(results, `Previous partial attempt: ${latestPartial.status}${latestPartial.error ? ` — ${latestPartial.error}` : ''}. Earlier valid evidence is retained.`);
-    renderArtifact(latestPartial, 'Partial attempt');
-  }
-  const latest = view?.latestAttempt;
-  if (latest && latest.id !== current?.id && latest.id !== latestPartial?.id) {
-    paragraph(results, `Latest attempt: ${latest.status}${latest.error ? ` — ${latest.error}` : ''}. Earlier valid evidence is retained above when available.`);
-    renderArtifact(latest, 'Latest attempt');
   }
 }

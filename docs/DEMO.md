@@ -23,7 +23,7 @@ The Proposals tab now separates model invocations from executed experiments. Sho
 The prompt 2.0 held-out run `run_bench_1793054619004_8e332a` is an authentic saved Spark finding. Import instructions are in `examples/controlled-v2/README.md`. It discovered the fault on the first experiment; do not narrate an adaptation that did not occur. `docs/heldout-finding-proof.png`, `docs/proposal-live-proof.png` and `docs/heldout-replay-proof.png` capture inspection and replay of this run. Its batch showed additional coverage over the fixed generator, with partial fixture-author blinding and unmeasured human timing.
 
 For a live presentation, keep an authentic completed investigation available to inspect while a new one runs. Explain whether the screen shows a new investigation or saved evidence. A failed or inconclusive fresh run remains a legitimate outcome; do not replace it with an unlabelled scripted path.
-# Challenge a saved finding
+# Challenge a saved finding and Watch verification
 
 1. Create a mock run for trading candidate A or inventory candidate A and let it finish saving.
 2. Open its confirmed finding and recorded reproduction. The challenge panel checks saved
@@ -32,13 +32,22 @@ For a live presentation, keep an authentic completed investigation available to 
 3. **Challenge with Muse · paid Meta API** explicitly uses the configured Meta model and
    incurs usage, even for a finding created by a mock run. It makes one proposal request for
    1–3 variants and, after deterministic execution, one interpretation request, without retries.
-4. Inspect proposed differences/hypotheses, actual step changes, candidate, replay and clean
-   results, same-invariant status and expandable full traces. Interpretation is labelled as
-   model text; an observation is not proof of root cause.
-5. Reload or revisit the same finding to retrieve saved evidence. Cancel stops subsequent
-   work but retains completed traces; remote usage may remain unknown. Failed interpretation
-   leaves execution evidence available. Failed new proposals retain earlier completed results.
+4. Watch verification presents a live 6-stage pipeline (Muse proposal -> candidate execution ->
+   replay verification -> clean control -> Muse interpretation -> terminal result) with real-time
+   read-only progress polling during generation that never reexecutes simulations.
+5. Inspect the full-width code pane, then the test steps and results beneath it (side by side on desktop, stacked on mobile):
+   - **Exact test steps & differences**: Proposed change, hypothesis, before/after step
+     diffs, and the proposed action sequence with active step highlighting matching playback.
+   - **Actual code under test**: Provenance-matched candidate and clean control source
+     bundles with verified SHA-256 hashes, file selector, line numbers and syntax highlighting.
+     Legacy records degrade honestly with a missing-source label.
+   - **Recorded execution results & saved trace playback**: Candidate, replay and clean
+     verdicts, violations, and deterministic in-memory trace playback controls (Play/Pause,
+     Next, Prev, Reset) that operate without model or code execution.
+6. Reopening or reloading a finding retrieves saved evidence. Cancelling halts further backend work
+   and preserves partial completed evidence. Active and historical challenge attempts remain distinct,
+   ensuring new attempts never overwrite earlier valid evidence or inherit their success.
 
-Use `npx vitest run tests/challenges.test.ts tests/challenge-api.test.ts tests/challenge-ui.test.ts`
+Use `npx vitest run tests/challenges.test.ts tests/challenge-api.test.ts tests/challenge-ui.test.ts tests/challenge-verification.test.ts`
 for an offline demonstration of the complete service/UI request flow with fake model
-responses and real deterministic adapters. No live Meta request is needed for these tests.
+responses, real deterministic adapters, and verified playback. No live Meta request is needed for these tests.
