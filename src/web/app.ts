@@ -1,4 +1,5 @@
 import { initFunctionalWorkspaceView } from './functional.ts';
+import { initRegressionWorkspaceView, type RegressionController } from './regressions.ts';
 import type {
   InvestigationRecord,
   ExperimentRecord,
@@ -553,7 +554,29 @@ function renderFindingsView(): void {
             panel.focus();
           }
         });
-        card.append(status, explain, go, challenge); opened.appendChild(card);
+        const saveReg = document.createElement('button'); saveReg.type = 'button'; saveReg.className = 'btn btn-secondary btn-xs';
+        saveReg.textContent = 'Save as regression';
+        saveReg.setAttribute('aria-label', `Save regression definition for finding ${index + 1}: ${conciseFindingTitle(f)}`);
+        saveReg.addEventListener('click', () => {
+          const rec = currentInvestigationRecord;
+          if (!rec || resolveExperimentPosition(rec, f) < 0) {
+            showAlert('The experiment for this finding is not present in the opened run, so it cannot be saved as a regression.');
+            return;
+          }
+          showView('investigations');
+          openReproductionForFinding(f, false);
+          void regressionController.preview();
+          const panel = document.getElementById('regression-capture-panel');
+          panel?.scrollIntoView({ block: 'start' });
+          const previewBtn = document.getElementById('btn-regression-preview') as HTMLButtonElement | null;
+          if (previewBtn && !previewBtn.disabled) {
+            previewBtn.focus();
+          } else if (panel) {
+            if (!panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1');
+            panel.focus();
+          }
+        });
+        card.append(status, explain, go, challenge, saveReg); opened.appendChild(card);
       }
     }
   }
@@ -621,7 +644,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); regressionController?.selectFinding(null, null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -1026,6 +1049,18 @@ function renderFindings(findings: Finding[]): void {
     openBtn.addEventListener('click', () => openReproductionForFinding(f));
     body.appendChild(openBtn);
 
+    const saveRegBtn = document.createElement('button');
+    saveRegBtn.type = 'button';
+    saveRegBtn.className = 'btn btn-secondary btn-xs';
+    saveRegBtn.textContent = 'Save as regression';
+    saveRegBtn.setAttribute('aria-label', `Save as regression for finding ${i + 1}: ${f.title}`);
+    saveRegBtn.addEventListener('click', () => {
+      openReproductionForFinding(f, false);
+      void regressionController.preview();
+      document.getElementById('regression-capture-panel')?.scrollIntoView({ block: 'start' });
+    });
+    body.appendChild(saveRegBtn);
+
     card.appendChild(header);
     card.appendChild(body);
 
@@ -1293,6 +1328,7 @@ function clearReproductionDetail(): void { const facts = reproEl('repro-generic-
 
 function resetReproductionSelection(): void {
   challengeSession.select(null, null);
+  regressionController?.selectFinding(null, null);
   reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = '';
   reproSession.clear();
   clearFreshView(); reproShowFull = false;
@@ -1312,6 +1348,7 @@ function renderReproduction(): void {
   } else reproStage = null;
   const waitingForSave = rec ? replayWaitsForSave(rec, isInvestigationActive, activeRecordId) : false;
   challengeSession.select(rec, reproSession.selectedFinding?.id ?? null, waitingForSave);
+  regressionController?.selectFinding(rec, reproSession.selectedFinding?.id ?? null, waitingForSave);
   const reproEyebrow = reproEl('repro-eyebrow');
   if (reproEyebrow) reproEyebrow.textContent = waitingForSave ? 'Recorded experiments · investigation in progress' : 'Recorded evidence';
   const sourceIndicator = reproEl('repro-source-indicator');
@@ -1901,6 +1938,13 @@ function selectedMaxExperiments(): number {
 
 function updateRequestPreflight(): void {
   functionalController.setContext({
+    systemId: selectedSystem?.id ?? null, revision: selectedSystem?.revision ?? null,
+    isDraftMode, hasUnsavedSystemEdits, isSystemSavePending,
+    hasSelectedSystem: Boolean(selectedSystem), selectedAdapterId: effectiveAdapter(),
+    snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
+    selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
+  });
+  regressionController.setContext({
     systemId: selectedSystem?.id ?? null, revision: selectedSystem?.revision ?? null,
     isDraftMode, hasUnsavedSystemEdits, isSystemSavePending,
     hasSelectedSystem: Boolean(selectedSystem), selectedAdapterId: effectiveAdapter(),
@@ -2525,6 +2569,17 @@ const functionalController = initFunctionalWorkspaceView(variant => {
   targetSelection.select(variant);
   targetSelect.value = targetSelection.selection ?? '';
   updateRunReadiness();
+});
+
+const regressionController: RegressionController = initRegressionWorkspaceView({
+  onTargetChange: variant => {
+    targetSelection.select(variant);
+    targetSelect.value = targetSelection.selection ?? '';
+    updateRunReadiness();
+  },
+  onOpenFunctionalView: () => {
+    showView('functional');
+  },
 });
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);
