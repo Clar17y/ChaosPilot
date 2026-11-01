@@ -1,4 +1,4 @@
-import type { Action, Experiment, ExperimentResult, TargetVariant, Usage } from '../domain.ts';
+import type { Action, Experiment, ExperimentResult, SourceBundle, TargetVariant, Usage } from '../domain.ts';
 
 export interface ChallengeBinding {
   runId: string;
@@ -42,6 +42,16 @@ export interface ChallengeRequest {
   requestSent: boolean | null;
   error?: string;
 }
+export type ChallengeStageName = 'proposal' | 'candidate' | 'replay' | 'clean' | 'interpretation' | 'terminal';
+
+export interface ChallengeStageCheckpoint {
+  stage: ChallengeStageName;
+  variantIndex?: number;
+  totalVariants?: number;
+  detail?: string;
+  updatedAt: string;
+}
+
 export interface ChallengeRecord {
   schemaVersion: 1;
   id: string;
@@ -49,6 +59,11 @@ export interface ChallengeRecord {
   startedAt: string;
   finishedAt?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
+  stage?: ChallengeStageCheckpoint;
+  sources?: {
+    candidate?: SourceBundle;
+    clean?: SourceBundle;
+  };
   variants: ChallengeVariant[];
   proposalResponse?: { text: string; bytes: number; truncated: boolean };
   requests: ChallengeRequest[];

@@ -54,6 +54,17 @@ Confirmed `synthetic-trading` findings can also be converted into immutable, eng
 
 At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. The current prompt and larger request limits have not been evaluated in a new live comparison.
 
+## Watch verification (Challenge with Muse)
+
+When inspecting a confirmed finding in **Findings & reproductions**, engineers can challenge the finding with Muse to test whether proposed variations reproduce the same invariant failure.
+
+**Watch verification** gives the source code a full-width pane, with test steps and execution results beneath it side by side on desktop and stacked on mobile:
+1. **Exact test steps & differences**: Proposed change, hypothesis, before/after differences from the original sequence, and the exact experiment steps with active step highlighting synchronised with playback.
+2. **Actual code under test**: Provenance-matched candidate and clean control source code with verified SHA-256 hashes, file selector, line numbers and accessible syntax highlighting. Context-only notice clarifies that source files provide execution context without per-line instrumentation; legacy records degrade honestly with an unrecorded-source notice.
+3. **Recorded execution results & trace playback**: Classification verdicts (candidate, replay and clean control status), observed invariants, and interactive in-memory trace playback (Play/Pause, Previous, Next, Reset) that updates the active action, state facts, and recorded violations without model or code execution.
+
+During challenge generation, real-time stage progress (Muse proposing -> candidate execution -> replay verification -> clean control -> Muse interpreting -> terminal result) is observable via read-only polling that never reexecutes preflight simulations. Checkpoints and completed evidence are preserved on cancellation or error, and newest active attempts remain prominent while retaining prior completed artifacts.
+
 ## Findings reports (saved HTML)
 
 In **Findings & reproductions**, the opened run's findings are shown first; prior runs and verbose provenance are collapsed below. For a saved terminal run with findings, **Create report with Muse** calls Muse through the existing Meta API (shared key, model, limits and budget ledger; it incurs usage), while **Create offline scripted report** makes no model call, incurs no usage and is explicitly labelled not Muse. Either action saves a self-contained, printable HTML report under `runs/reports/` covering every recorded finding — hypothesis/why tested, recorded action/trace sequence, expected vs observed, and the recorded replay/clean-control status — with missing, legacy, ambiguous or truncated evidence stated rather than invented. View/download later makes no model call; stale reports (evidence changed) and reports for deleted runs are never served as current. Model narration is labelled interpretation and is rendered escaped in a static template; expected/observed/replay facts come only from the record.
