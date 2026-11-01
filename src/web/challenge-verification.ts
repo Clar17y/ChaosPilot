@@ -1,5 +1,6 @@
 import type { ChallengeRecord, ChallengeVariant, ChallengeView } from '../challenges/types.ts';
 import type { SourceBundle, TraceEntry } from '../domain.ts';
+import { renderChallengeInterpretation } from './challenge-interpretation.ts';
 
 export interface VerificationViewState {
   selectedAttemptId?: string;
@@ -1090,15 +1091,7 @@ function renderVerificationFooter(parent: HTMLElement, record: ChallengeRecord):
   const footer = document.createElement('footer');
   footer.className = 'verification-footer';
 
-  const pInterpHead = document.createElement('p');
-  pInterpHead.className = 'interp-head';
-  pInterpHead.textContent = `Muse interpretation (${record.interpretation.status}) — interpretation, not deterministic evidence:`;
-  footer.append(pInterpHead);
-
-  const pInterpBody = document.createElement('p');
-  pInterpBody.className = 'interp-body';
-  pInterpBody.textContent = record.interpretation.text ?? record.interpretation.error ?? 'No interpretation available.';
-  footer.append(pInterpBody);
+  renderChallengeInterpretation(footer, record.interpretation);
 
   appendJsonDetails(footer, 'Challenge model requests and reported usage (null means unknown)', record.requests);
 

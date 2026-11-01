@@ -4,6 +4,8 @@ import type {
   RegressionDefinitionDetail,
   RegressionDefinitionRecord,
   RegressionDefinitionSummary,
+  RegressionDeliveryExpectation,
+  RegressionOrderStateExpectation,
   RegressionPreviewResult,
   RegressionRunRecord,
   RegressionRunSummary,
@@ -589,6 +591,87 @@ export function setHtmlPreservingDisclosures(
   }
 }
 
+function renderOrderExpectations(
+  orders: Record<string, RegressionOrderStateExpectation>,
+): string {
+  const entries = Object.entries(orders);
+  if (entries.length === 0) {
+    return `<p class="orders-empty-state">No orders expected in active state.</p>`;
+  }
+  return `<div class="orders-cards-list">
+    ${entries
+      .map(([orderKey, o]) => `
+      <div class="order-card">
+        <div class="order-card-header">
+          <span class="order-id-label">Order <code>${escapeHtml(o.orderId || orderKey)}</code></span>
+          <span class="order-status-badge status-${escapeHtml(o.status.toLowerCase())}">${escapeHtml(o.status)}</span>
+        </div>
+        <div class="order-fields-grid">
+          <div class="order-field"><span class="field-label">Quote ID:</span> <code>${escapeHtml(o.quoteId)}</code></div>
+          <div class="order-field"><span class="field-label">Price:</span> <span class="field-val">${o.price}</span></div>
+          <div class="order-field"><span class="field-label">Initial qty:</span> <span class="field-val">${o.initialQuantity}</span></div>
+          <div class="order-field"><span class="field-label">Remaining qty:</span> <span class="field-val">${o.remainingQuantity}</span></div>
+          <div class="order-field"><span class="field-label">Filled qty:</span> <span class="field-val">${o.filledQuantity}</span></div>
+          <div class="order-field"><span class="field-label">Cancelled qty:</span> <span class="field-val">${o.cancelledQuantity}</span></div>
+          <div class="order-field"><span class="field-label">Cancel requested:</span> <span class="field-val">${o.cancellationRequested ? 'true' : 'false'}</span></div>
+        </div>
+      </div>
+    `)
+      .join('')}
+  </div>`;
+}
+
+function renderAbsentOrders(absentOrderIds: string[]): string {
+  if (absentOrderIds.length === 0) {
+    return `<div class="absent-orders-row empty"><span class="absent-label">Absent orders:</span> <span class="muted">No absence assertions</span></div>`;
+  }
+  return `<div class="absent-orders-row present">
+    <span class="absent-label">Asserted absent orders:</span>
+    <div class="absent-order-tags">
+      ${absentOrderIds.map(id => `<code class="absent-tag">${escapeHtml(id)}</code>`).join(' ')}
+    </div>
+  </div>`;
+}
+
+function renderDeliveryMilestoneCard(d: RegressionDeliveryExpectation): string {
+  const statusCls =
+    d.expectedStatus === 'accepted' ? 'milestone-accepted' : 'milestone-rejected';
+  const limitVal = d.expectedState.creditLimit
+    ? `${d.expectedState.creditLimit.limit} (v${d.expectedState.creditLimit.version})`
+    : 'null';
+  const quoteVal = d.expectedState.quote
+    ? `<code>${escapeHtml(d.expectedState.quote.id)}</code> @ ${d.expectedState.quote.price} (v${d.expectedState.quote.version})`
+    : 'null';
+
+  return `<article class="milestone-card ${statusCls}">
+    <header class="milestone-header">
+      <div class="milestone-primary-info">
+        <span class="milestone-step-badge">Step ${d.step + 1}</span>
+        <span class="milestone-trace-action">trace ${d.traceIndex} · ${escapeHtml(d.action)}</span>
+        <code class="milestone-msg-id">${escapeHtml(d.messageId)}</code>
+        <span class="milestone-channel-type">(${escapeHtml(d.channel)} / ${escapeHtml(d.messageType)})</span>
+      </div>
+      <div class="milestone-status-badges">
+        <span class="badge badge-status badge-${escapeHtml(d.expectedStatus)}">${escapeHtml(d.expectedStatus.toUpperCase())}</span>
+        ${d.expectedState.stateUnchangedFromPrevious ? `<span class="badge badge-unchanged">state unchanged</span>` : ''}
+      </div>
+    </header>
+    ${d.expectedReason ? `<div class="milestone-reason"><span class="reason-label">Expected rejection reason:</span> <span class="reason-text">${escapeHtml(d.expectedReason)}</span></div>` : ''}
+    ${d.targetOrderId ? `<div class="milestone-target-order"><span class="target-order-label">Target order:</span> <code>${escapeHtml(d.targetOrderId)}</code></div>` : ''}
+    <div class="milestone-metrics-grid">
+      <div class="metric-item"><span class="metric-key">Used credit:</span> <span class="metric-val">${d.expectedState.usedCredit}</span></div>
+      <div class="metric-item"><span class="metric-key">Reserved credit:</span> <span class="metric-val">${d.expectedState.reservedCredit}</span></div>
+      <div class="metric-item"><span class="metric-key">Credit limit:</span> <span class="metric-val">${limitVal}</span></div>
+      <div class="metric-item"><span class="metric-key">Active quote:</span> <span class="metric-val">${quoteVal}</span></div>
+    </div>
+    <div class="milestone-orders-section">
+      <h5 class="orders-section-title">Order Expectations &amp; Absence</h5>
+      ${renderOrderExpectations(d.expectedState.orders)}
+      ${renderAbsentOrders(d.expectedState.absentOrderIds)}
+    </div>
+  </article>`;
+}
+
 export function regressionPreviewHtml(
   preview: Extract<RegressionPreviewResult, { available: true }>,
   currentWorkspaceRevision: number | null,
@@ -600,40 +683,35 @@ export function regressionPreviewHtml(
       : '';
 
   return `<div class="regression-preview-summary">
-    <p><strong>${escapeHtml(preview.expected.referenceProvenance.reviewLabel)}</strong></p>
-    <p class="muted">${escapeHtml(preview.expected.referenceProvenance.note)}</p>
+    <div class="regression-provenance-banner">
+      <p><strong>${escapeHtml(preview.expected.referenceProvenance.reviewLabel)}</strong></p>
+      <p class="muted">${escapeHtml(preview.expected.referenceProvenance.note)}</p>
+    </div>
     ${revDiffNotice}
-    <p>Proposed definition ID: <code>${escapeHtml(preview.definitionId)}</code> · Origin run <code>${escapeHtml(preview.runId)}</code> · Finding <code>${escapeHtml(preview.findingId)}</code> (experiment #${preview.origin.experimentIndex}) · Pinned brief <code>${escapeHtml(preview.origin.systemBrief.id)}</code> rev ${originRev} · Original target <code>${escapeHtml(preview.origin.variant)}</code> (<code>${escapeHtml(preview.origin.sourceHash)}</code>) · Clean reference source <code>${escapeHtml(preview.origin.cleanSourceHash)}</code></p>
+    <p class="regression-meta-line">Experiment #${preview.origin.experimentIndex} · Target <code>${escapeHtml(preview.origin.variant)}</code> · Pinned brief <code>${escapeHtml(preview.origin.systemBrief.id)}</code> rev ${originRev}</p>
     ${preview.existingDefinitionId ? `<p class="note">This exact finding and expectation set is already saved as regression definition <code>${escapeHtml(preview.existingDefinitionId)}</code>.</p>` : ''}
     <details data-disclosure-key="preview-deliveries" open>
       <summary>Proposed delivery decisions and business-state assertions (${preview.expected.deliveries.length} delivery milestone(s))</summary>
-      <div style="overflow:auto">
-        <table>
-          <thead><tr><th>Step / Trace</th><th>Message</th><th>Expected Decision</th><th>Expected Credit / Quote</th><th>Expected Orders &amp; Absence</th></tr></thead>
-          <tbody>
-            ${preview.expected.deliveries
-              .map(
-                d => `<tr>
-              <td>Step ${d.step + 1} (trace ${d.traceIndex}, ${escapeHtml(d.action)})</td>
-              <td><code>${escapeHtml(d.messageId)}</code> (${escapeHtml(d.channel)} / ${escapeHtml(d.messageType)})</td>
-              <td><strong>${escapeHtml(d.expectedStatus)}</strong>${d.expectedReason ? ` (${escapeHtml(d.expectedReason)})` : ''}${d.expectedState.stateUnchangedFromPrevious ? ' · state unchanged' : ''}</td>
-              <td>used=${d.expectedState.usedCredit}, reserved=${d.expectedState.reservedCredit}, limit=${d.expectedState.creditLimit?.limit ?? 'null'}, quote=${d.expectedState.quote ? `${escapeHtml(d.expectedState.quote.id)}@${d.expectedState.quote.price}(v${d.expectedState.quote.version})` : 'null'}</td>
-              <td>orders=${escapeHtml(JSON.stringify(d.expectedState.orders))} · absent=${escapeHtml(JSON.stringify(d.expectedState.absentOrderIds))}</td>
-            </tr>`,
-              )
-              .join('')}
-          </tbody>
-        </table>
+      <div class="milestones-stack">
+        ${preview.expected.deliveries.map(d => renderDeliveryMilestoneCard(d)).join('')}
       </div>
     </details>
     <details data-disclosure-key="preview-origin">
       <summary>Pinned origin, sequence steps, final state and review token</summary>
+      <dl class="regression-identities">
+        <dt>Proposed definition ID:</dt><dd><code>${escapeHtml(preview.definitionId)}</code></dd>
+        <dt>Origin run</dt><dd><code>${escapeHtml(preview.runId)}</code></dd>
+        <dt>Finding</dt><dd><code>${escapeHtml(preview.findingId)}</code></dd>
+        <dt>Original target source</dt><dd><code>${escapeHtml(preview.origin.sourceHash)}</code></dd>
+        <dt>Clean reference source</dt><dd><code>${escapeHtml(preview.origin.cleanSourceHash)}</code></dd>
+      </dl>
       ${raw({
         definitionId: preview.definitionId,
         contentHash: preview.contentHash,
         reviewToken: preview.reviewToken,
         experiment: preview.experiment,
         expectedFinalState: preview.expected.finalState,
+        expectedDeliveries: preview.expected.deliveries,
         evaluator: preview.evaluator,
         origin: {
           runId: preview.origin.runId,
