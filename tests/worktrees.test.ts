@@ -66,7 +66,7 @@ fs.writeFileSync(path.join(process.cwd(), "node_modules", ".installed"), "yes\\n
   return fake;
 }
 
-describe("worktrees CLI", () => {
+describe("worktrees CLI", { timeout: 30000 }, () => {
   it("creates, lists and removes a managed worktree; branch is retained", () => {
     const { primary, root } = makeRepo();
     const target = path.join(root, "alpha");

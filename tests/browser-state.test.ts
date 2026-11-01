@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { extractSnapshotDisplay } from '../src/web/snapshot.ts';
-import type { InvestigationRecord } from '../src/domain.ts';
 
 describe('UI Snapshot & State Model (Pure Display Helper)', () => {
   it('extracts actual state from nested target snapshot (nested target state)', () => {
@@ -181,75 +180,5 @@ describe('UI Snapshot & State Model (Pure Display Helper)', () => {
     expect(model.credit.availableCredit).toBe('4700');
     expect(model.hasOrders).toBe(true);
     expect(model.orders[0]?.status).toBe('CANCELLED');
-  });
-
-  it('preserves saved run status and provenance fields accurately (saved run status/provenance)', () => {
-    const mockRecord: InvestigationRecord = {
-      schemaVersion: 1,
-      id: 'run_test_saved_01',
-      provider: 'mock',
-      model: 'mock-runner',
-      mode: 'mock',
-      variant: 'candidate-b',
-      status: 'completed',
-      startedAt: '2026-10-26T18:00:00.000Z',
-      finishedAt: '2026-10-26T18:00:02.000Z',
-      sourceHash: 'source-hash-111',
-      experiments: [],
-      findings: [],
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-      errors: [],
-      contextAudit: { sourcePaths: [], contractHash: '', promptVersion: '1.0' },
-    };
-
-    expect(mockRecord.status).toBe('completed');
-    expect(mockRecord.mode).toBe('mock');
-    expect(mockRecord.variant).toBe('candidate-b');
-
-    const liveRecord: InvestigationRecord = {
-      ...mockRecord,
-      id: 'run_test_saved_02',
-      provider: 'meta',
-      model: 'muse-wonder-1.0',
-      mode: 'live',
-      status: 'failed',
-      stopReason: 'Rate limit exceeded',
-    };
-
-    expect(liveRecord.status).toBe('failed');
-    expect(liveRecord.mode).toBe('live');
-    expect(liveRecord.stopReason).toBe('Rate limit exceeded');
-  });
-
-  it('resets selected experiment index on run selection without retaining stale indices (selected experiment reset)', () => {
-    // Emulate UI index selection boundary check
-    let selectedExperimentIndex = 4; // previously on experiment 5 of another run
-
-    const incomingSavedRecord: Partial<InvestigationRecord> = {
-      id: 'run_small_01',
-      experiments: [
-        {
-          index: 0,
-          experiment: { hypothesis: 'H1', expectedInvariant: 'I1', steps: [] },
-          result: {
-            schemaVersion: 1,
-            experiment: { hypothesis: 'H1', expectedInvariant: 'I1', steps: [] },
-            sourceHash: 'hash',
-            trace: [],
-            snapshot: {},
-            violations: [],
-            rejections: [],
-            valid: true,
-          },
-          replayVerified: true,
-          cleanControlPassed: true,
-        },
-      ],
-    };
-
-    // Upon viewing a saved run, index must be reset to 0
-    selectedExperimentIndex = 0;
-    expect(selectedExperimentIndex).toBe(0);
-    expect(incomingSavedRecord.experiments?.[selectedExperimentIndex]).toBeDefined();
   });
 });

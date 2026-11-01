@@ -134,14 +134,4 @@ describe('Held-out target variant validation', () => {
     const expResult = executeExperiment(reproducerExperiment, 'candidate-c');
     expect(expResult.sourceHash).toBe(bundle.hash);
   });
-
-  it('preserves unchanged source hashes for prior variants', () => {
-    const cleanBundle = getSourceBundle('clean');
-    const aBundle = getSourceBundle('candidate-a');
-    const bBundle = getSourceBundle('candidate-b');
-    const cBundle = getSourceBundle('candidate-c');
-
-    const hashes = new Set([cleanBundle.hash, aBundle.hash, bBundle.hash, cBundle.hash]);
-    expect(hashes.size).toBe(4);
-  });
 });

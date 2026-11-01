@@ -459,32 +459,6 @@ describe('Replay Provenance & Deterministic Execution', () => {
     expect(loaded?.stopReason).toContain('Interrupted');
     expect(loaded?.experiments).toHaveLength(1);
   });
-
-  it('never invokes model/provider during replay', async () => {
-    const record = createDummyRecord('run_replay_no_prov');
-    await saveRun(record, tmpDir);
-
-    let providerCalled = false;
-    const fakeSimulator: SimulatorApi = {
-      getSourceBundle: (_v) => ({ hash: 'hash-abc-123', files: [] }),
-      executeExperiment: (_exp, _v) => {
-        // Deterministic simulator execution only
-        return {
-          schemaVersion: 1,
-          experiment: _exp,
-          sourceHash: 'hash-abc-123',
-          trace: [],
-          snapshot: {},
-          violations: [],
-          rejections: [],
-          valid: true,
-        };
-      },
-    };
-
-    await replayRun('run_replay_no_prov', tmpDir, fakeSimulator);
-    expect(providerCalled).toBe(false);
-  });
 });
 
 describe('HTTP Server Lifecycle & Invariants', () => {

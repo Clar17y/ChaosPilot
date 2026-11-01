@@ -17,14 +17,18 @@ function attempt(status: ProposalAttempt['status'], requestSent?: boolean): Prop
 
 it('distinguishes unrecorded legacy proposal history from a known empty history', () => {
   expect(describeProposals(record()).count).toBeNull();
+  expect(describeProposals(record()).summary).toContain('not recorded');
   expect(describeProposals(record([])).count).toBe(0);
 });
 
 it('counts rejected, failed and pending proposals separately from executed experiments', () => {
-  const display = describeProposals(record([
+  const rec = record([
     attempt('invalid_response'), attempt('invalid_plan'), attempt('failed'), attempt('pending')
-  ]));
-  expect(display.summary).toContain('4 proposals recorded; 0 experiments executed; 2 proposals rejected; 1 failed or cancelled; 1 pending');
+  ]);
+  rec.experiments = [{}, {}] as InvestigationRecord['experiments'];
+  const display = describeProposals(rec);
+  expect(display.count).toBe(4);
+  expect(display.summary).toContain('4 proposals recorded; 2 experiments executed; 2 proposals rejected; 1 failed or cancelled; 1 pending');
   expect(display.unknownCost).toBe(true);
 });
 

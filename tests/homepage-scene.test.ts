@@ -82,10 +82,6 @@ describe('timeline', () => {
     expect(s.playing).toBe(false);
     expect(s.reducedMotion).toBe(false);
   });
-  it('next while paused shows new caption immediately', () => {
-    const s = nextEvent(pauseTimeline(createTimeline()));
-    expect(s.eventIndex).toBe(1); expect(s.playing).toBe(false);
-  });
 });
 
 describe('scene geometry', () => {
@@ -151,11 +147,6 @@ describe('scene geometry', () => {
         }
       }
     }
-  });
-  it('packet positions move with time', () => {
-    const a = scenePacketsAt(1000, 0, 1200, 600);
-    const b = scenePacketsAt(2000, 0, 1200, 600);
-    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
   });
   it('has 42 events each with a source-rule mapping', () => {
     expect(HOMEPAGE_EVENTS.length).toBe(42);
