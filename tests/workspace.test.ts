@@ -5,12 +5,14 @@ import {
   groupRunsByRevision,
   hasRunDetail,
   inspectionScope,
+  launchBlockedReason,
   partitionRuns,
   runOutcomeLabel,
   shouldAutoRenderActiveRecord,
   shouldClearInspectionOnSelection,
   stopControlState,
   tradingContractVisible,
+  WORKSPACE_VIEWS,
 } from '../src/web/workspace.ts';
 import type { RunSummary } from '../src/storage.ts';
 
@@ -92,6 +94,21 @@ describe('workspace scoping of inspection and capabilities', () => {
     expect(hasRunDetail(null)).toBe(false);
     expect(hasRunDetail(undefined)).toBe(false);
     expect(hasRunDetail('run-1')).toBe(true);
+  });
+
+  it('exposes the seven real workspace views', () => {
+    expect(WORKSPACE_VIEWS).toEqual(['overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings', 'functional']);
+  });
+
+  it('blocks launch while starting, saving, or missing a selected system', () => {
+    const ready = {
+      isLaunchRequestPending: false, isInvestigationActive: false, isSystemSavePending: false,
+      isDraftMode: false, hasUnsavedSystemEdits: false, hasSelectedSystem: true,
+      selectedAdapterId: 'synthetic-trading',
+    };
+    expect(launchBlockedReason({ ...ready, isLaunchRequestPending: true })).toMatch(/STARTING/);
+    expect(launchBlockedReason({ ...ready, isSystemSavePending: true })).toMatch(/SAVING/);
+    expect(launchBlockedReason({ ...ready, hasSelectedSystem: false, selectedAdapterId: null })).toMatch(/SELECT/);
   });
 });
 

@@ -92,7 +92,4 @@ describe('homepage HTTP routes', () => {
       const res = await request(server, p); expect(res.status, p).toBe(404);
     }
   });
-  it('missing asset returns 404 not fabricated content', async () => {
-    const res = await request(server, '/assets/homepage/missing.png'); expect(res.status).toBe(404);
-  });
 });

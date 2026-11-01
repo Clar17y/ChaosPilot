@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Finding, InvestigationRecord, TraceEntry } from '../src/domain.ts';
+import type { InvestigationRecord, TraceEntry } from '../src/domain.ts';
 import { buildReproductionModel, buildRerunSteps, classifyFreshReplay, groupUnimportantSteps, buildTraceSteps } from '../src/web/reproduction-player.ts';
 import { ReproductionSession } from '../src/web/reproduction-state.ts';
 
