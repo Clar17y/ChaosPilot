@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import type { Experiment, ExperimentRecord, ExperimentResult, Finding, InvestigationRecord } from '../domain.ts';
 import { resolveAdapter, type AdapterRegistration, assertAdapterVariant } from '../adapters/index.ts';
-import { canonicalJson, compareSemanticReplay, computeContractHash } from '../evidence.ts';
+import { canonicalJson, compareSemanticReplay, computeContractHash, computeLegacyRawContractHash } from '../evidence.ts';
 import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { evidenceHashOf, type ExplanationTransport } from '../explanations/index.ts';
 import { metaExplanationTransport } from '../explanations/meta-transport.ts';
@@ -125,12 +125,21 @@ export function validateChallengePreconditions(record: InvestigationRecord, find
   const adapter = resolveAdapter(adapterId);
   const category = finding.category ?? finding.violation?.category;
   const invariant = text(finding.violation?.invariant, 'selected invariant', 256);
-  if (!adapter.getContract().invariants.some(i => i.id === invariant)) throw new Error('Selected invariant is not supported by this adapter contract');
+  const contract = adapter.getContract();
+  if (!contract.invariants.some(i => i.id === invariant)) throw new Error('Selected invariant is not supported by this adapter contract');
   const cleanSourceHash = record.contextAudit?.cleanSourceHash;
   if (!cleanSourceHash || adapter.getSourceBundle('clean').hash !== cleanSourceHash) {
     throw new Error('Challenge cannot be verified: clean-source provenance is missing or changed');
   }
-  if (!record.contextAudit?.contractHash || computeContractHash(adapter.getContract()) !== record.contextAudit.contractHash) {
+  // Match replay's provable legacy hashes without accepting a drifted pinned contract.
+  const recordedContractHash = record.contextAudit?.contractHash;
+  const snapshotContract = record.systemBrief?.contract;
+  const contractMatches = record.systemBrief === undefined
+    || (snapshotContract != null && canonicalJson(snapshotContract) === canonicalJson(contract));
+  const contractHashMatches = recordedContractHash === computeContractHash(contract)
+    || recordedContractHash === computeLegacyRawContractHash(contract)
+    || (snapshotContract != null && recordedContractHash === computeLegacyRawContractHash(snapshotContract));
+  if (!contractMatches || !contractHashMatches) {
     throw new Error('Challenge cannot be verified: contract-hash provenance is missing or changed');
   }
   if (adapter.getSourceBundle(record.variant).hash !== record.sourceHash) {

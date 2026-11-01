@@ -3,10 +3,12 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CHALLENGE_LIMITS, challengeFinding, classifyVariant, getChallengeView, parseChallengeProposals, prepareChallenge, truncateUtf8Preview } from '../src/challenges/index.ts';
 import { readChallenges, readChallengeSource } from '../src/challenges/storage.ts';
-import { deleteRun, getRunRevision, saveRun } from '../src/storage.ts';
+import { deleteRun, getRunRevision, replaySelectedExperiment, saveRun } from '../src/storage.ts';
 import { resolveAdapter } from '../src/adapters/index.ts';
+import { computeContractHash, computeLegacyRawContractHash } from '../src/evidence.ts';
+import { computeSnapshotHash } from '../src/systems/index.ts';
 import type { ChallengeBinding, ChallengeProposal } from '../src/challenges/types.ts';
-import type { ExperimentResult, Violation } from '../src/domain.ts';
+import type { ExperimentResult, SystemContract, Violation } from '../src/domain.ts';
 import { challengeFixture, deferred, fakeTransport, originalExperiment, proposalFor, tempChallengeDir, usage } from './challenge-fixtures.ts';
 
 const dirs: string[] = [];
@@ -42,6 +44,69 @@ describe('authentic saved challenge evidence', () => {
     const view = await getChallengeView(record.id, findingId, dir);
     expect(view.available).toBe(false); expect(view.reason).toMatch(/clean-source/);
   });
+
+  it.each([
+    { snapshot: 'none', hash: 'current-raw' },
+    { snapshot: 'current', hash: 'current-raw' },
+    { snapshot: 'reordered', hash: 'saved-raw' },
+    { snapshot: 'reordered', hash: 'current-raw' },
+    { snapshot: 'reordered', hash: 'canonical' },
+  ] as const)('preserves replay-verifiable contract provenance: $snapshot snapshot / $hash hash', async ({ snapshot, hash }) => {
+    const { dir, record, findingId } = await setup(true);
+    const adapter = resolveAdapter('inventory-reservation');
+    const contract = adapter.getContract();
+    if (snapshot === 'none') delete record.systemBrief;
+    if (snapshot === 'reordered') {
+      record.systemBrief!.contract = Object.fromEntries(Object.entries(contract).reverse()) as SystemContract;
+      record.systemBrief!.hash = computeSnapshotHash(record.systemBrief!.brief, record.systemBrief!.contract, record.systemBrief!.requirementEvaluator);
+      expect(computeLegacyRawContractHash(record.systemBrief!.contract)).not.toBe(computeLegacyRawContractHash(contract));
+    }
+    record.contextAudit.contractHash = hash === 'canonical' ? computeContractHash(contract)
+      : computeLegacyRawContractHash(hash === 'saved-raw' ? record.systemBrief!.contract : contract);
+    if (hash !== 'canonical') expect(record.contextAudit.contractHash).not.toBe(computeContractHash(contract));
+    await saveRun(record, dir);
+
+    const position = record.experiments.findIndex(e => e.index === record.findings[0]!.experimentIndex);
+    const replay = await replaySelectedExperiment(record, position, dir);
+    expect(replay.exactReproductionClaimed).toBe(true);
+    expect(replay.contextChecks).toContainEqual(expect.objectContaining({ kind: 'contract-hash', status: 'identical' }));
+
+    const execute = vi.spyOn(adapter, 'executeExperiment');
+    expect((await getChallengeView(record.id, findingId, dir)).available).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+    const fake = fakeTransport(record);
+    const made = await challengeFinding(record.id, findingId, { runsDir: dir, transport: fake.transport, interpret: false });
+    expect(made.status).toBe('completed'); expect(made.variants[0]!.reproduced).toBe(true);
+    expect(made.binding.contractHash).toBe(computeContractHash(contract)); expect(fake.calls).toHaveLength(1);
+    const executions = execute.mock.calls.length;
+    const view = await getChallengeView(record.id, findingId, dir);
+    expect(view.available).toBe(true); expect(view.stale).not.toBe(true); expect(view.current?.id).toBe(made.id);
+    expect(execute).toHaveBeenCalledTimes(executions); expect(fake.calls).toHaveLength(1);
+  });
+
+  it.each(['missing-hash', 'unknown-hash', 'unknown-legacy-hash', 'missing-contract', 'drifted-current-canonical', 'drifted-current-raw', 'drifted-saved-raw'] as const)(
+    'keeps unprovable contract provenance unavailable without executing or paying: %s', async kind => {
+      const { dir, record, findingId } = await setup(true);
+      const adapter = resolveAdapter('inventory-reservation');
+      const contract = adapter.getContract();
+      if (kind === 'missing-hash') delete record.contextAudit.contractHash;
+      if (kind === 'unknown-hash' || kind === 'unknown-legacy-hash') record.contextAudit.contractHash = 'unprovable';
+      if (kind === 'unknown-legacy-hash') delete record.systemBrief;
+      if (kind === 'missing-contract') record.systemBrief!.contract = null;
+      if (kind.startsWith('drifted-')) {
+        record.systemBrief!.contract!.description += ' changed historical contract';
+        record.contextAudit.contractHash = kind === 'drifted-current-canonical' ? computeContractHash(contract)
+          : computeLegacyRawContractHash(kind === 'drifted-saved-raw' ? record.systemBrief!.contract : contract);
+      }
+      if (record.systemBrief) record.systemBrief.hash = computeSnapshotHash(record.systemBrief.brief, record.systemBrief.contract, record.systemBrief.requirementEvaluator);
+      await saveRun(record, dir);
+      const execute = vi.spyOn(adapter, 'executeExperiment'); const fake = fakeTransport(record);
+      const view = await getChallengeView(record.id, findingId, dir);
+      expect(view.available).toBe(false); expect(view.reason).toMatch(/contract-hash/);
+      await expect(challengeFinding(record.id, findingId, { runsDir: dir, transport: fake.transport })).rejects.toThrow(/contract-hash/);
+      expect(execute).not.toHaveBeenCalled(); expect(fake.calls).toHaveLength(0);
+    },
+  );
 
   it.each(['running', 'ambiguous-finding', 'ambiguous-experiment', 'missing-experiment', 'source', 'clean-source', 'contract', 'unconfirmed', 'wrong-violation', 'adapter'] as const)('blocks %s before any model work', async kind => {
     const { dir, record, findingId } = await setup();
