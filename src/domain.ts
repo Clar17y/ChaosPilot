@@ -1,8 +1,14 @@
 // Integration contracts. Target implementation and hidden evaluation metadata live elsewhere.
+import type { RecoveryEvidence } from './recovery/types.ts';
+import type { CoveragePlan, CoverageScenarioSuggestion, ScenarioCheckEvidence } from './coverage/types.ts';
+export type { RecoveryEvidence } from './recovery/types.ts';
+
 export const TARGET_VARIANTS = ['clean', 'candidate-a', 'candidate-b', 'candidate-c', 'candidate-d', 'candidate-e', 'candidate-f', 'candidate-g', 'candidate-h', 'candidate-i'] as const;
 const INVENTORY_FAULT_VARIANTS = ['inventory-candidate-a', 'inventory-candidate-b', 'inventory-candidate-c', 'inventory-candidate-d'] as const;
 export const INVENTORY_TARGET_VARIANTS = ['clean', ...INVENTORY_FAULT_VARIANTS] as const;
-export const ALL_TARGET_VARIANTS = [...TARGET_VARIANTS, ...INVENTORY_FAULT_VARIANTS] as const;
+const RECOVERY_FAULT_VARIANTS = ['recovery-candidate-a'] as const;
+export const RECOVERY_TARGET_VARIANTS = ['clean', ...RECOVERY_FAULT_VARIANTS] as const;
+export const ALL_TARGET_VARIANTS = [...TARGET_VARIANTS, ...INVENTORY_FAULT_VARIANTS, ...RECOVERY_FAULT_VARIANTS] as const;
 export type TargetVariant = typeof ALL_TARGET_VARIANTS[number];
 export type ProviderKind = 'mock' | 'meta';
 export type Channel = 'market' | 'credit' | 'client' | 'reports' | 'stock' | 'reservations' | 'shipments';
@@ -14,7 +20,9 @@ export type Action =
   | { op: 'advance'; ticks: number }
   | { op: 'drain' }
   | { op: 'fill'; messageId: string; orderId: string; executionId: string; quantity: number; delay?: number }
-  | { op: 'confirm_cancel'; messageId: string; orderId: string; delay?: number };
+  | { op: 'confirm_cancel'; messageId: string; orderId: string; delay?: number }
+  | { op: 'disconnect' }
+  | { op: 'reconnect' };
 
 export interface Experiment {
   hypothesis: string;
@@ -46,7 +54,7 @@ export interface SystemBrief {
   requirements: string[];
   /** Explicitly reviewed declarative rules, associated by unique normalized text. */
   requirementRules?: RequirementRule[];
-  adapterId: 'synthetic-trading' | 'inventory-reservation' | 'unconfigured';
+  adapterId: 'synthetic-trading' | 'inventory-reservation' | 'synthetic-trading-recovery' | 'unconfigured';
   updatedAt: string;
 }
 
@@ -124,15 +132,35 @@ export interface Violation {
   evidence: Record<string, unknown>;
 }
 
+export type RecordedTraceAction =
+  | 'send'
+  | 'duplicate'
+  | 'deliver'
+  | 'advance'
+  | 'drain'
+  | 'drain:deliver'
+  | 'fill'
+  | 'confirm_cancel'
+  | 'reconcile'
+  | 'recovery:deadline'
+  | 'connection:disconnect'
+  | 'connection:reconnect'
+  | 'unsupported';
+
 export interface TraceEntry {
   step: number;
   time: number;
-  action: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  action: any;
   messageId?: string;
   businessTime?: number;
   payload?: unknown;
   outcome: string;
   state: Record<string, unknown>;
+}
+
+export interface RecordedTraceEntry extends Omit<TraceEntry, 'action'> {
+  action: RecordedTraceAction;
 }
 
 export interface ExperimentResult {
@@ -144,7 +172,7 @@ export interface ExperimentResult {
   categoryAware?: boolean;
   experiment: Experiment;
   sourceHash: string;
-  trace: TraceEntry[];
+  trace: RecordedTraceEntry[];
   snapshot: Record<string, unknown>;
   violations: Violation[];
   rejections: { step: number; reason: string }[];
@@ -152,6 +180,8 @@ export interface ExperimentResult {
   deliveryObservations?: DeliveryObservation[];
   executionComplete?: boolean;
   requirementRuleResults?: RequirementRuleResult[];
+  recovery?: RecoveryEvidence;
+  scenarioCheckEvidence?: ScenarioCheckEvidence[];
 }
 
 export interface Usage {
@@ -173,6 +203,7 @@ export interface ProviderContext {
   maxExperiments: number;
   feedback?: string[];
   systemBrief?: SystemBriefSnapshot;
+  reviewedScenarios?: CoverageScenarioSuggestion[];
 }
 
 export type ProposalAttemptStatus =
@@ -267,6 +298,7 @@ export interface Finding {
 }
 
 export interface InvestigationRecord {
+  coveragePlan?: CoveragePlan;
   schemaVersion: 1;
   id: string;
   provider: ProviderKind;
@@ -301,6 +333,7 @@ export interface InvestigationRecord {
 }
 
 export interface InvestigationOptions {
+  coveragePlan?: CoveragePlan;
   id?: string;
   variant: TargetVariant;
   continueAfterFindings?: boolean;

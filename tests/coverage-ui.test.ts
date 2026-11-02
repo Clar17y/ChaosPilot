@@ -7,7 +7,7 @@ import {
 import { loadOptionalFeature } from '../src/web/workspace.ts';
 import { CREDIT_EVALUATOR } from '../src/coverage/catalog.ts';
 import {
-  COVERAGE_EVALUATOR, RECOVERY_ADAPTER_ID, buildCoveragePlan, prepareCoverage,
+  COVERAGE_CATALOG, COVERAGE_EVALUATOR, RECOVERY_ADAPTER_ID, buildCoveragePlan, prepareCoverage,
   type CoverageContext, type CoveragePreparationInput, type ScenarioCheckEvidence,
 } from '../src/coverage/index.ts';
 
@@ -381,7 +381,7 @@ describe('production coverage renderers (safe DOM binding)', () => {
     expect(text).toContain('Credit <script>x</script>');
     expect(text).toContain('Run status: cancelled');
     expect(text).toContain(`evaluator: ${COVERAGE_EVALUATOR.id} v${COVERAGE_EVALUATOR.version} (${COVERAGE_EVALUATOR.hash})`);
-    expect(text).toContain('Catalog: chaospilot-coverage-catalog v1');
+    expect(text).toContain(`Catalog: ${COVERAGE_CATALOG.id} v${COVERAGE_CATALOG.version}`);
     expect(text).not.toContain('%');
     container.findAll(e => e.className.includes('btn-open-finding'))[0].dispatch('click');
     expect(onOpenFinding).toHaveBeenCalledWith('f-1');

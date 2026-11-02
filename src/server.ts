@@ -1,7 +1,9 @@
 import * as http from 'node:http';
 import { MetaProvider } from './providers/meta.ts';
+import { prepareCoverage } from './coverage/index.ts';
+import { coveragePreparation, pinCoveragePlan } from './investigation/coverage-evidence.ts';
 import { readSystemBriefFile, resolveSystemPath } from './systems/index.ts';
-import { resolveAdapter, assertAdapterVariant, listRegisteredAdapters, type AdapterRegistration } from './adapters/index.ts';
+import { resolveAdapter, assertAdapterVariant, type AdapterRegistration } from './adapters/index.ts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -332,6 +334,10 @@ export class ChaosPilotServer {
       return this.serveFile(res, path.join(this.publicDir, 'styles.css'), 'text/css; charset=utf-8');
     }
 
+    if (['/coverage/identity.js', '/coverage/catalog.js', '/coverage/prepare.js', '/coverage/plan.js', '/coverage/project.js'].includes(pathname)) {
+      return this.serveFile(res, path.join(this.distDir, pathname.slice(1)), 'application/javascript; charset=utf-8');
+    }
+
     const jsMatch = pathname.match(/^\/([a-zA-Z0-9_-]+\.(?:js|js\.map))$/);
     if (jsMatch) {
       const fileName = jsMatch[1]!;
@@ -409,7 +415,9 @@ export class ChaosPilotServer {
             currentRecord: active ? active.record : this.startingController ? null : this.latestRecord,
             metaKeyConfigured: Boolean(process.env.MODEL_API_KEY && process.env.MODEL_API_KEY.trim().length > 0),
             targetVariants: TARGET_VARIANTS,
-            targetVariantsByAdapter: Object.fromEntries(listRegisteredAdapters().map((adapterId) => [adapterId, [...resolveAdapter(adapterId).variants]])),
+            targetVariantsByAdapter: Object.fromEntries(
+              (['synthetic-trading', 'inventory-reservation'] as const).map((adapterId) => [adapterId, [...resolveAdapter(adapterId).variants]])
+            ),
           });
           return;
         }
@@ -643,6 +651,31 @@ export class ChaosPilotServer {
           return;
         }
 
+        // Resolve saved coverage context without invoking a target or provider.
+        if (method === 'POST' && pathname === '/api/coverage/prepare') {
+          if (!(req.headers['content-type'] ?? '').toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' }); return;
+          }
+          const parsed = await this.readJsonBody(req);
+          if (parsed.error) { this.sendJson(res, parsed.status || 400, { error: parsed.error }); return; }
+          const body = (parsed.data ?? {}) as Record<string, unknown>;
+          if (typeof body.systemId !== 'string' || !validateSystemId(body.systemId) || !Number.isSafeInteger(body.expectedRevision)
+            || typeof body.adapterId !== 'string' || !isKnownTargetVariant(body.variant as TargetVariant)) {
+            this.sendJson(res, 400, { error: 'Coverage requires a saved system revision, adapter and target' }); return;
+          }
+          const brief = await getSystemBrief(body.systemId, this.systemsDir);
+          if (!brief) { this.sendJson(res, 404, { error: 'System brief not found' }); return; }
+          if (brief.revision !== body.expectedRevision) { this.sendJson(res, 409, { error: 'System revision changed; reload before reviewing coverage' }); return; }
+          if (brief.adapterId !== body.adapterId) { this.sendJson(res, 400, { error: 'Coverage adapter does not match the saved system' }); return; }
+          try {
+            const variant = body.variant as TargetVariant;
+            assertAdapterVariant(brief.adapterId, variant);
+            const snapshot = await createSystemSnapshot(brief);
+            this.sendJson(res, 200, prepareCoverage(coveragePreparation(snapshot, variant, resolveAdapter(brief.adapterId).getSourceBundle(variant).hash)));
+          } catch (err) { this.sendJson(res, 400, { error: err instanceof Error ? err.message : 'Coverage preparation unavailable' }); }
+          return;
+        }
+
         // POST /api/investigation/start - Launch an investigation
         if (method === 'POST' && pathname === '/api/investigation/start') {
           // Rule: Single active investigation exclusivity
@@ -678,7 +711,7 @@ export class ChaosPilotServer {
             }
 
             const body = (data || {}) as Record<string, unknown>;
-            const variant = (body.variant as TargetVariant) || 'candidate-a';
+            const rawVariant = body.variant as TargetVariant | undefined;
             const providerKind = (body.provider as ProviderKind) || 'mock';
             const maxExperiments = Math.min(
               Math.max(Math.floor(Number(body.maxExperiments) || 5), 1),
@@ -690,8 +723,8 @@ export class ChaosPilotServer {
             }
             const continueAfterFindings = body.continueAfterFindings === true;
 
-            if (!isKnownTargetVariant(variant)) {
-              this.sendJson(res, 400, { error: `Invalid target variant: "${String(variant)}"` });
+            if (rawVariant !== undefined && rawVariant !== ('' as unknown) && !isKnownTargetVariant(rawVariant)) {
+              this.sendJson(res, 400, { error: `Invalid target variant: "${String(rawVariant)}"` });
               return;
             }
 
@@ -739,9 +772,23 @@ export class ChaosPilotServer {
               return;
             }
 
+            const variant: TargetVariant = rawVariant
+              ? rawVariant
+              : brief.adapterId === 'inventory-reservation'
+                ? 'inventory-candidate-a'
+                : brief.adapterId === 'synthetic-trading-recovery'
+                  ? 'recovery-candidate-a'
+                  : 'candidate-a';
+
             try { assertAdapterVariant(brief.adapterId, variant); }
             catch (error) { this.sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) }); return; }
             const systemSnapshot = await createSystemSnapshot(brief);
+
+            let coveragePlan: InvestigationOptions['coveragePlan'];
+            if (body.coveragePlan !== undefined) {
+              try { coveragePlan = pinCoveragePlan(body.coveragePlan, systemSnapshot, variant, resolveAdapter(brief.adapterId).getSourceBundle(variant).hash); }
+              catch (err) { this.sendJson(res, 400, { error: err instanceof Error ? err.message : 'Invalid coverage plan' }); return; }
+            }
 
             // Never accept API keys or custom endpoints from the browser
             if (providerKind === 'meta' && (!process.env.MODEL_API_KEY || !process.env.MODEL_API_KEY.trim())) {
@@ -806,6 +853,7 @@ export class ChaosPilotServer {
                   provider,
                   signal: abortController.signal,
                   systemBrief: structuredClone(systemSnapshot),
+                  ...(coveragePlan ? { coveragePlan: structuredClone(coveragePlan) } : {}),
                   onUpdate: (record) => {
                     if (this.activeInvestigation && this.activeInvestigation.id === runId) {
                       this.activeInvestigation.record = record;
@@ -844,6 +892,7 @@ export class ChaosPilotServer {
               provider: providerKind,
               maxExperiments,
               continueAfterFindings,
+              ...(coveragePlan ? { coveragePlan } : {}),
               systemBrief: {
                 id: systemSnapshot.brief.id,
                 name: systemSnapshot.brief.name,

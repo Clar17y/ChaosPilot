@@ -42,6 +42,8 @@ export interface SemanticReplayComparison {
   traceMatched: boolean;
   violationsMatched: boolean;
   rejectionsMatched: boolean;
+  recoveryMatched?: boolean;
+  scenarioChecksMatched?: boolean;
   details?: string;
   mismatches: string[];
 }
@@ -121,13 +123,36 @@ export function compareSemanticReplay(
     mismatches.push('Trace mismatch between original and replayed execution');
   }
 
+  let recoveryMatched: boolean | undefined;
+  if (original.recovery !== undefined || replayed.recovery !== undefined) {
+    if (original.recovery === undefined) {
+      recoveryMatched = false;
+      mismatches.push('Unexpected recovery evidence on replayed execution (absent in saved record)');
+    } else if (replayed.recovery === undefined) {
+      recoveryMatched = false;
+      mismatches.push('Missing recovery evidence on replayed execution');
+    } else {
+      recoveryMatched = canonicalJson(original.recovery) === canonicalJson(replayed.recovery);
+      if (!recoveryMatched) {
+        mismatches.push('Recovery evidence mismatch between original and replayed execution');
+      }
+    }
+  }
+
+  let scenarioChecksMatched: boolean | undefined;
+  if (original.scenarioCheckEvidence !== undefined || replayed.scenarioCheckEvidence !== undefined) {
+    scenarioChecksMatched = canonicalJson(original.scenarioCheckEvidence ?? null) === canonicalJson(replayed.scenarioCheckEvidence ?? null);
+    if (!scenarioChecksMatched) mismatches.push('Recorded scenario checks mismatch between original and replayed execution');
+  }
+
   const matched =
     sourceMatched &&
     validityMatched &&
     violationsMatched &&
     rejectionsMatched &&
     snapshotMatched &&
-    traceMatched;
+    traceMatched &&
+    (recoveryMatched ?? true) && (scenarioChecksMatched ?? true);
 
   return {
     matched,
@@ -137,6 +162,8 @@ export function compareSemanticReplay(
     traceMatched,
     violationsMatched,
     rejectionsMatched,
+    ...(recoveryMatched !== undefined ? { recoveryMatched } : {}),
+    ...(scenarioChecksMatched !== undefined ? { scenarioChecksMatched } : {}),
     details: mismatches.length > 0 ? mismatches.join('; ') : undefined,
     mismatches,
   };

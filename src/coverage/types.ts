@@ -111,6 +111,14 @@ export interface CoverageRecoveryFacts {
   horizonTick: number;
   completionTick?: number;
   retryObserved?: boolean;
+  /** Independent retry check at the actual delivery, separate from later reconciliation. */
+  retryCheck?: {
+    status: 'passed' | 'failed' | 'inconclusive';
+    before?: RecoveryAccountingFacts;
+    after?: RecoveryAccountingFacts;
+    /** Independent expected accounting from the raw producer's accepted history. Required to pass a connected retry. */
+    expected?: RecoveryAccountingFacts;
+  };
   expected: RecoveryAccountingFacts;
   observed?: RecoveryAccountingFacts;
 }
