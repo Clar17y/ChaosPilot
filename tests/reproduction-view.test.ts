@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { TraceEntry, Violation } from '../src/domain.ts';
 import { buildRerunTrace, buildTraceSteps, groupUnimportantSteps, PlaybackController } from '../src/web/reproduction-player.ts';
-import { activeUnattributedViolations, detailVisibility, evidenceHeading, replayBehaviourStatus, stepsRevision, timelineRenderKey, unattributedText } from '../src/web/reproduction-view.ts';
+import { activeUnattributedViolations, detailVisibility, evidenceHeading, recordedRecoveryFacts, replayBehaviourStatus, stepsRevision, timelineRenderKey, unattributedText } from '../src/web/reproduction-view.ts';
+import { COVERAGE_EVALUATOR, type ScenarioCheckEvidence } from '../src/coverage/index.ts';
 
 const entry = (step: number, payload: unknown, state: Record<string, unknown> = {}): TraceEntry =>
   ({ step, time: step, action: 'deliver', payload, outcome: 'scheduled', state });
@@ -109,5 +110,26 @@ describe('grouped step summary', () => {
     expect(group.stateText).toContain('not recorded for the group as a whole');
     expect(group.title).toContain('3 grouped recorded entries');
     expect(group.detail).toContain('complete original trace');
+  });
+});
+
+describe('recorded recovery facts presentation', () => {
+  const recoveryCheck: ScenarioCheckEvidence = {
+    schemaVersion: 1, id: 'rec-1', scenarioId: 'recovery-by-deadline', evaluator: COVERAGE_EVALUATOR,
+    context: { systemId: 's', revision: 1, snapshotHash: 'a', adapterId: 'synthetic-trading-recovery', variant: 'clean', sourceHash: 'b', contractHash: 'c' },
+    experimentIndex: 0, trigger: 'reached', outcome: 'passed', traceRefs: [{ traceIndex: 2, step: 1, tick: 14 }],
+    facts: { kind: 'recovery', reportId: 'rep-1', executionId: 'exec-1', orderId: 'ord-1', acceptedAtTick: 5, acceptedDuringDisconnection: true,
+      reconnectTick: 10, deadlineTick: 15, horizonTick: 20, completionTick: 14, retryObserved: false,
+      expected: { filledQuantity: 10, remainingQuantity: 0, usedCredit: 100, reservedCredit: 0, applicationCount: 1 },
+      observed: { filledQuantity: 10, remainingQuantity: 0, usedCredit: 100, reservedCredit: 0, applicationCount: 1 } },
+    detail: 'recorded',
+  };
+  it('presents recorded facts with simulated tick units only at the referenced trace position', () => {
+    const facts = recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading-recovery');
+    expect(facts.join('\n')).toContain('15 simulated ticks');
+    expect(facts.join('\n')).toContain('rep-1');
+    expect(recordedRecoveryFacts([recoveryCheck], 1, 'synthetic-trading-recovery')).toEqual([]);
+    expect(recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading')).toEqual([]);
+    expect(recordedRecoveryFacts(undefined, 2, 'synthetic-trading-recovery')).toEqual([]);
   });
 });

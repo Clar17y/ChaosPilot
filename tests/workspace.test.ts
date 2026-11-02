@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   effectiveAdapterId,
   executableCheckCount,
+  functionalExecutionBlockedReason,
   groupRunsByRevision,
   hasRunDetail,
   inspectionScope,
+  isExecutableAdapter,
   launchBlockedReason,
   partitionRuns,
+  regressionCaptureBlockedReason,
+  regressionExecutionBlockedReason,
   runOutcomeLabel,
   shouldAutoRenderActiveRecord,
   shouldClearInspectionOnSelection,
@@ -88,6 +92,21 @@ describe('workspace scoping of inspection and capabilities', () => {
     expect(tradingContractVisible('unconfigured')).toBe(false);
     expect(tradingContractVisible(null)).toBe(false);
     expect(tradingContractVisible('synthetic-trading')).toBe(true);
+    expect(tradingContractVisible('synthetic-trading-recovery')).toBe(true);
+    expect(isExecutableAdapter('synthetic-trading-recovery')).toBe(true);
+    expect(functionalExecutionBlockedReason({
+      isFunctionalRunPending: false, isDraftMode: false, hasUnsavedSystemEdits: false, hasSelectedSystem: true,
+      selectedAdapterId: 'synthetic-trading-recovery',
+    })).toBe('FUNCTIONAL BASELINES DO NOT SUPPORT RECOVERY ADAPTER');
+    expect(regressionCaptureBlockedReason({
+      isCapturePending: false, isDraftMode: false, hasUnsavedSystemEdits: false, hasSelectedSystem: true,
+      selectedSystemId: 'sys-1', selectedAdapterId: 'synthetic-trading-recovery', hasInspectedRun: true,
+      inspectedRunTerminal: true, inspectedRunSystemId: 'sys-1', hasSelectedFinding: true, findingConfirmed: true,
+    })).toBe('REGRESSION CAPTURE DOES NOT SUPPORT RECOVERY ADAPTER');
+    expect(regressionExecutionBlockedReason({
+      isRegressionRunPending: false, isDraftMode: false, hasUnsavedSystemEdits: false, hasSelectedSystem: true,
+      selectedAdapterId: 'synthetic-trading-recovery', hasSelectedDefinition: true,
+    })).toBe('REGRESSION TESTS DO NOT SUPPORT RECOVERY ADAPTER');
     expect(executableCheckCount(effectiveAdapterId({ isDraftMode: true, hasUnsavedSystemEdits: true, draftAdapterId: 'unconfigured', savedAdapterId: null }), 10)).toBe(0);
   });
   it('shows no run detail until a real record is opened', () => {

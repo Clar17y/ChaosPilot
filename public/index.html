@@ -125,6 +125,7 @@
                 <label for="system-adapter-select">Execution adapter</label>
                 <select id="system-adapter-select" class="form-input">
                   <option value="synthetic-trading">synthetic-trading (Executable synthetic trading simulator)</option>
+                  <option value="synthetic-trading-recovery">synthetic-trading-recovery (Executable synthetic trading recovery simulator)</option>
                   <option value="inventory-reservation">inventory-reservation (Executable synthetic inventory reservation system)</option>
                   <option value="unconfigured">unconfigured (Draft spec - Run disabled)</option>
                 </select>
@@ -230,8 +231,12 @@
                 <p class="muted">The model sees the saved brief, the selected system's public contract and the selected neutral business source. It does not see a hidden catalog or other candidate variants. The adapter always tests its synthetic simulator, not an arbitrary application described in the brief.</p>
               </details>
             </section>
+            <section class="card" id="prepare-coverage-card">
+              <h2>2. Review coverage intentions</h2>
+              <div id="prepare-coverage-container"></div>
+            </section>
             <section class="card control-card">
-              <h2 class="card-title">2. Set the bounded investigation</h2>
+              <h2 class="card-title">3. Set the bounded investigation</h2>
               <div class="controls-grid prepare-grid">
                 <div class="control-group">
                   <label for="target-select">Target Variant</label>
@@ -467,6 +472,7 @@
                 <button class="tab-btn" data-tab="tab-proposals" type="button" role="tab" id="tab-btn-proposals" aria-controls="tab-proposals" aria-selected="false" tabindex="-1">Proposals (<span id="count-proposals">0</span>)</button>
                 <button class="tab-btn" data-tab="tab-trace" type="button" role="tab" id="tab-btn-trace" aria-controls="tab-trace" aria-selected="false" tabindex="-1">Action trace &amp; timeline</button>
                 <button class="tab-btn" data-tab="tab-state" type="button" role="tab" id="tab-btn-state" aria-controls="tab-state" aria-selected="false" tabindex="-1">Order &amp; credit exposure</button>
+                <button class="tab-btn" data-tab="tab-coverage" type="button" role="tab" id="tab-btn-coverage" aria-controls="tab-coverage" aria-selected="false" tabindex="-1">Coverage</button>
               </div>
               <div id="tab-findings" class="tab-pane active" role="tabpanel" aria-labelledby="tab-btn-findings" tabindex="0"><div id="findings-container" class="findings-list"><div class="empty-state">No findings recorded yet. Launch an investigation to observe behavior.</div></div></div>
               <div id="tab-experiments" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-experiments" tabindex="0"><div id="experiments-container" class="experiments-list"><div class="empty-state">No experiments executed yet.</div></div><section id="requirement-rule-results" aria-label="Requirement rule results"><h3>Requirement rule results (separate from confirmed findings)</h3><p class="muted">Per-experiment outcomes of the pinned deterministic rule. A passing experiment does not verify the entire natural-language requirement, and a rule failure alone is not a confirmed finding.</p><div id="requirement-rule-results-body"><p class="muted">No requirement rule results recorded for this run.</p></div></section></div>
@@ -479,6 +485,11 @@
                 <div class="state-grid">
                   <div class="state-section"><h3 id="state-primary-title">Credit &amp; Gateway Accounting</h3><div id="credit-state-table" class="snapshot-table"><div class="empty-state">No snapshot state available.</div></div></div>
                   <div class="state-section"><h3 id="state-secondary-title">Orders Tracked</h3><div id="orders-state-table" class="snapshot-table"><div class="empty-state">No orders active in snapshot.</div></div></div>
+                </div>
+              </div>
+              <div id="tab-coverage" class="tab-pane" role="tabpanel" aria-labelledby="tab-btn-coverage" tabindex="0">
+                <div id="coverage-container">
+                  <div class="empty-state">Select an investigation run to view coverage evidence.</div>
                 </div>
               </div>
             </div>

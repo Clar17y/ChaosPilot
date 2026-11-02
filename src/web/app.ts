@@ -1,7 +1,10 @@
+import type { CoverageResultFields } from '../coverage/types.ts';
 import { initFunctionalWorkspaceView } from './functional.ts';
+import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { initRegressionWorkspaceView, type RegressionController } from './regressions.ts';
 import type {
   InvestigationRecord,
+  ExperimentResult,
   ExperimentRecord,
   Finding,
   Violation,
@@ -30,6 +33,15 @@ import {
   type PlaybackStep,
   type ReproductionModel,
 } from './reproduction-player.ts';
+// Coverage is an optional feature loaded behind a caught async boundary:
+// its shared modules live under /coverage/*.js, which the current static
+// server does not serve yet. Type-only imports are erased at build time.
+import type {
+  CoverageController,
+  CoverageLaunchToken,
+  CoverageViewState,
+} from './coverage.ts';
+type CoverageModule = typeof import('./coverage.ts');
 import { conciseFindingTitle, recordedDifferences } from './finding-story.ts';
 import {
   effectiveAdapterId,
@@ -38,6 +50,7 @@ import {
   hasRunDetail,
   inspectionScope,
   launchBlockedReason as launchBlockedReasonPure,
+  loadOptionalFeature,
   partitionRuns,
   RequestSequencer,
   runOutcomeLabel,
@@ -58,7 +71,7 @@ import {
 import { replayWaitsForSave, ReproductionSession } from './reproduction-state.ts';
 import { FindingExplanationSession, reportStatusToUi, reportStateText } from './finding-explanations.ts';
 import { ChallengeSession, renderChallengePanel } from './challenges.ts';
-import { activeUnattributedViolations, detailVisibility, evidenceHeading, liveActivity, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, timelineRenderKey, unattributedText } from './reproduction-view.ts';
+import { activeUnattributedViolations, detailVisibility, evidenceHeading, liveActivity, NO_STEP_CREDIT_TEXT, replayBehaviourStatus, recordedRecoveryFacts, timelineRenderKey, unattributedText } from './reproduction-view.ts';
 import { buildStageProjection, formatRecordedValue, visiblePositionForTracePosition, type StageFrame, type StageProjection } from './replay-stage.ts';
 import { StagePacketAnimator } from './stage-animation.ts';
 import {
@@ -131,6 +144,97 @@ const challengeSession = new ChallengeSession(() => {
   if (host) renderChallengePanel(host, challengeSession);
 });
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
+
+let currentContractRules: string[] = [];
+
+let coverageModule: CoverageModule | null = null;
+let coverageController: CoverageController | null = null;
+let coverageLoadFailed = false;
+
+function renderCoverage(state: CoverageViewState): void {
+  if (!coverageModule || !coverageController) return;
+  const prepContainer = document.getElementById('prepare-coverage-container');
+  if (prepContainer) {
+    coverageModule.renderCoveragePreparation(prepContainer, state, (scenarioId, checked) => {
+      coverageController?.toggleIntention(scenarioId, checked);
+    });
+  }
+
+  const projContainer = document.getElementById('coverage-container');
+  if (projContainer) {
+    coverageModule.renderCoverageProjection(projContainer, state.projection, {
+      onOpenFinding: fid => {
+        const finding = currentInvestigationRecord?.findings.find(f => f.id === fid);
+        if (finding) {
+          showView('investigations');
+          openReproductionForFinding(finding);
+        }
+      },
+      onOpenExperiment: ei => {
+        if (currentInvestigationRecord) {
+          const position = resolveExperimentPositionForIndex(currentInvestigationRecord.experiments, ei);
+          if (position < 0) return;
+          showView('investigations');
+          selectedExperimentIndex = position;
+          renderExperiments(currentInvestigationRecord.experiments);
+          renderSelectedExperimentTrace();
+          const traceTab = document.getElementById('tab-btn-trace') as HTMLButtonElement | null;
+          if (traceTab) activateTab(traceTab, false);
+        }
+      },
+    });
+  }
+
+  updateRunReadiness();
+}
+
+function renderCoverageUnavailable(): void {
+  for (const id of ['prepare-coverage-container', 'coverage-container']) {
+    const container = document.getElementById(id);
+    if (!container) continue;
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.textContent = 'Coverage is unavailable in this build. Supported investigations can still run without a coverage plan. Recovery requires coverage.';
+    container.replaceChildren(note);
+  }
+  updateRunReadiness();
+}
+
+/** Initialize the optional coverage feature. Failure leaves the baseline
+ * workspace fully functional, with coverage explicitly unavailable. */
+async function initCoverageFeature(): Promise<void> {
+  const load = await loadOptionalFeature(() => import('./coverage.ts'));
+  if (!load.available) {
+    coverageLoadFailed = true;
+    renderCoverageUnavailable();
+    return;
+  }
+  coverageModule = load.module;
+  coverageController = new load.module.CoverageController(
+    (url, init) => fetch(url, init),
+    state => renderCoverage(state)
+  );
+  syncCoverageContext();
+  if (currentInvestigationRecord) coverageController.inspectRun(currentInvestigationRecord);
+  updateRunReadiness();
+}
+
+function syncCoverageContext(): void {
+  const adapterId = effectiveAdapter();
+  coverageController?.setContext({
+    systemId: selectedSystem?.id ?? null,
+    revision: selectedSystem?.revision ?? null,
+    selectedAdapterId: adapterId,
+    selectedVariant: targetSelect?.value ?? null,
+    isDraftMode,
+    hasUnsavedSystemEdits,
+    isSystemSavePending,
+    requirements: selectedSystem?.requirements,
+    requirementRules: draftRequirementRules,
+    contractRuleIds: currentContractRules,
+    isContextReady: snapshotState === 'ready' && effectiveTargetState() === 'ready' && scopedVariants().includes(targetSelect.value),
+  });
+}
 let reproModel: ReproductionModel | null = null;
 let reproShowFull = false;
 let reproUseRerun = false;
@@ -450,6 +554,7 @@ function renderWorkspaceSummaries(): void {
       overviewRun.append(p, btn);
     }
   }
+  syncCoverageContext();
 }
 
 function renderFindingsView(): void {
@@ -644,7 +749,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); regressionController?.selectFinding(null, null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); regressionController?.selectFinding(null, null); coverageController?.inspectRun(null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -900,6 +1005,7 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
   renderProposals(rec, proposalDisplay);
   renderSelectedExperimentTrace();
   renderReproduction();
+  coverageController?.inspectRun(rec);
 }
 
 function renderProposals(rec: InvestigationRecord, display = describeProposals(rec)): void {
@@ -1673,7 +1779,7 @@ function renderReproductionDetail(): void {
   observedBox?.classList.toggle('is-violation', explanation.observedIsViolation);
   set('repro-observed-text', explanation.observed);
   const factsEl = reproEl('repro-generic-facts');
-  if (factsEl) { factsEl.textContent=''; const facts = step.isGroup ? step.facts : step.facts; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
+  if (factsEl) { factsEl.textContent=''; const result = currentInvestigationRecord?.experiments[selectedExperimentIndex]?.result as (ExperimentResult & CoverageResultFields) | undefined; const facts = [...step.facts, ...(!reproUseRerun && !step.isGroup ? recordedRecoveryFacts(result?.scenarioCheckEvidence, step.tracePosition, currentInvestigationRecord?.systemBrief?.brief.adapterId ?? null) : [])]; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
   const creditWrap = reproEl('repro-credit-wrap');
   if (creditWrap) creditWrap.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).creditVisible || !!step.isGroup);
   reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).factsVisible);
@@ -1770,11 +1876,14 @@ async function openRun(id: string): Promise<void> {
   const token = recordSequencer.next();
   if (lifecycle.openLive(id) && latestLiveRecord && latestLiveRecord.id === id) { isInspectingHistory = false; resetReproductionSelection(); selectedExperimentIndex = 0; currentInvestigationRecord = latestLiveRecord; renderActiveRecord(latestLiveRecord); renderFindingsView(); announce(`Opened investigation ${id}.`); return; }
   if (activeRecordId && id === activeRecordId) { renderEmptyDashboard('Investigation is starting.'); return; }
+  lifecycle.openHistory(id); isInspectingHistory = true;
+  coverageController?.inspectRun(null);
   try {
     const runRes = await fetch(`/api/runs/${encodeURIComponent(id)}`);
     if (!runRes.ok) throw new Error(`HTTP ${runRes.status}`);
     const rec: InvestigationRecord = await runRes.json();
     if (!recordSequencer.isCurrent(token)) return;
+    if (rec.id !== id) throw new Error('Historical run response identity mismatch');
     lifecycle.openHistory(rec.id); isInspectingHistory = true;
     resetReproductionSelection();
     selectedExperimentIndex = 0;
@@ -1784,6 +1893,7 @@ async function openRun(id: string): Promise<void> {
     announce(`Opened saved run ${rec.id}.`);
   } catch (err) {
     if (!recordSequencer.isCurrent(token)) return;
+    coverageController?.inspectRun(null);
     showAlert(`Failed to open run: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -1996,6 +2106,11 @@ function launchBlockedReason(): string | null {
     targetState: effectiveTargetState(),
   });
   if (reason) return reason;
+  // Recovery can never launch without the coverage feature and a valid plan.
+  if (effectiveAdapter() === 'synthetic-trading-recovery' && !coverageController)
+    return coverageLoadFailed ? 'COVERAGE UNAVAILABLE: RECOVERY LAUNCH REQUIRES VALID PREPARATION AND A REVIEWED PLAN' : 'COVERAGE IS STILL LOADING';
+  const covBlocked = coverageController?.state.blockedReason;
+  if (covBlocked) return covBlocked;
   if (providerSelect.value === 'meta' && requestPreflight.checking) return 'Checking the initial request size.';
   if (providerSelect.value === 'meta' && requestPreflight.overLimit) return 'The initial request exceeds the configured size limit.';
   return null;
@@ -2164,15 +2279,19 @@ async function fetchSystemContract(systemId: string): Promise<void> {
     onReady: (snapshot) => {
       snapshotState = 'ready'; snapshotSystemId = snapshot.brief.id;
       snapshotIdentity = { id: snapshot.brief.id, revision: snapshot.brief.revision, adapterId: snapshot.brief.adapterId };
+      currentContractRules = (snapshot.contract?.invariants ?? []).map(i => i.id);
       renderContract(snapshot.contract!);
+      syncCoverageContext();
       updateRunReadiness();
     },
     onIncompatible: () => {
-      snapshotState = 'incompatible'; snapshotIdentity = null; clearContractDisplay();
+      snapshotState = 'incompatible'; snapshotIdentity = null; currentContractRules = []; clearContractDisplay();
+      syncCoverageContext();
       updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
     },
     onError: (err) => {
-      snapshotState = 'error'; snapshotIdentity = null; clearContractDisplay();
+      snapshotState = 'error'; snapshotIdentity = null; currentContractRules = []; clearContractDisplay();
+      syncCoverageContext();
       updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
       if (systemFeedback) {
         systemFeedback.textContent = `System contract unavailable: ${err instanceof Error ? err.message : String(err)} Reselect or reload the system profile to retry.`;
@@ -2244,6 +2363,18 @@ btnLaunch.addEventListener('click', async () => {
   }
   recordSequencer.invalidate(); lifecycle.beginLaunch(); latestLiveRecord = null; isInspectingHistory = false; currentInvestigationRecord = null; resetReproductionSelection(); renderEmptyDashboard('Starting investigation…'); serverRunStatus = 'starting';
   selectedExperimentIndex = 0;
+  // Clearing the previous inspection changes its token. Capture this launch
+  // only after that reset so its own successful response remains current.
+  let coverageLaunch: CoverageLaunchToken | null = null;
+  try {
+    coverageLaunch = coverageController ? coverageController.captureLaunch() : null;
+  } catch (err) {
+    lifecycle.settleStart(); serverRunStatus = 'idle';
+    showAlert(err instanceof Error ? err.message : String(err));
+    updateRunReadiness();
+    return;
+  }
+  const launchInspection = recordSequencer.next();
   const variant = targetSelect.value as TargetVariant;
   const provider = providerSelect.value as ProviderKind;
   const maxExperiments = selectedMaxExperiments();
@@ -2253,19 +2384,25 @@ btnLaunch.addEventListener('click', async () => {
   updateRunReadiness();
 
   try {
+    const launchBody: Record<string, unknown> = {
+      variant,
+      provider,
+      maxExperiments,
+      continueAfterFindings: continueAfterFindingsInput?.checked === true,
+      systemId: systemToRun.id,
+      expectedRevision: systemToRun.revision,
+    };
+    const coveragePlan = coverageLaunch?.plan;
+    if (coveragePlan) {
+      launchBody.coveragePlan = coveragePlan;
+    }
+
     const res = await fetch('/api/investigation/start', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        variant,
-        provider,
-        maxExperiments,
-        continueAfterFindings: continueAfterFindingsInput?.checked === true,
-        systemId: systemToRun.id,
-        expectedRevision: systemToRun.revision,
-      }),
+      body: JSON.stringify(launchBody),
     });
 
     if (!res.ok) {
@@ -2274,9 +2411,17 @@ btnLaunch.addEventListener('click', async () => {
       throw new Error(err.error || `HTTP ${res.status}`);
     }
 
+    const launchData: unknown = await res.json().catch(() => null);
+    const launchBoundary = coverageController && coverageLaunch
+      ? coverageController.validateLaunchResponse(launchData, coverageLaunch)
+      : { current: true } as { current: boolean; error?: string };
+
     isInvestigationActive = true;
     const { deferredStop } = lifecycle.settleStart(); if (deferredStop) { serverRunStatus = 'stopping'; const deferred = await executeDeferredStop(postStopRequest); if (deferred.outcome === 'failed') { showAlert(`Failed to stop investigation: ${deferred.error ?? 'unknown error'}`); } else if (deferred.outcome === 'stopping') serverRunStatus = 'stopping'; }
-    showView('investigations');
+    if (launchBoundary.current && recordSequencer.isCurrent(launchInspection)) {
+      if (launchBoundary.error) showAlert(launchBoundary.error);
+      else showView('investigations');
+    }
     statusCoordinator.invalidate();
     startPolling();
     await fetchStatus();
@@ -2338,6 +2483,7 @@ if (targetSelect) {
   targetSelect.addEventListener('change', () => {
     // Explicit choice wins over any earlier captured preference for the next refresh.
     targetSelection.select(targetSelect.value || null);
+    syncCoverageContext();
     updateRequestPreflight();
   });
 }
@@ -2588,3 +2734,4 @@ fetchStatus();
 loadHistory();
 loadSystems();
 startPolling();
+void initCoverageFeature();
