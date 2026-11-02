@@ -11,6 +11,32 @@ const VARIANT_FILES: Partial<Record<TargetVariant, string>> = {
 
 const SHARED_TRADING_MODULES = ['credit-manager', 'decoder', 'order-engine'] as const;
 
+/**
+ * The executing engine is selected through the business module-selection shim
+ * (inbox imports TargetEngine/decodePayload from it). Only these exact raw
+ * re-export bindings to the bundled shared modules are supported: anything
+ * else fails closed instead of being neutralized into an identical hash.
+ * The bundled copy rewrites the validated specifiers to neutral bundle paths,
+ * so no variant/selector path reaches the model while the selected shared
+ * modules' own contents stay in the hash.
+ */
+function neutralBusinessShim(content: string, ext: string, variant: TargetVariant): string {
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('//# sourceMappingURL='));
+  const expected = [
+    `export { TargetEngine } from '../simulator/variants/clean/order-engine${ext}';`,
+    `export { decodePayload } from '../simulator/variants/clean/decoder${ext}';`,
+  ];
+  if (lines.length !== expected.length || expected.some((line, i) => lines[i] !== line)) {
+    throw new Error(
+      `Unsupported recovery business module-selection binding for variant ${variant}: ` +
+        'the shim must re-export TargetEngine and decodePayload from the bundled shared modules.',
+    );
+  }
+  return `export { TargetEngine } from './order-engine${ext}';\nexport { decodePayload } from './decoder${ext}';\n`;
+}
+
 export function computeRecoverySourceHash(files: { path: string; content: string }[]): string {
   const hash = createHash('sha256');
   const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
@@ -43,6 +69,10 @@ function readRecoverySourceBundle(variant: TargetVariant): SourceBundle {
       bundlePath: `inbox${ext}`,
       diskPath: path.join(currentDir, `inbox${ext}`),
     },
+    {
+      bundlePath: `business${ext}`,
+      diskPath: path.join(currentDir, `business${ext}`),
+    },
     ...SHARED_TRADING_MODULES.map((mod) => ({
       bundlePath: `${mod}${ext}`,
       diskPath: path.join(currentDir, '..', 'simulator', 'variants', 'clean', `${mod}${ext}`),
@@ -56,7 +86,7 @@ function readRecoverySourceBundle(variant: TargetVariant): SourceBundle {
     const content = fs.readFileSync(diskPath, 'utf8');
     return {
       path: bundlePath,
-      content,
+      content: bundlePath === `business${ext}` ? neutralBusinessShim(content, ext, variant) : content,
     };
   });
 

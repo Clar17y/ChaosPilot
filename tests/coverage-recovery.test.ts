@@ -50,6 +50,12 @@ describe('recovery preparation', () => {
       [{ kind: 'contract-rule', ruleId: 'recovery_deadline' }], [{ kind: 'contract-rule', ruleId: 'recovery_deadline' }]]);
     const withRetry = prepareCoverage({ ...preparation, contractRuleIds: ['recovery_deadline', 'recovery_retry_idempotence'] });
     expect(withRetry.suggestions[1].links).toEqual([{ kind: 'contract-rule', ruleId: 'recovery_retry_idempotence' }]);
+    // The public execution_idempotency rule, when the contract actually has it,
+    // wins over the legacy fallbacks.
+    const withExecution = prepareCoverage({ ...preparation, contractRuleIds: ['recovery_deadline', 'recovery_retry_idempotence', 'execution_idempotency'] });
+    expect(withExecution.suggestions[1].links).toEqual([{ kind: 'contract-rule', ruleId: 'execution_idempotency' }]);
+    const executionOnly = prepareCoverage({ ...preparation, contractRuleIds: ['execution_idempotency'] });
+    expect(executionOnly.suggestions.map(s => s.scenarioId)).toEqual(['recovery-retry-idempotence']);
     expect(prepareCoverage({ ...preparation, contractRuleIds: ['some_retry_thing'] }).suggestions).toEqual([]);
     expect(prep.contextOnly).toEqual(preparation.requirements);
   });
@@ -130,6 +136,57 @@ describe('recovery deadline transitions', () => {
     expect(row(project([changed], [finding]), 'recovery-retry-idempotence').status).toBe('confirmed');
     changed.facts = { ...changed.facts, retryCheck: { status: 'failed', before: accounting, after: accounting } } as CoverageRecoveryFacts;
     expect(row(project([changed], [finding]), 'recovery-retry-idempotence').status).toBe('inconclusive');
+  });
+  it('credits a connected retry against independent expected accounting without inventing reconnect or deadline facts', () => {
+    const connectedFacts = (over: Partial<CoverageRecoveryFacts> = {}): CoverageRecoveryFacts => facts({
+      acceptedDuringDisconnection: false, reconnectTick: undefined, deadlineTick: undefined,
+      completionTick: undefined, horizonTick: 10, retryObserved: true,
+      retryCheck: { status: 'passed', before: { ...accounting }, after: { ...accounting }, expected: { ...accounting } },
+      ...over,
+    });
+    expect(row(project([check('recovery-retry-idempotence', connectedFacts())]), 'recovery-retry-idempotence').status).toBe('exercised');
+    // The retry scenario never credits the deadline row for a connected acceptance.
+    expect(row(project([check('recovery-by-deadline', connectedFacts())]), 'recovery-by-deadline').status).toBe('inconclusive');
+
+    const mutated = check('recovery-retry-idempotence', connectedFacts({
+      observed: { ...accounting, applicationCount: 2 },
+      retryCheck: { status: 'failed', before: { ...accounting }, after: { ...accounting, applicationCount: 2 }, expected: { ...accounting } },
+    }), { outcome: 'failed', violationId: 'v-connected-retry' });
+    expect(row(project([mutated]), 'recovery-retry-idempotence').status).toBe('failed-unconfirmed');
+    const finding: CoverageFindingInput = { id: 'f-connected-retry', experimentIndex: 0, sourceHash: context.sourceHash,
+      violationId: 'v-connected-retry', invariant: 'execution_idempotency', reproduced: true, cleanControlPassed: true };
+    expect(row(project([mutated], [finding]), 'recovery-retry-idempotence').status).toBe('confirmed');
+    // Confirmation still needs both replay reproduction and a passing clean control.
+    expect(row(project([mutated], [{ ...finding, cleanControlPassed: false }]), 'recovery-retry-idempotence').status).toBe('failed-unconfirmed');
+
+    // Unchanged before/after facts that never matched independent expectations do not pass.
+    const unreconciled = { filledQuantity: 0, remainingQuantity: 10, usedCredit: 0, reservedCredit: 1000, applicationCount: 0 };
+    const notApplied = check('recovery-retry-idempotence', connectedFacts({
+      observed: { ...unreconciled },
+      retryCheck: { status: 'passed', before: { ...unreconciled }, after: { ...unreconciled }, expected: { ...accounting } },
+    }));
+    expect(row(project([notApplied]), 'recovery-retry-idempotence').status).toBe('inconclusive');
+    // And a connected retry with no independent expected accounting is unproved.
+    const noExpected = check('recovery-retry-idempotence', connectedFacts({
+      retryCheck: { status: 'passed', before: { ...accounting }, after: { ...accounting } },
+    }));
+    expect(row(project([noExpected]), 'recovery-retry-idempotence').status).toBe('inconclusive');
+  });
+  it('keeps disconnected retries inconclusive before reconnect while preserving actual mutations as failures', () => {
+    const pendingFacts = (over: Partial<CoverageRecoveryFacts> = {}): CoverageRecoveryFacts => facts({
+      reconnectTick: undefined, deadlineTick: undefined, completionTick: undefined, horizonTick: 10,
+      observed: { filledQuantity: 0, remainingQuantity: 10, usedCredit: 0, reservedCredit: 1000, applicationCount: 0 },
+      retryObserved: true, ...over,
+    });
+    const zero = { filledQuantity: 0, remainingQuantity: 10, usedCredit: 0, reservedCredit: 1000, applicationCount: 0 };
+    const cleanPending = check('recovery-retry-idempotence', pendingFacts({
+      retryCheck: { status: 'passed', before: { ...zero }, after: { ...zero }, expected: { ...accounting } },
+    }), { outcome: 'inconclusive' });
+    expect(row(project([cleanPending]), 'recovery-retry-idempotence').status).toBe('inconclusive');
+    const mutatedPending = check('recovery-retry-idempotence', pendingFacts({
+      retryCheck: { status: 'failed', before: { ...zero }, after: { ...zero, filledQuantity: 4, remainingQuantity: 6 }, expected: { ...accounting } },
+    }), { outcome: 'failed' });
+    expect(row(project([mutatedPending]), 'recovery-retry-idempotence').status).toBe('failed-unconfirmed');
   });
   it('early stop preserves confirmed deadline evidence and the pending retry intention, with stop reason', () => {
     const failed = check('recovery-by-deadline', facts({ observed: { ...accounting, applicationCount: 2 } }), { outcome: 'failed', violationId: 'v-early' });

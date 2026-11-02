@@ -15,15 +15,26 @@ function accounting(v: unknown): v is RecoveryAccountingFacts {
 function recoveryTruth(f: CoverageRecoveryFacts, retry: boolean): boolean | null {
   if (![f.reportId, f.executionId, f.orderId].every(text) || !amount(f.acceptedAtTick) || !amount(f.horizonTick)
     || f.horizonTick < f.acceptedAtTick || typeof f.acceptedDuringDisconnection !== 'boolean') return null;
-  if (f.acceptedDuringDisconnection !== true) return null;
   if (!accounting(f.expected) || f.expected.applicationCount !== 1 || !accounting(f.observed)) return null;
-  if (retry && f.retryObserved !== true) return null;
+  if (!retry && f.acceptedDuringDisconnection !== true) return null;
   if (retry) {
+    if (f.retryObserved !== true) return null;
     if (!f.retryCheck || !accounting(f.retryCheck.before) || !accounting(f.retryCheck.after)) return null;
     const unchanged = accountingKeys
       .every(k => f.retryCheck!.before![k] === f.retryCheck!.after![k]);
     // A mutation at retry is a failure even if later work repairs accounting.
     if (!unchanged) return f.retryCheck.status === 'failed' ? false : null;
+    if (f.acceptedDuringDisconnection === false) {
+      // A connected acceptance has no reconnect or deadline. Its retry is proved
+      // only against the independent expected accounting recorded with the retry;
+      // a target before-snapshot alone can never supply the expected oracle.
+      if (f.reconnectTick !== undefined || f.deadlineTick !== undefined || f.completionTick !== undefined) return null;
+      if (!accounting(f.retryCheck.expected) || f.retryCheck.expected.applicationCount !== 1) return null;
+      if (!accountingKeys.every(k => f.retryCheck!.expected![k] === f.expected[k])) return null;
+      if (f.retryCheck.status === 'failed') return false;
+      if (f.retryCheck.status !== 'passed') return null;
+      return accountingKeys.every(k => f.retryCheck!.after![k] === f.expected[k]);
+    }
     if (f.retryCheck.status !== 'passed') return null;
   }
   // A proven retry mutation is local evidence even before reconnect. Positive

@@ -116,6 +116,8 @@ export interface CoverageRecoveryFacts {
     status: 'passed' | 'failed' | 'inconclusive';
     before?: RecoveryAccountingFacts;
     after?: RecoveryAccountingFacts;
+    /** Independent expected accounting from the raw producer's accepted history. Required to pass a connected retry. */
+    expected?: RecoveryAccountingFacts;
   };
   expected: RecoveryAccountingFacts;
   observed?: RecoveryAccountingFacts;

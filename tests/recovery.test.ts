@@ -29,6 +29,49 @@ function setupOrderSteps(orderId = 'ord-1', quantity = 10, price = 100, limit = 
   ];
 }
 
+function wrapRecoveryTarget(
+  inner: RecoveryTarget,
+  hooks: {
+    onMessage?: (payload: unknown) => void;
+    onResult?: (result: RecoveryProcessResult, payload: unknown) => RecoveryProcessResult;
+    onExecution?: (payload: Record<string, unknown>, forward: (p: unknown) => RecoveryProcessResult) => RecoveryProcessResult | undefined;
+    snapshot?: (snap: RecoverySnapshot) => RecoverySnapshot;
+  } = {},
+): RecoveryTarget {
+  return {
+    processMessage(channel, payload, tick) {
+      hooks.onMessage?.(payload);
+      const p = payload as Record<string, unknown> | null;
+      if (p?.type === 'execution' && hooks.onExecution) {
+        const intercepted = hooks.onExecution(p, (forwarded) => inner.processMessage(channel, forwarded, tick));
+        if (intercepted) return intercepted;
+      }
+      const res = inner.processMessage(channel, payload, tick);
+      return hooks.onResult ? hooks.onResult(res, payload) : res;
+    },
+    setConnected: (connected, tick) => inner.setConnected(connected, tick),
+    nextDueTick: () => inner.nextDueTick(),
+    runDue: (tick) => inner.runDue(tick),
+    getSnapshot: () => (hooks.snapshot ? hooks.snapshot(inner.getSnapshot()) : inner.getSnapshot()),
+  };
+}
+
+function disconnectedFillExp(extra: Experiment['steps'] = []): Experiment {
+  return {
+    hypothesis: 'Disconnected fill recovery',
+    expectedInvariant: 'recovery_deadline',
+    steps: [
+      ...setupOrderSteps(),
+      { op: 'disconnect' },
+      { op: 'fill', messageId: 'm-fill-1', orderId: 'ord-1', executionId: 'exec-1', quantity: 4 },
+      { op: 'deliver', messageId: 'm-fill-1' },
+      { op: 'reconnect' },
+      { op: 'advance', ticks: 5 },
+      ...extra,
+    ],
+  };
+}
+
 describe('Recovery engine and independent oracle (synthetic-trading-recovery)', () => {
   it('only target-accepted execution reports while disconnected create recovery obligations; scheduled, withheld, or rejected reports do not', () => {
     // 1. Scheduled while disconnected, but never delivered (withheld)
@@ -705,6 +748,213 @@ describe('Recovery engine and independent oracle (synthetic-trading-recovery)', 
     expect(result.violations.some(v => v.invariant === 'recovery_deadline')).toBe(true);
   });
 
+  it('oracle creates the obligation from the delivered payload even when the target falsely claims duplicate on first delivery', () => {
+    // Target forwards normally (so it does reconcile) but lies duplicate:true.
+    const lying = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res, payload) =>
+        (payload as Record<string, unknown>)?.type === 'execution' && res.accepted && !res.duplicate
+          ? { ...res, duplicate: true }
+          : res,
+    });
+    const res = executeExperiment(disconnectedFillExp(), 'clean', lying);
+    expect(res.recovery?.obligations).toHaveLength(1);
+    expect(res.recovery?.obligations[0]?.status).toBe('passed');
+    expect(res.recovery?.obligations[0]?.report.quantity).toBe(4);
+    expect(res.recovery?.ingress[0]?.duplicate).toBe(false);
+    expect(res.violations.some((v) => v.invariant === 'execution_idempotency')).toBe(true);
+
+    // Target claims duplicate and suppresses processing entirely: the delivered
+    // venue fact must still become an obligation that misses its deadline.
+    const suppressing = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onExecution: (payload) => ({
+        accepted: true,
+        duplicate: true,
+        report: {
+          type: 'execution', id: payload.id as string, orderId: payload.orderId as string,
+          executionId: payload.executionId as string, quantity: payload.quantity as number,
+          price: payload.price as number, occurredAt: payload.occurredAt as number,
+        },
+      }),
+    });
+    const suppressed = executeExperiment(disconnectedFillExp(), 'clean', suppressing);
+    expect(suppressed.recovery?.obligations).toHaveLength(1);
+    expect(suppressed.recovery?.obligations[0]?.status).toBe('failed');
+    expect(suppressed.recovery?.obligations[0]?.deadlineMissed).toBe(true);
+    expect(suppressed.recovery?.status).toBe('failed');
+    expect(suppressed.violations.some((v) => v.invariant === 'recovery_deadline')).toBe(true);
+  });
+
+  it('oracle keeps delivered business content when the returned report substitutes quantity or execution identity', () => {
+    // Target applies/reports quantity 2 for a delivered fact of 4.
+    const shrinking = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onExecution: (payload, forward) => forward({ ...payload, quantity: 2 }),
+    });
+    const shrunk = executeExperiment(disconnectedFillExp(), 'clean', shrinking);
+    expect(shrunk.recovery?.obligations).toHaveLength(1);
+    expect(shrunk.recovery?.obligations[0]?.report.quantity).toBe(4);
+    expect(shrunk.recovery?.obligations[0]?.expected?.filledQuantity).toBe(4);
+    expect(shrunk.recovery?.obligations[0]?.status).toBe('failed');
+    expect(shrunk.recovery?.status).toBe('failed');
+    expect(shrunk.violations.some((v) => v.invariant === 'execution_idempotency')).toBe(true);
+
+    // Returned report renames the business execution identity; the delivered
+    // identity stays authoritative, so genuine reconciliation still passes.
+    const renaming = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res) => (res.report ? { ...res, report: { ...res.report, executionId: 'exec-renamed' } } : res),
+    });
+    const renamed = executeExperiment(disconnectedFillExp(), 'clean', renaming);
+    expect(renamed.recovery?.obligations[0]?.report.executionId).toBe('exec-1');
+    expect(renamed.recovery?.obligations[0]?.status).toBe('passed');
+    expect(renamed.violations.some((v) => v.invariant === 'execution_idempotency')).toBe(true);
+  });
+
+  it('oracle ignores transport report-id differences and supports omitted optional result metadata', () => {
+    const differentTransportId = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res) => (res.report ? { ...res, report: { ...res.report, id: 'transport-other' } } : res),
+    });
+    const transported = executeExperiment(disconnectedFillExp(), 'clean', differentTransportId);
+    expect(transported.recovery?.obligations[0]?.status).toBe('passed');
+    expect(transported.violations.some((v) => v.invariant === 'execution_idempotency')).toBe(false);
+
+    const minimal = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res) => ({ accepted: res.accepted, ...(res.orderCreated ? { orderCreated: res.orderCreated } : {}), ...(res.reason ? { reason: res.reason } : {}) }),
+    });
+    const minimalRes = executeExperiment(disconnectedFillExp(), 'clean', minimal);
+    expect(minimalRes.recovery?.obligations).toHaveLength(1);
+    expect(minimalRes.recovery?.obligations[0]?.status).toBe('passed');
+    expect(minimalRes.violations).toHaveLength(0);
+  });
+
+  it('allows a rejected conflicting delivery to echo the existing accepted report without redefining ingress', () => {
+    let acceptedReport: RecoveryProcessResult['report'];
+    const diagnosticTarget = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res, payload) => {
+        if ((payload as Record<string, unknown>)?.type !== 'execution') return res;
+        if (res.accepted && res.report) acceptedReport = res.report;
+        return !res.accepted && acceptedReport ? { ...res, report: acceptedReport } : res;
+      },
+    });
+    const result = executeExperiment(disconnectedFillExp([
+      { op: 'send', id: 'm-conflict', to: 'reports', payload: {
+        type: 'execution', id: 'conflict', orderId: 'ord-1', executionId: 'exec-1', quantity: 2, price: 100, occurredAt: 0,
+      } },
+      { op: 'deliver', messageId: 'm-conflict' },
+    ]), 'clean', diagnosticTarget);
+    expect(result.violations).toEqual([]);
+    expect(result.recovery?.ingress[1]).toMatchObject({ status: 'rejected', duplicate: true, report: { quantity: 2 } });
+    expect(result.recovery?.obligations).toHaveLength(1);
+    expect(result.recovery?.obligations[0]?.report.quantity).toBe(4);
+    expect(result.recovery?.obligations[0]?.status).toBe('passed');
+    expect(result.recovery?.retries[0]?.status).toBe('passed');
+  });
+
+  it('oracle derives duplicate status and disconnection from its own records, not target claims or snapshot connection state', () => {
+    // Snapshot always claims connected; the executor knows the link is down.
+    const lyingConnected = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      snapshot: (snap) => ({ ...snap, connected: true }),
+    });
+    const res = executeExperiment(disconnectedFillExp(), 'clean', lyingConnected);
+    expect(res.recovery?.ingress[0]?.disconnected).toBe(true);
+    expect(res.recovery?.obligations).toHaveLength(1);
+    expect(res.recovery?.obligations[0]?.status).toBe('passed');
+
+    // A genuine retry delivered under a new transport id is a duplicate in the
+    // oracle's own history even if the target omits its duplicate flag.
+    const connectedRetry: Experiment = {
+      hypothesis: 'Connected duplicate under a new transport id',
+      expectedInvariant: 'execution_idempotency',
+      steps: [
+        ...setupOrderSteps(),
+        { op: 'fill', messageId: 'm-fill-1', orderId: 'ord-1', executionId: 'exec-1', quantity: 4 },
+        { op: 'deliver', messageId: 'm-fill-1' },
+        {
+          op: 'send', id: 'm-retry', to: 'reports',
+          payload: { type: 'execution', id: 'm-retry-transport', orderId: 'ord-1', executionId: 'exec-1', quantity: 4, price: 100, occurredAt: 0 },
+        },
+        { op: 'deliver', messageId: 'm-retry' },
+      ],
+    };
+    const cleanRetry = executeExperiment(connectedRetry, 'clean');
+    expect(cleanRetry.recovery?.obligations).toHaveLength(0);
+    expect(cleanRetry.recovery?.ingress).toHaveLength(2);
+    expect(cleanRetry.recovery?.ingress[1]?.duplicate).toBe(true);
+    expect(cleanRetry.recovery?.retries).toHaveLength(1);
+    expect(cleanRetry.recovery?.retries[0]?.status).toBe('passed');
+    expect(cleanRetry.recovery?.retries[0]?.expected).toEqual({
+      filledQuantity: 4, remainingQuantity: 6, usedCredit: 400, reservedCredit: 600, applicationCount: 1,
+    });
+    expect(cleanRetry.recovery?.idempotenceStatus).toBe('passed');
+    expect(cleanRetry.violations).toHaveLength(0);
+  });
+
+  it('preserves an on-time completed obligation through a later unrelated target exception, without passing pending work or later mutations', () => {
+    const throwOnQuoteV2 = {
+      onMessage: (payload: unknown) => {
+        const p = payload as Record<string, unknown> | null;
+        if (p?.type === 'quote' && p?.version === 2) throw new Error('unrelated boom');
+      },
+    };
+    const laterQuote: Experiment['steps'] = [
+      { op: 'send', id: 'q-2', to: 'market', payload: { type: 'quote', id: 'quote-2', version: 2, price: 100 } },
+      { op: 'deliver', messageId: 'q-2' },
+    ];
+    const completed = executeExperiment(
+      disconnectedFillExp(laterQuote), 'clean',
+      wrapRecoveryTarget(createRecoveryTarget('clean'), throwOnQuoteV2),
+    );
+    expect(completed.recovery?.obligations[0]?.completionTick).toBeDefined();
+    expect(completed.recovery?.obligations[0]?.deadlineMissed).toBe(false);
+    expect(completed.recovery?.obligations[0]?.status).toBe('passed');
+    expect(completed.recovery?.status).toBe('failed');
+    expect(completed.recovery?.executionComplete).toBe(false);
+
+    // The same exception before any completion cannot pass the obligation.
+    const pendingExp: Experiment = {
+      hypothesis: 'Pending obligation then unrelated exception',
+      expectedInvariant: 'recovery_deadline',
+      steps: [
+        ...setupOrderSteps(),
+        { op: 'disconnect' },
+        { op: 'fill', messageId: 'm-fill-1', orderId: 'ord-1', executionId: 'exec-1', quantity: 4 },
+        { op: 'deliver', messageId: 'm-fill-1' },
+        ...laterQuote,
+      ],
+    };
+    const pending = executeExperiment(pendingExp, 'clean', wrapRecoveryTarget(createRecoveryTarget('clean'), throwOnQuoteV2));
+    expect(pending.recovery?.obligations[0]?.status).not.toBe('passed');
+    expect(pending.recovery?.status).toBe('failed');
+    expect(pending.recovery?.executionComplete).toBe(false);
+
+    // A genuine second application after completion still fails the obligation.
+    let doubled = false;
+    const doubler = wrapRecoveryTarget(createRecoveryTarget('clean'), {
+      onResult: (res, payload) => {
+        if ((payload as Record<string, unknown>)?.type === 'execution' && res.duplicate) doubled = true;
+        return res;
+      },
+      snapshot: (snap) => {
+        if (!doubled || snap.applications.length === 0) return snap;
+        const app = snap.applications[0]!;
+        const order = snap.orders['ord-1']!;
+        return {
+          ...snap,
+          applications: [...snap.applications, { ...app }],
+          orders: { ...snap.orders, 'ord-1': { ...order, filledQuantity: order.filledQuantity + 4, remainingQuantity: order.remainingQuantity - 4 } },
+          usedCredit: snap.usedCredit + 400,
+          reservedCredit: snap.reservedCredit - 400,
+        };
+      },
+    });
+    const mutated = executeExperiment(disconnectedFillExp([
+      { op: 'duplicate', messageId: 'm-fill-1', id: 'm-fill-dup' },
+      { op: 'deliver', messageId: 'm-fill-dup' },
+    ]), 'clean', doubler);
+    expect(mutated.recovery?.retries[0]?.status).toBe('failed');
+    expect(mutated.recovery?.obligations[0]?.status).toBe('failed');
+    expect(mutated.recovery?.status).toBe('failed');
+    expect(mutated.violations.some((v) => v.invariant === 'execution_idempotency')).toBe(true);
+  });
+
   it('model-visible recovery source bundle includes only the selected recovery component and neutral dependencies without variant labels, fault comments, or oracle code', () => {
     const cleanBundle = getSourceBundle('clean');
     const candidateBundle = getSourceBundle('recovery-candidate-a');
@@ -714,6 +964,7 @@ describe('Recovery engine and independent oracle (synthetic-trading-recovery)', 
     expect(cleanBundle.hash).not.toBe(candidateBundle.hash);
 
     const expectedPaths = [
+      'business.ts',
       'credit-manager.ts',
       'decoder.ts',
       'inbox.ts',

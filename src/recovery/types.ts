@@ -52,6 +52,8 @@ export interface RecoveryRetryCheck {
   status: RecoveryStatus;
   before?: RecoveryFacts;
   after?: RecoveryFacts;
+  /** Independent expected accounting from the oracle's accepted-delivery history. */
+  expected?: RecoveryFacts;
 }
 /** Raw deterministic observations. Coverage projects these; a proposal goal is not evidence. */
 export interface RecoveryEvidence {

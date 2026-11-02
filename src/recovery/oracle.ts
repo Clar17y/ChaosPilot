@@ -19,8 +19,8 @@ import {
 export { isRecoveryEvaluatorIdentity };
 
 const RECOVERY_EVALUATOR_DESCRIPTOR = {
-  id: 'recovery-oracle-v1',
-  version: 1 as const,
+  id: 'recovery-oracle-v2',
+  version: 2 as const,
   deadlineTicks: RECOVERY_DEADLINE_TICKS,
   schemaVersion: 1 as const,
 };
@@ -366,6 +366,8 @@ export class RecoveryOracle {
     targetSnapshot: RecoverySnapshot;
     processResult: RecoveryProcessResult;
     targetException: boolean;
+    /** The executor's own link state; target snapshots must not redefine it. */
+    executorConnected: boolean;
     venueOrders: Record<string, VenueOrder>;
   }): void {
     const {
@@ -379,25 +381,65 @@ export class RecoveryOracle {
       targetSnapshot,
       processResult,
       targetException,
+      executorConnected,
       venueOrders,
     } = context;
 
+    // The delivered payload was cloned by the executor before the target saw
+    // it, so it is the authoritative business content. Target-returned report
+    // content and duplicate claims are claims to check, never inputs.
     const extractedReport = extractExecutionReportPayload(payload);
     const isReportsOrExecution = channel === 'reports' || extractedReport !== undefined;
+    const deliveredKey = extractedReport ? JSON.stringify([extractedReport.orderId, extractedReport.executionId]) : undefined;
+    const oracleDuplicate = deliveredKey !== undefined && this.acceptedReports.has(deliveredKey);
 
     if (isReportsOrExecution) {
-      const reportForIngress = processResult.report ?? extractedReport;
       this.ingress.push({
         traceIndex,
         step,
         tick,
         messageId,
         status: targetException ? 'exception' : processResult.accepted ? 'accepted' : 'rejected',
-        disconnected: !previousSnapshot.connected,
-        duplicate: Boolean(processResult.duplicate),
-        ...(reportForIngress ? { report: structuredClone(reportForIngress) } : {}),
+        disconnected: !executorConnected,
+        duplicate: oracleDuplicate,
+        ...(extractedReport ? { report: structuredClone(extractedReport) } : {}),
         ...(processResult.reason ? { reason: processResult.reason } : {}),
       });
+    }
+
+    if (extractedReport && !targetException) {
+      const reported = processResult.report;
+      // A rejection may echo the existing accepted report as diagnostic data;
+      // only an accepted delivery claims to have accepted the delivered content.
+      const reportMismatch = processResult.accepted && reported !== undefined && (
+        reported.orderId !== extractedReport.orderId ||
+        reported.executionId !== extractedReport.executionId ||
+        reported.quantity !== extractedReport.quantity ||
+        reported.price !== extractedReport.price ||
+        reported.occurredAt !== extractedReport.occurredAt
+      );
+      const duplicateMismatch = processResult.accepted && processResult.duplicate !== undefined &&
+        processResult.duplicate !== oracleDuplicate;
+      if (reportMismatch || duplicateMismatch) {
+        this.pushViolation({
+          invariant: 'execution_idempotency',
+          category: 'execution_idempotency',
+          step,
+          orderId: extractedReport.orderId,
+          message: reportMismatch
+            ? `Target returned execution report content that differs from the delivered execution '${extractedReport.executionId}' for order '${extractedReport.orderId}'`
+            : `Target claimed duplicate=${String(processResult.duplicate)} for execution '${extractedReport.executionId}' for order '${extractedReport.orderId}', contradicting the recorded accepted-delivery history`,
+          evidence: {
+            key: deliveredKey,
+            orderId: extractedReport.orderId,
+            executionId: extractedReport.executionId,
+            delivered: structuredClone(extractedReport),
+            ...(reported ? { reported: structuredClone(reported) } : {}),
+            claimedDuplicate: processResult.duplicate,
+            recordedDuplicate: oracleDuplicate,
+          },
+        });
+      }
     }
 
     let publicError = wireError(channel, payload, tick);
@@ -458,6 +500,7 @@ export class RecoveryOracle {
               status: failed ? 'failed' : 'passed',
               before,
               after,
+              expected: this.computeExpectedFacts(extractedReport.orderId),
             });
             if (failed) {
               this.pushViolation({
@@ -485,6 +528,7 @@ export class RecoveryOracle {
               status: failed ? 'failed' : 'passed',
               before,
               after,
+              expected: this.computeExpectedFacts(extractedReport.orderId),
             });
             if (stateMutated) {
               this.pushViolation({
@@ -524,20 +568,20 @@ export class RecoveryOracle {
             publicError = 'Execution exceeds unreconciled quantity';
           }
 
-          if (!publicError && processResult.accepted && !processResult.duplicate) {
-            const acceptedReport = structuredClone(processResult.report ?? extractedReport);
+          if (!publicError && processResult.accepted) {
+            const acceptedReport = structuredClone(extractedReport);
             this.acceptedReports.set(key, {
               key,
               report: acceptedReport,
               acceptedTick: tick,
-              disconnected: !previousSnapshot.connected,
+              disconnected: !executorConnected,
             });
             this.confirmedDeliveredFills.set(
               acceptedReport.orderId,
               (this.confirmedDeliveredFills.get(acceptedReport.orderId) ?? 0) + acceptedReport.quantity,
             );
 
-            if (!previousSnapshot.connected) {
+            if (!executorConnected) {
               const expected = this.computeExpectedFacts(acceptedReport.orderId);
               const observed = this.computeObservedFacts(targetSnapshot, acceptedReport.orderId, key, tick);
               this.obligations.push({
@@ -802,14 +846,14 @@ export class RecoveryOracle {
         ob.status = 'invalid';
         continue;
       }
-      if (this.hasTargetException) {
-        ob.status = 'failed';
-        continue;
-      }
       if (ob.deadlineMissed) {
         ob.status = 'failed';
         continue;
       }
+      // An obligation already proved reconciled on time keeps that per-obligation
+      // fact even when a later unrelated delivery throws; the aggregate status
+      // and executionComplete below still record the exception. A later second
+      // application is caught by the horizon application-count check.
       if (ob.completionTick !== undefined) {
         // Verify reconciled state still holds at horizon for the application record and credit conservation
         const observedAtHorizon = this.computeObservedFacts(finalSnapshot, ob.report.orderId, ob.key, horizonTick);
@@ -821,6 +865,10 @@ export class RecoveryOracle {
         } else {
           ob.status = 'passed';
         }
+        continue;
+      }
+      if (this.hasTargetException) {
+        ob.status = 'failed';
         continue;
       }
 

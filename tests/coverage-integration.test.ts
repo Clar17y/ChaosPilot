@@ -248,6 +248,62 @@ describe('Pinned coverage across preparation, execution, publication and replay'
     expect((await replayRun(record, runsDir, simulator)).exactReproductionClaimed).toBe(true);
   });
 
+  it('credits connected retries from genuine recorded coverage and confirms a connected double application', async () => {
+    const connectedExperiment = (): Experiment => {
+      const experiment = recoveryProposal(1)!;
+      experiment.steps = experiment.steps.filter(s => s.op !== 'disconnect' && s.op !== 'reconnect' && s.op !== 'advance');
+      return experiment;
+    };
+    const providerFor = (experiment: Experiment) => ({ kind: 'mock' as const, model: 'test',
+      async propose() { return { experiment, usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 } }; } });
+
+    const cleanPrepared = await prepare('clean');
+    const cleanRecord = await runInvestigation({ variant: 'clean', systemBrief: cleanPrepared.snapshot,
+      coveragePlan: cleanPrepared.plan, maxExperiments: 1, provider: providerFor(connectedExperiment()) });
+    const cleanResult = cleanRecord.experiments[0]!.result;
+    expect(cleanResult.recovery!.obligations).toEqual([]);
+    expect(cleanResult.recovery!.retries[0]).toMatchObject({ status: 'passed',
+      expected: { filledQuantity: 4, remainingQuantity: 6, usedCredit: 400, reservedCredit: 600, applicationCount: 1 } });
+    const cleanCheck = cleanResult.scenarioCheckEvidence!.find(c => c.scenarioId === 'recovery-retry-idempotence')!;
+    expect(cleanCheck.outcome).toBe('passed');
+    expect(cleanCheck.facts).toMatchObject({ acceptedDuringDisconnection: false, retryObserved: true,
+      retryCheck: { status: 'passed', expected: { applicationCount: 1, filledQuantity: 4 } } });
+    expect(cleanCheck.facts).not.toHaveProperty('reconnectTick');
+    const cleanRows = project(cleanRecord).rows;
+    expect(cleanRows.find(r => r.scenarioId === 'recovery-retry-idempotence')?.status).toBe('exercised');
+    expect(cleanRows.find(r => r.scenarioId === 'recovery-by-deadline')?.status).toBe('planned');
+
+    const { plan, snapshot } = await prepare();
+    const simulator = { ...recovery, executeExperiment(input: Experiment, variant: any) {
+      if (variant === 'clean') return recovery.executeExperiment(input, variant);
+      const target = recovery.createRecoveryTarget('clean');
+      let duplicateAt: number | undefined, report: ExecutionReportPayload | undefined;
+      const bad: recovery.RecoveryTarget = { ...target,
+        setConnected: target.setConnected.bind(target), nextDueTick: target.nextDueTick.bind(target), runDue: target.runDue.bind(target),
+        processMessage(channel, payload, tick) { const response = target.processMessage(channel, payload, tick);
+          if (response.duplicate) { duplicateAt = tick; report = response.report; } return response; },
+        getSnapshot() { const s = target.getSnapshot(); if (duplicateAt !== undefined && report) {
+          const order = s.orders[report.orderId]!; order.filledQuantity += report.quantity; order.remainingQuantity -= report.quantity;
+          s.usedCredit += report.quantity * report.price; s.reservedCredit -= report.quantity * report.price;
+          s.applications.push({ key: JSON.stringify([report.orderId, report.executionId]), report: { ...report }, tick: duplicateAt });
+        } return s; },
+      };
+      return recovery.executeExperiment(input, variant, bad);
+    } };
+    const record = await runInvestigation({ variant: 'recovery-candidate-a', systemBrief: snapshot, coveragePlan: plan,
+      maxExperiments: 1, simulator, provider: providerFor(connectedExperiment()) });
+    const result = record.experiments[0]!.result;
+    expect(result.recovery!.retries[0]!.status).toBe('failed');
+    const check = result.scenarioCheckEvidence!.find(c => c.scenarioId === 'recovery-retry-idempotence')!;
+    expect(check.outcome).toBe('failed');
+    expect(record.findings.some(f => f.violation.id === check.violationId && f.violation.invariant === 'execution_idempotency')).toBe(true);
+    expect(project(record).rows.find(r => r.scenarioId === 'recovery-retry-idempotence')?.status).toBe('confirmed');
+    const withoutClean = structuredClone(record);
+    withoutClean.findings.forEach(f => { f.cleanControlPassed = false; });
+    expect(project(withoutClean).rows.find(r => r.scenarioId === 'recovery-retry-idempotence')?.status).toBe('failed-unconfirmed');
+    expect((await replayRun(record, runsDir, simulator)).exactReproductionClaimed).toBe(true);
+  });
+
   it('does not derive verified coverage from missing, unknown or malformed raw producer identity/schema', async () => {
     const { plan, snapshot } = await prepare('clean');
     const genuine = recovery.executeExperiment(recoveryProposal(0)!, 'clean');

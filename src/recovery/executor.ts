@@ -254,6 +254,7 @@ export function executeExperiment(
       targetSnapshot: currSnapshot,
       processResult,
       targetException,
+      executorConnected: connected,
       venueOrders: venue.getSnapshot()['orders'] as Record<string, VenueOrder>,
     });
 

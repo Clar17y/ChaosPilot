@@ -4,6 +4,10 @@ Implemented on `codex/recovery-coverage` in
 `C:/dev/ChaosPilot-worktrees/recovery-coverage`, based on `35b444a`, with the
 parallel coverage commits `56f3729` and `f5a2730` integrated. Main was preserved.
 
+This checkpoint records acceptance for `6b133ce`. The subsequent user-requested
+[Muse review and repairs](MUSE_REVIEW.md) has its own case-specific validation;
+earlier results below are reused only where code and inputs remain applicable.
+
 The opt-in `trading-recovery` profile executes `synthetic-trading-recovery`.
 Only target-accepted disconnected reports create independent obligations. Clean
 reconciles next tick; the candidate loses its backlog. The deadline is reconnect

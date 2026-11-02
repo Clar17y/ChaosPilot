@@ -72,13 +72,50 @@ export function recordScenarioChecks(result: ExperimentResult, plan: CoveragePla
               reconnectTick: ob.reconnectTick, deadlineTick: ob.deadlineTick, horizonTick: horizon,
               completionTick: ob.completionTick, ...(retry ? { retryObserved: retries.length > 0 } : {}),
               ...(retryResult ? { retryCheck: { status: retryResult.status === 'passed' || retryResult.status === 'failed' ? retryResult.status : 'inconclusive',
-                ...(retryResult.before ? { before: { ...retryResult.before } } : {}), ...(retryResult.after ? { after: { ...retryResult.after } } : {}) } } : {}),
+                ...(retryResult.before ? { before: { ...retryResult.before } } : {}), ...(retryResult.after ? { after: { ...retryResult.after } } : {}),
+                ...(retryResult.expected ? { expected: { ...retryResult.expected } } : {}) } } : {}),
               expected: { ...ob.expected }, ...(ob.observed ? { observed: { ...ob.observed } } : {}) },
             ...(outcome === 'failed' && violation ? { violationId: violation.id } : {}),
             detail: retry ? (retryResult ? 'Recorded duplicate delivery, before/after facts and independent recovery accounting' : 'No duplicate delivery observed')
               : `Independent recovery check at simulated tick ${ob.checkedTick}: ${ob.status}`,
           });
         }
+      }
+    }
+    // Connected acceptances create no recovery obligation, so their retries are
+    // emitted per delivery from the authoritative accepted ingress plus the
+    // oracle's independent expected accounting. No reconnect/deadline is invented.
+    const obligationKeys = new Set(raw.obligations.map(ob => ob.key));
+    const factKeys = ['filledQuantity', 'remainingQuantity', 'usedCredit', 'reservedCredit', 'applicationCount'] as const;
+    const factsEqual = (a: Record<(typeof factKeys)[number], number>, b: Record<(typeof factKeys)[number], number>) =>
+      factKeys.every(k => a[k] === b[k]);
+    for (const intention of plan.intentions) {
+      if (intention.scenarioId !== 'recovery-retry-idempotence') continue;
+      for (const retryResult of raw.retries) {
+        if (obligationKeys.has(retryResult.key) || !retryResult.expected || !retryResult.before || !retryResult.after) continue;
+        const ingress = raw.ingress.find(i => i.status === 'accepted' && !i.duplicate && i.report
+          && JSON.stringify([i.report.orderId, i.report.executionId]) === retryResult.key);
+        if (!ingress?.report || ingress.disconnected) continue;
+        const refs = [ref(ingress.traceIndex), ref(retryResult.traceIndex)]
+          .filter((r): r is CoverageTraceReference => r !== undefined);
+        const violation = result.violations.find(v => v.evidence?.key === retryResult.key
+          && v.invariant === 'execution_idempotency' && v.step === result.trace[retryResult.traceIndex]?.step);
+        const outcome: ScenarioCheckEvidence['outcome'] = retryResult.status === 'failed' ? 'failed'
+          : retryResult.status === 'passed' && factsEqual(retryResult.before, retryResult.after)
+            && factsEqual(retryResult.after, retryResult.expected) ? 'passed' : 'inconclusive';
+        checks.push({ schemaVersion: 1, id: JSON.stringify([intention.scenarioId, experimentIndex, retryResult.key, retryResult.traceIndex]),
+          scenarioId: intention.scenarioId, evaluator: { ...COVERAGE_EVALUATOR }, context: { ...plan.context }, experimentIndex,
+          trigger: 'reached', outcome,
+          traceRefs: [...new Map(refs.map(r => [r.traceIndex, r])).values()],
+          facts: { kind: 'recovery', reportId: ingress.messageId, executionId: ingress.report.executionId, orderId: ingress.report.orderId,
+            acceptedAtTick: ingress.tick, acceptedDuringDisconnection: false, horizonTick: retryResult.tick,
+            retryObserved: true,
+            retryCheck: { status: retryResult.status === 'passed' || retryResult.status === 'failed' ? retryResult.status : 'inconclusive',
+              before: { ...retryResult.before }, after: { ...retryResult.after }, expected: { ...retryResult.expected } },
+            expected: { ...retryResult.expected }, observed: { ...retryResult.after } },
+          ...(outcome === 'failed' && violation ? { violationId: violation.id } : {}),
+          detail: 'Recorded connected duplicate delivery, before/after facts and independent expected accounting',
+        });
       }
     }
   }

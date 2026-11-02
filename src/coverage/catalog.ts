@@ -42,8 +42,12 @@ export function allowedLinks(input: CoveragePreparationInput, id: CoverageScenar
         && matches[0]?.reviewed === true && matches[0]?.preset === id;
     }).map(req => ({ kind: 'requirement-text', text: normalize(req) }));
   }
-  const ruleId = id === 'recovery-retry-idempotence' && input.contractRuleIds.includes('recovery_retry_idempotence')
-    ? 'recovery_retry_idempotence' : 'recovery_deadline';
+  // Prefer the contract's actual idempotency rule when present; keep the
+  // explicit legacy fallbacks for older supported contracts and fixtures.
+  const ruleId = id === 'recovery-retry-idempotence' && input.contractRuleIds.includes('execution_idempotency')
+    ? 'execution_idempotency'
+    : id === 'recovery-retry-idempotence' && input.contractRuleIds.includes('recovery_retry_idempotence')
+      ? 'recovery_retry_idempotence' : 'recovery_deadline';
   return input.contractRuleIds.includes(ruleId) ? [{ kind: 'contract-rule', ruleId }] : [];
 }
 export function linkKey(v: unknown): string | null {
