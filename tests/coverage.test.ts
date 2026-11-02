@@ -205,4 +205,57 @@ describe('credit evidence adapter (real evaluator evidence)', () => {
     expect(adaptCreditEvidenceToScenarioCheck({ ...base, delivery: { ...delivery, messageId: 'nope' } })).toBeNull();
     expect(adaptCreditEvidenceToScenarioCheck({ ...base, context: { ...context, sourceHash: 'other' } })).toBeNull();
   });
+  it('preserves a genuine client exception as unknown-trigger inconclusive evidence (R-07)', () => {
+    const { result, snapshot } = genuineResult(false);
+    result.deliveryObservations = [{ ...result.deliveryObservations![0], status: 'exception', reason: 'Target exception: boom' }];
+    result.trace = [result.trace[0]];
+    const [rule] = evaluateRequirementRules(result, snapshot, 0);
+    expect(rule.evidence.some(e => e.status === 'inconclusive')).toBe(true); // actual evaluator output
+    const check = adaptCreditEvidenceToScenarioCheck({ context, experimentIndex: 0, snapshot, result, ruleResult: rule, delivery: result.deliveryObservations[0] });
+    expect(check).not.toBeNull();
+    expect(check!.trigger).toBe('unknown');
+    expect(check!.outcome).toBe('inconclusive');
+    expect(check!.violationId).toBeUndefined();
+    expect((check!.facts as { deliveryStatus: string }).deliveryStatus).toBe('exception');
+    expect(creditRow(project([experiment([check!])])).status).toBe('inconclusive');
+    // Market-channel exception is not a valid client new_order exception.
+    expect(adaptCreditEvidenceToScenarioCheck({ context, experimentIndex: 0, snapshot, result, ruleResult: rule,
+      delivery: { ...result.deliveryObservations[0], channel: 'market' } })).toBeNull();
+  });
+});
+
+describe('unreadable scenario evidence (R-03)', () => {
+  it('null, non-object, missing-ID and unknown-scenario entries warn and cannot pass or appear unexercised', () => {
+    for (const corrupt of [null, 'garbage', { id: 'x' }, { ...creditCheck(), id: 'u1', scenarioId: 'invented-scenario' }] as unknown[]) {
+      const p = project([experiment([corrupt] as never)]);
+      expect(creditRow(p).status).toBe('inconclusive');
+      expect(p.warnings.some(w => w.includes('Unreadable scenario check evidence'))).toBe(true);
+    }
+    for (const checks of [null, 'not-a-list', 42] as unknown[]) {
+      const p = project([experiment(checks as never)]);
+      expect(creditRow(p).status).toBe('inconclusive');
+      expect(p.warnings.length).toBeGreaterThan(0);
+    }
+  });
+  it('corruption beside a pass downgrades it; beside a confirmed finding the verdict stays with warnings', () => {
+    const besidePass = project([experiment([creditCheck(), null] as never)]);
+    expect(creditRow(besidePass).status).toBe('inconclusive');
+    const failed = creditCheck({ id: 'f-check', outcome: 'failed', violationId: 'v-1' }, { usedCredit: 500, reservedCredit: 100 });
+    const finding: CoverageFindingInput = { id: 'f1', experimentIndex: 0, sourceHash: context.sourceHash, violationId: 'v-1', invariant: 'credit_limit_respected', reproduced: true, cleanControlPassed: true };
+    const besideConfirmed = project([experiment([failed, null] as never)], [finding]);
+    expect(creditRow(besideConfirmed).status).toBe('confirmed');
+    expect(besideConfirmed.warnings.length).toBeGreaterThan(0);
+    const besideFailed = project([experiment([failed, null] as never)]);
+    expect(creditRow(besideFailed).status).toBe('failed-unconfirmed');
+  });
+  it('genuinely empty or absent evidence remains planned with no warnings; suggested/context-only keep status beside corruption', () => {
+    expect(creditRow(project([experiment([])])).status).toBe('planned');
+    expect(project([experiment([])]).warnings).toEqual([]);
+    expect(creditRow(project([{ ...experiment([]), checks: undefined as never }])).status).toBe('planned');
+    const emptyPlan = buildCoveragePlan({ preparation, intentions: [] }).plan!;
+    const p = project([experiment([null] as never)], [], emptyPlan);
+    expect(creditRow(p).status).toBe('suggested');
+    expect(p.warnings.length).toBeGreaterThan(0);
+    expect(p.rows.find(r => r.scenarioId === null)?.status).toBe('unsupported');
+  });
 });

@@ -109,7 +109,7 @@ entry points and are not needed by the browser graph.)
    (`synthetic-trading-recovery` / `trading-recovery`) and widened
    `SystemBrief.adapterId` are backend changes.
 
-## Final host validation (`.llm-output/host-validation/`)
+## Initial implementation host validation (`.llm-output/host-validation/`)
 
 - `npm run typecheck` — passed both TypeScript configurations (exit 0).
 - `npm test` — build passed; **66 test files / 1,214 tests passed**, exit 0.
@@ -165,3 +165,105 @@ paths remain unchanged by the implementation commit.
 Unproved: combined backend+recovery execution, real browser rendering
 (automation disabled; verified via fake-DOM production-renderer tests and
 build output inspection), and live-model behavior (mock/fake transport only).
+
+## Muse review repair (R-01–R-10, reviewed candidate f5a2730)
+
+One consolidated batch per `.llm-output/muse-review/adjudication.md`; frozen
+`types.ts`/`identity.ts` and all backend files unchanged.
+
+- **R-01** `CoverageController.setContext` distinguishes transient
+  readiness/DOM reloads (same stable identity; temporarily absent
+  variant/snapshot metadata is not a change) from genuine pinned-identity
+  changes. Transient reloads keep reviewed intentions and the historical
+  projection, block launch while unready, and restore the review only when
+  server preparation re-confirms the identical preparation (context,
+  catalog, evaluator, links). Genuine changes and differing revalidation
+  invalidate the review with a visible `reviewInvalidatedReason`; a failed
+  revalidation leaves no executable plan but does not silently empty the
+  review. Preparation no longer clears historical inspection; app owns
+  explicit clear/selection. App passes `TargetSelectionSession.selection`,
+  not a temporarily empty DOM select.
+- **R-02** App `openRun` failure (including identity mismatch), still
+  guarded by `recordSequencer`, clears dashboard, current record,
+  lifecycle inspection and coverage together via `renderEmptyDashboard`;
+  global live/stop bookkeeping is untouched. Controller `open` failure
+  also clears `selectedRunId`. Late failures cannot clear a newer selection.
+- **R-03** `projectCoverage` treats present-but-unreadable evidence
+  (non-array checks including explicit `null`, null/non-object entries,
+  missing or unknown scenario IDs) as corruption: warnings are returned
+  and rendered in the ready state, planned/exercised rows become
+  `inconclusive`, genuine confirmed/failed verdicts stay qualified by the
+  warnings, suggested stays suggested and context-only stays unsupported.
+  Absent/`undefined` or genuinely empty evidence remains planned.
+  Reopen no longer erases explicit null with `?? []`.
+- **R-04** Recovery `acceptedAtTick` and `reconnectTick` now require actual
+  indexed trace references like horizon/completion (inclusive
+  `reconnect+5` unchanged). No `reportId == messageId` equivalence is
+  invented: typed accepted report/execution/order correlation and
+  immutable contents remain the genuine backend recorder's trust
+  boundary, not a client tamper-resistance claim.
+- **R-05** `inspectRun(record, { automatic: true })` for live/status
+  renders does not advance the user-selection token. A poll of the previous
+  run followed by the newly launched run before the POST echo remains owned
+  by that launch (matching/missing/mismatched echo tested). Explicit
+  selection/clear still revokes. Global start/stop settlement on HTTP
+  success is unchanged. Review invalidation notices remain visible during
+  loading, unavailable preparation and errors (R-01).
+- **R-06** Empty plans remain valid pure data, but `getLaunchPlan`/
+  `captureLaunch` attach a plan only with at least one reviewed
+  intention. Copy reads "No intentions reviewed. No coverage plan will be
+  attached…"; ordinary trading/inventory launch proceeds without a plan,
+  recovery stays blocked until reviewed.
+- **R-07** The credit adapter preserves a valid client `new_order` target
+  exception (actual evaluator inconclusive event) as evidence with
+  `trigger: 'unknown'`, `outcome: 'inconclusive'`,
+  `deliveryStatus: 'exception'`; never a finding. Rejection/pass paths
+  and all context/evaluator/trace gates are unchanged.
+- **R-08** `recordedRecoveryFacts` labels raw outcomes as unverified
+  recorded outcome claims, not coverage verdicts, and omits a check when
+  its reference does not match the selected trace entry's
+  step/tick/message (app passes `result.trace[step.tracePosition]`). No
+  coverage-core runtime import was added to the baseline graph.
+- **R-09** App stores the real snapshot hash from `loadSystemContract`
+  (`snapshotHash`, cleared while loading/dirty/draft) and carries it into
+  `syncCoverageContext` for comparison with preparation. Temporarily
+  absent metadata is not a different identity. Source/contract hashes
+  remain server-resolved backend authority, revalidated at launch — no
+  client claim of independent source validation.
+- **R-10** The recovery picker option no longer claims "Executable"; it
+  states execution requires confirmed backend support. Workspace adapter
+  recognition is documented as UI capability only; no adapter was
+  registered and no domain/backend file changed.
+
+Repair checks (`.llm-output/muse-review/repair/`): focused suites and
+`npm run typecheck` and `git diff --check` were re-run after this batch;
+see the saved logs for actual counts/exit codes. The primary owns the
+final host full `npm test` and HTTP asset check. Still unproved: real
+browser rendering/navigation, combined backend+recovery execution,
+backend source/contract validation, and live-model behavior.
+
+### Final review-repair acceptance
+
+The user-requested fresh Muse review was read-only and used Muse Wonder Full
+at medium effort. It reported no P1 findings and ten P2/P3 items; all ten
+have the dispositions above. This was a same-provider review of code partly
+authored by Muse, not a claim of provider-diverse review or a second review
+approving the repair.
+
+Host checks on the repaired source (`.llm-output/muse-review/host/`):
+
+- `npm run typecheck`: both configurations passed, exit 0 (`typecheck.log`).
+- `npm test`: build and **66 files / 1,229 tests passed**, exit 0
+  (`npm-test.log`, started 12:01:06 UTC on 2 November 2026).
+- Focused coverage/UI suites: **8 files / 157 tests passed** (15 added tests
+  plus the previous-run-to-new-run poll sequence and invalidation notices
+  during loading/errors), also included in the full suite.
+- HTTP module check: **20 main workspace modules, zero failures**
+  (`assets.json`). The unchanged backend still returns 404 for preparation
+  and the five nested coverage assets; the optional loader preserves startup.
+- Diff hygiene passed; candidate/diff identity and review evidence are saved
+  under `.llm-output/muse-review/`.
+
+No backend, frozen-schema or original requirement-evaluator files changed.
+The actual accepted report correlation, source/contract resolution, real
+recovery execution and browser journey remain integration responsibilities.

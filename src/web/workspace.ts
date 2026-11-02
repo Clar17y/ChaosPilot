@@ -74,7 +74,9 @@ export function groupRunsByRevision(runs: readonly RunSummary[]): RevisionGroup[
     });
 }
 
-/** Adapters with a deterministic executable contract on this server. Keep in step with src/adapters/index.ts; an adapter becomes executable only when the backend can save, snapshot and run it. */
+/** Adapters the workspace recognizes for UI capability (choices/readiness only).
+ * Actual execution requires the backend to save, snapshot and run the adapter;
+ * server-side authorization/allowlist remains authoritative. Keep in step with src/adapters/index.ts. */
 export const EXECUTABLE_ADAPTER_IDS = ['synthetic-trading', 'inventory-reservation', 'synthetic-trading-recovery'] as const;
 export const INVENTORY_ADAPTER_ID = 'inventory-reservation';
 export const TRADING_ADAPTER_ID = 'synthetic-trading';

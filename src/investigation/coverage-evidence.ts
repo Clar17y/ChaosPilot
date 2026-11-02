@@ -56,7 +56,8 @@ export function recordScenarioChecks(result: ExperimentResult, plan: CoveragePla
         for (const retryResult of applicableRetries) {
           const horizon = retryResult ? Math.max(ob.checkedTick, retryResult.tick) : ob.checkedTick;
           const refs = [ref(ob.acceptanceTraceIndex), ref(ob.checkTraceIndex),
-            ...result.trace.flatMap((t, index) => t.time === ob.checkedTick || t.time === ob.completionTick ? [ref(index)] : []),
+            ...result.trace.flatMap((t, index) => t.time === ob.checkedTick || t.time === ob.completionTick
+              || t.action === 'connection:reconnect' && t.time === ob.reconnectTick ? [ref(index)] : []),
             ...(retryResult ? [ref(retryResult.traceIndex)] : [])].filter((r): r is CoverageTraceReference => r !== undefined);
           const violation = result.violations.find(v => v.evidence?.key === ob.key &&
             (retry ? v.invariant === 'execution_idempotency' && v.step === result.trace[retryResult?.traceIndex ?? -1]?.step : v.invariant === 'recovery_deadline'));

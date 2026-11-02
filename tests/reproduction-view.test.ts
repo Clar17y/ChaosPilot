@@ -132,4 +132,15 @@ describe('recorded recovery facts presentation', () => {
     expect(recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading')).toEqual([]);
     expect(recordedRecoveryFacts(undefined, 2, 'synthetic-trading-recovery')).toEqual([]);
   });
+  it('labels the raw outcome unverified and omits facts whose ref mismatches the selected trace entry (R-08)', () => {
+    const entry = { step: 1, time: 14 };
+    const facts = recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading-recovery', entry);
+    expect(facts.join('\n')).toContain('unverified recorded outcome claim, not a coverage verdict');
+    expect(facts.join('\n')).toContain('recorded outcome: passed');
+    expect(recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading-recovery', { step: 9, time: 14 })).toEqual([]);
+    expect(recordedRecoveryFacts([recoveryCheck], 2, 'synthetic-trading-recovery', { step: 1, time: 99 })).toEqual([]);
+    const withMessage = { ...recoveryCheck, traceRefs: [{ traceIndex: 2, step: 1, tick: 14, messageId: 'm-1' }] };
+    expect(recordedRecoveryFacts([withMessage], 2, 'synthetic-trading-recovery', { step: 1, time: 14, messageId: 'm-2' })).toEqual([]);
+    expect(recordedRecoveryFacts([withMessage], 2, 'synthetic-trading-recovery', { step: 1, time: 14, messageId: 'm-1' }).length).toBeGreaterThan(0);
+  });
 });

@@ -147,6 +147,25 @@ describe('Pinned coverage across preparation, execution, publication and replay'
     }
   });
 
+  it.each(['clean', 'recovery-candidate-a'] as const)('binds distinct acceptance, reconnect and check ticks for %s coverage and replay', async variant => {
+    const { plan, snapshot } = await prepare(variant);
+    const experiment = recoveryProposal(0)!;
+    const fillAt = experiment.steps.findIndex(s => s.op === 'fill');
+    experiment.steps.splice(fillAt, 0, { op: 'advance', ticks: 2 });
+    const reconnectAt = experiment.steps.findIndex(s => s.op === 'reconnect');
+    experiment.steps.splice(reconnectAt, 0, { op: 'advance', ticks: 1 });
+    const record = await runInvestigation({ variant, systemBrief: snapshot, coveragePlan: plan, maxExperiments: 1,
+      provider: { kind: 'mock', model: 'distinct-ticks', async propose() { return { experiment, usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 } }; } } });
+    const row = project(record).rows.find(r => r.scenarioId === 'recovery-by-deadline')!;
+    expect(row.status).toBe(variant === 'clean' ? 'exercised' : 'confirmed');
+    const result = record.experiments[0]!.result;
+    const check = result.scenarioCheckEvidence!.find(c => c.scenarioId === 'recovery-by-deadline')!;
+    expect(check.facts).toMatchObject({ acceptedAtTick: 2, reconnectTick: 3, deadlineTick: 8 });
+    expect(check.traceRefs.some(ref => ref.tick === 3 && result.trace[ref.traceIndex]?.action === 'connection:reconnect')).toBe(true);
+    expect((await replayRun(record, runsDir)).exactReproductionClaimed).toBe(true);
+    expect((await replaySelectedExperiment(record, 0, runsDir)).exactReproductionClaimed).toBe(true);
+  });
+
   it('reopening is read-only and whole/selected replay rebuild pinned checks; tampering and evaluator drift cannot claim exactness', async () => {
     const { record } = await start();
     const requests = contexts.length;
