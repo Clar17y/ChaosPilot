@@ -1,8 +1,15 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { assertAdapterVariant } from './adapters/index.ts';
-import { SEEDED_INVENTORY_BRIEF, SEEDED_RECOVERY_BRIEF } from './systems/index.ts';
+import { SEEDED_INVENTORY_BRIEF, SEEDED_RECOVERY_BRIEF, SEEDED_TRADING_BRIEF } from './systems/index.ts';
 import { replayOutcome } from './web/presentation.ts';
+import {
+  runApiJourneys,
+  saveApiJourneyRun,
+  getApiJourneyRun,
+  compareApiJourneys,
+  type Comparison,
+} from './target-api/index.ts';
 import {
   TARGET_VARIANTS,
   ALL_TARGET_VARIANTS,
@@ -44,6 +51,7 @@ interface ParsedArgs {
   id?: string;
   continueAfterFindings?: boolean;
   systemId?: string;
+  compare?: string;
   runsDir?: string;
   systemsDir?: string;
   help?: boolean;
@@ -170,6 +178,10 @@ function parseCliArgs(args: string[]): ParsedArgs {
       const val = prefix ? arg.slice(prefix.length) : args[++i];
       if (!val) throw new Error(`Missing value for --system-id.`);
       result.systemId = val;
+    } else if (arg === '--compare' || arg.startsWith('--compare=')) {
+      const val = arg.startsWith('--compare=') ? arg.slice('--compare='.length) : args[++i];
+      if (!val) throw new Error(`Missing value for --compare.`);
+      result.compare = val;
     } else if (arg === '--runs-dir' || arg.startsWith('--runs-dir=') || arg === '--systems-dir' || arg.startsWith('--systems-dir=')) {
       const isRuns = arg.startsWith('--runs-dir');
       const val = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : args[++i];
@@ -208,6 +220,7 @@ Commands:
   benchmark-freeze  Capture baseline and prompt freeze manifest
   replay            Deterministically replay an investigation artifact
   demo              Run mock investigation against candidate-a
+  api-journey       Execute scripted target HTTP API journeys against isolated loopback listener
 
 Options:
   --provider        Provider kind: 'mock' | 'meta' (default: mock)
@@ -624,6 +637,89 @@ async function handleBenchmarkFreeze(args: ParsedArgs): Promise<void> {
   }
 }
 
+async function handleApiJourney(args: ParsedArgs): Promise<void> {
+  const target: TargetVariant = args.target ?? 'clean';
+  const systemId = args.systemId ?? SEEDED_TRADING_BRIEF.id;
+  const systemsDir = args.systemsDir ?? path.join(args.runsDir ?? 'runs', 'systems');
+
+  console.log(`\n============================================================`);
+  console.log(` Scripted Target HTTP API Journey`);
+  console.log(` Target variant: ${target}`);
+  console.log(` System profile: ${systemId}`);
+  console.log(` Mode:           ${args.compare ? 'Rerun and Compare' : 'Direct Journey Execution'}`);
+  console.log(`============================================================\n`);
+
+  let brief = await getSystemBrief(systemId, systemsDir);
+  if (!brief) {
+    if (systemId === SEEDED_TRADING_BRIEF.id) {
+      brief = SEEDED_TRADING_BRIEF;
+    } else {
+      throw new Error(`System brief "${systemId}" not found in ${systemsDir}`);
+    }
+  }
+
+  if (brief.adapterId !== 'synthetic-trading') {
+    throw new Error(`Target API journeys only support synthetic-trading, but profile uses "${brief.adapterId}"`);
+  }
+
+  assertAdapterVariant(brief.adapterId, target);
+  const systemSnapshot = await createSystemSnapshot(brief);
+
+  console.log(`[1/3] Starting ephemeral loopback target API listener and executing journeys...`);
+  const record = await runApiJourneys({ variant: target, systemSnapshot });
+
+  console.log(`[2/3] Journeys completed. Status: ${record.status.toUpperCase()}`);
+  for (const j of record.journeys) {
+    const passed = j.assertions.filter((a) => a.status === 'pass').length;
+    const total = j.assertions.length;
+    console.log(
+      `  - Journey [${j.id}]: ${j.status.toUpperCase()} (${passed}/${total} assertions passed, ${j.exchanges.length} HTTP exchanges)`,
+    );
+    if (j.error) {
+      console.log(`    Error: ${j.error}`);
+    }
+    for (const a of j.assertions) {
+      if (a.status !== 'pass') {
+        console.log(
+          `    * FAIL/INC assertion [${a.id}]: expected ${JSON.stringify(a.expected)}, observed ${JSON.stringify(a.observed)}`,
+        );
+      }
+    }
+  }
+
+  const savedPath = await saveApiJourneyRun(record, args.runsDir);
+  console.log(`[3/3] Journey evidence saved: ${savedPath}`);
+  console.log(`  Record ID: ${record.id}`);
+  console.log(`  Integrity: ${record.integrity.slice(0, 16)}...`);
+
+  let comparison: Comparison | undefined;
+  if (args.compare) {
+    console.log(`\n============================================================`);
+    console.log(` Comparing against prior run: ${args.compare}`);
+    console.log(`============================================================\n`);
+    const originalRecord = await getApiJourneyRun(args.compare, args.runsDir);
+    if (!originalRecord) {
+      throw new Error(`Original run record "${args.compare}" not found`);
+    }
+    comparison = compareApiJourneys(originalRecord, record);
+    console.log(`Comparison outcome: ${comparison.status.toUpperCase()}`);
+    console.log(`Provenance note:    ${comparison.note}`);
+    if (comparison.reasons.length > 0) {
+      console.log(`Differences / Notes:`);
+      for (const r of comparison.reasons) {
+        console.log(`  * ${r}`);
+      }
+    }
+  }
+
+  console.log(`\nDone.\n`);
+  if (record.status !== 'pass') {
+    process.exitCode = 1;
+  } else if (comparison && comparison.status !== 'match') {
+    process.exitCode = 1;
+  }
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   let args: ParsedArgs;
   try {
@@ -671,6 +767,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       break;
     case 'benchmark-freeze':
       await handleBenchmarkFreeze(args);
+      break;
+    case 'api-journey':
+      await handleApiJourney(args);
       break;
     default:
       console.error(`Unknown command: ${args.command}`);

@@ -3186,3 +3186,67 @@ textarea.form-input { min-height: 96px; resize: vertical; line-height: 1.6; }
   color: #8b949e;
   border: 1px solid rgba(110, 118, 129, 0.4);
 }
+
+/* Target API Journey Suite Styles */
+.badge-pass {
+  background: rgba(46, 160, 67, 0.2);
+  color: #3fb950;
+  border: 1px solid rgba(46, 160, 67, 0.4);
+}
+
+.badge-fail {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.4);
+}
+
+.badge-blocked {
+  background: rgba(218, 54, 51, 0.25);
+  color: #ff7b72;
+  border: 1px solid rgba(218, 54, 51, 0.45);
+}
+
+.badge-inconclusive {
+  background: rgba(240, 136, 62, 0.2);
+  color: #f0883e;
+  border: 1px solid rgba(240, 136, 62, 0.4);
+}
+
+.target-api-comparison {
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 16px;
+  border-radius: 6px;
+}
+
+.target-api-journeys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.target-api-payload-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.target-api-payload-grid > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.target-api-payload-grid pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+
+@media (max-width: 600px) {
+  .target-api-payload-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

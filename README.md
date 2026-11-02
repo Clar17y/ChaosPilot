@@ -56,6 +56,16 @@ Confirmed `synthetic-trading` findings can also be converted into immutable, eng
 2. Proposed delivery-by-delivery and final business-state expectations derived from the verified clean control are shown with the provenance label *"Proposed reference behavior from clean control — requires engineer review"*. Tick the explicit review confirmation checkbox and click **Save reviewed regression** to publish an immutable definition under `runs/regressions/definitions/<definitionId>/record.json` (client-supplied expectations or unreviewed saves are rejected).
 3. In **Functional tests**, select a saved regression definition and any compatible target variant (e.g. `candidate-c` to reproduce the failure or `clean` to verify the fix) and click **Run selected regression**. Each execution is saved separately under `runs/regressions/runs/<runId>/record.json`, evaluating positive delivery decisions, credit/quote accounting, full order book and `absentOrderIds`, `stateUnchangedFromPrevious` rejection invariants, pinned requirement rules and oracle violations against the selected target's current executing source while preserving original finding lineage (`record.origin`). If the original investigation run is later modified or deleted, saved definitions remain valid and executable from their pinned origin snapshot and surface the updated `originStatus`. Detailed documentation is in [docs/REGRESSION_TESTING.md](docs/REGRESSION_TESTING.md).
 
+## Scripted target HTTP API journeys
+
+Engineers can also exercise real target-facing HTTP journeys on isolated ephemeral loopback listeners on `127.0.0.1` with **no AI model calls** and zero token usage:
+1. Genuine target HTTP endpoints: `POST /setup`, `POST /orders`, `POST /executions`, `GET /state`, `GET /events`, `GET /orders/:id`.
+2. Asynchronous processing with explicit transport acknowledgement: `HTTP 202 Accepted` receipts are distinguished from eventual business acceptance.
+3. Three reviewed journeys verify order lifecycle (partial/complete fills), credit rejection without state mutation, and identical execution retry idempotence.
+4. Clean reference behavior passes all checks; faulty variants produce honest, genuine business failures (e.g. `candidate-a` duplicate execution mutation and `candidate-c` over-credit admission).
+5. Immutable, versioned records are persisted under `runs/api-journeys/<id>/record.json` with SHA-256 integrity seal, supporting read-only reopening and semantic rerun comparison.
+6. Available via CLI (`npm run api-journey -- --target clean`) and an understandable UI panel within the **Functional tests** workspace view. Detailed documentation is in [docs/TARGET_API_JOURNEY.md](docs/TARGET_API_JOURNEY.md).
+
 At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. The current prompt and larger request limits have not been evaluated in a new live comparison.
 
 ## Watch verification (Challenge with Muse)

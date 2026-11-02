@@ -58,6 +58,15 @@ import {
   validateFunctionalRunId,
 } from './functional/index.ts';
 import {
+  CATALOG as TARGET_API_CATALOG,
+  runApiJourneys,
+  saveApiJourneyRun,
+  getApiJourneyRun,
+  listApiJourneyRuns,
+  validateApiJourneyRunId,
+  compareApiJourneys,
+} from './target-api/index.ts';
+import {
   previewRegressionFromFinding,
   captureRegressionFromFinding,
   runSavedRegression,
@@ -1438,6 +1447,293 @@ export class ChaosPilotServer {
               this.sendJson(res, 400, { error: msg });
             } else {
               this.sendJson(res, 500, { error: `Regression execution failed: ${msg}` });
+            }
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
+        // --- Target API Journeys API Routes ---
+
+        // GET /api/target-api/catalog - List reviewed scripted target API scenarios
+        if (method === 'GET' && pathname === '/api/target-api/catalog') {
+          this.sendJson(
+            res,
+            200,
+            TARGET_API_CATALOG.map((c) => ({
+              id: c.id,
+              name: c.name,
+              checkpointCount: c.checkpoints.length,
+            })),
+          );
+          return;
+        }
+
+        // GET /api/target-api/runs - List persisted target API journey runs
+        if (method === 'GET' && pathname === '/api/target-api/runs') {
+          try {
+            const runs = await listApiJourneyRuns(this.runsDir);
+            this.sendJson(res, 200, runs);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+          }
+          return;
+        }
+
+        // GET /api/target-api/runs/:id - Get specific target API journey run record
+        const targetApiRunMatch = pathname.match(/^\/api\/target-api\/runs\/([^/]+)$/);
+        if (method === 'GET' && targetApiRunMatch && targetApiRunMatch[1]) {
+          const id = targetApiRunMatch[1];
+          if (!validateApiJourneyRunId(id)) {
+            this.sendJson(res, 400, { error: 'Invalid API journey run ID' });
+            return;
+          }
+          const record = await getApiJourneyRun(id, this.runsDir);
+          if (!record) {
+            this.sendJson(res, 404, { error: 'API journey run not found' });
+            return;
+          }
+          this.sendJson(res, 200, record);
+          return;
+        }
+
+        // POST /api/target-api/run - Execute scripted target API journeys against selected target variant
+        if (method === 'POST' && pathname === '/api/target-api/run') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set(['systemId', 'expectedRevision', 'variant']);
+          if (
+            Object.keys(body).some((key) => !allowedKeys.has(key)) ||
+            typeof body.systemId !== 'string' ||
+            !validateSystemId(body.systemId) ||
+            body.systemId !== body.systemId.trim() ||
+            typeof body.variant !== 'string' ||
+            !body.variant ||
+            !Number.isSafeInteger(body.expectedRevision) ||
+            (body.expectedRevision as number) < 1
+          ) {
+            this.sendJson(res, 400, {
+              error:
+                'Required selection: valid systemId, variant and positive expectedRevision; unknown fields are not allowed',
+            });
+            return;
+          }
+
+          const systemId = body.systemId;
+          const variant = body.variant as TargetVariant;
+
+          let brief: SystemBrief | null = null;
+          try {
+            brief = await getSystemBrief(systemId, this.systemsDir);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+            return;
+          }
+
+          if (!brief) {
+            this.sendJson(res, 404, { error: `System brief "${systemId}" not found` });
+            return;
+          }
+
+          if (typeof body.expectedRevision === 'number' && brief.revision !== body.expectedRevision) {
+            this.sendJson(res, 409, {
+              error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}`,
+            });
+            return;
+          }
+
+          if (brief.adapterId !== 'synthetic-trading') {
+            this.sendJson(res, 400, {
+              error: `Cannot run target API journeys: System brief "${brief.name}" uses adapter "${brief.adapterId}". Target API journeys are only supported for the "synthetic-trading" adapter.`,
+            });
+            return;
+          }
+
+          try {
+            assertAdapterVariant(brief.adapterId, variant);
+          } catch (err) {
+            this.sendJson(res, 400, {
+              error: err instanceof Error ? err.message : `Unsupported variant "${variant}" for synthetic-trading`,
+            });
+            return;
+          }
+
+          const controller = new AbortController();
+          const disconnected = () => {
+            if (!res.writableEnded) {
+              controller.abort(
+                new DOMException('Target API journey cancelled by client disconnect', 'AbortError'),
+              );
+            }
+          };
+          res.once?.('close', disconnected);
+
+          try {
+            const systemSnapshot = await createSystemSnapshot(brief);
+            const record = await runApiJourneys({
+              variant,
+              systemSnapshot,
+              signal: controller.signal,
+            });
+            await saveApiJourneyRun(record, this.runsDir);
+            this.sendJson(res, 201, record);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (controller.signal.aborted) {
+              this.sendJson(res, 409, { error: 'Target API journey cancelled' });
+            } else {
+              this.sendJson(res, 500, { error: `Target API journey execution failed: ${msg}` });
+            }
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
+        // POST /api/target-api/compare - Compare a saved run with another run or a fresh execution
+        if (method === 'POST' && pathname === '/api/target-api/compare') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 64 * 1024);
+          if (error) {
+            this.sendJson(res, status || 400, { error });
+            return;
+          }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON compare request object' });
+            return;
+          }
+          const body = data as Record<string, unknown>;
+          const allowedKeys = new Set(['originalRunId', 'freshRunId', 'systemId', 'expectedRevision', 'variant']);
+          if (
+            Object.keys(body).some((k) => !allowedKeys.has(k)) ||
+            typeof body.originalRunId !== 'string' ||
+            !validateApiJourneyRunId(body.originalRunId)
+          ) {
+            this.sendJson(res, 400, { error: 'Valid originalRunId is required' });
+            return;
+          }
+
+          const originalRecord = await getApiJourneyRun(body.originalRunId, this.runsDir);
+          if (!originalRecord) {
+            this.sendJson(res, 404, { error: `Original API journey run "${body.originalRunId}" not found` });
+            return;
+          }
+
+          if (body.freshRunId !== undefined) {
+            if (typeof body.freshRunId !== 'string' || !validateApiJourneyRunId(body.freshRunId)) {
+              this.sendJson(res, 400, { error: 'Invalid freshRunId' });
+              return;
+            }
+            const freshRecord = await getApiJourneyRun(body.freshRunId, this.runsDir);
+            if (!freshRecord) {
+              this.sendJson(res, 404, { error: `Fresh API journey run "${body.freshRunId}" not found` });
+              return;
+            }
+            const comparison = compareApiJourneys(originalRecord, freshRecord);
+            this.sendJson(res, 200, { comparison, freshRecord });
+            return;
+          }
+
+          // Otherwise fresh run requires systemId, expectedRevision, variant
+          if (
+            typeof body.systemId !== 'string' ||
+            !validateSystemId(body.systemId) ||
+            typeof body.variant !== 'string' ||
+            !body.variant ||
+            !Number.isSafeInteger(body.expectedRevision) ||
+            (body.expectedRevision as number) < 1
+          ) {
+            this.sendJson(res, 400, {
+              error: 'Rerun comparison requires freshRunId or valid systemId, variant, and expectedRevision',
+            });
+            return;
+          }
+
+          const systemId = body.systemId;
+          const variant = body.variant as TargetVariant;
+          let brief: SystemBrief | null = null;
+          try {
+            brief = await getSystemBrief(systemId, this.systemsDir);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.sendJson(res, 500, { error: msg });
+            return;
+          }
+
+          if (!brief) {
+            this.sendJson(res, 404, { error: `System brief "${systemId}" not found` });
+            return;
+          }
+
+          if (typeof body.expectedRevision === 'number' && brief.revision !== body.expectedRevision) {
+            this.sendJson(res, 409, {
+              error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}`,
+            });
+            return;
+          }
+
+          if (brief.adapterId !== 'synthetic-trading') {
+            this.sendJson(res, 400, {
+              error: `Cannot run target API journeys: System brief "${brief.name}" uses adapter "${brief.adapterId}". Target API journeys are only supported for the "synthetic-trading" adapter.`,
+            });
+            return;
+          }
+
+          try {
+            assertAdapterVariant(brief.adapterId, variant);
+          } catch (err) {
+            this.sendJson(res, 400, {
+              error: err instanceof Error ? err.message : `Unsupported variant "${variant}" for synthetic-trading`,
+            });
+            return;
+          }
+
+          const controller = new AbortController();
+          const disconnected = () => {
+            if (!res.writableEnded) {
+              controller.abort(
+                new DOMException('Target API rerun cancelled by client disconnect', 'AbortError'),
+              );
+            }
+          };
+          res.once?.('close', disconnected);
+
+          try {
+            const systemSnapshot = await createSystemSnapshot(brief);
+            const freshRecord = await runApiJourneys({
+              variant,
+              systemSnapshot,
+              signal: controller.signal,
+            });
+            await saveApiJourneyRun(freshRecord, this.runsDir);
+            const comparison = compareApiJourneys(originalRecord, freshRecord);
+            this.sendJson(res, 200, { comparison, freshRecord });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (controller.signal.aborted) {
+              this.sendJson(res, 409, { error: 'Target API rerun cancelled' });
+            } else {
+              this.sendJson(res, 500, { error: `Target API rerun execution failed: ${msg}` });
             }
           } finally {
             res.off?.('close', disconnected);
