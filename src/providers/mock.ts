@@ -77,6 +77,25 @@ export class MockProvider implements ExperimentProvider {
       };
     }
 
+    if (
+      context.systemBrief?.brief.adapterId === 'synthetic-trading-recovery' ||
+      context.contract.invariants.some((inv) => inv.id === 'recovery_deadline')
+    ) {
+      const { recoveryProposal } = await import('./recovery-mock.ts');
+      const experiment = recoveryProposal(context.history.length);
+      return {
+        experiment,
+        usage,
+        requestAudit,
+        requestSent: false,
+        summary: 'Scripted offline recovery sequence; no autonomous discovery claimed',
+        responseAudit: {
+          content: JSON.stringify(experiment ?? { done: true, summary: 'Scripted offline sequence exhausted' }),
+          finishReason: 'stop',
+        },
+      };
+    }
+
     const experimentIndex = context.history.length;
 
     // When a requirement check is configured, start with its existing offline

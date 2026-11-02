@@ -115,9 +115,21 @@ describe('recovery deadline transitions', () => {
     expect(row(deadlineOnly, 'recovery-retry-idempotence').status).toBe('planned');
     const noRetry = check('recovery-retry-idempotence', facts({ retryObserved: false }), { trigger: 'not-reached', outcome: 'not-checked' });
     expect(row(project([noRetry]), 'recovery-retry-idempotence').status).toBe('planned');
-    expect(row(project([check('recovery-retry-idempotence', facts({ retryObserved: true }))]), 'recovery-retry-idempotence').status).toBe('exercised');
-    const double = check('recovery-retry-idempotence', facts({ retryObserved: true, observed: { ...accounting, applicationCount: 2 } }), { outcome: 'failed' });
+    const unchanged = { status: 'passed' as const, before: { ...accounting }, after: { ...accounting } };
+    expect(row(project([check('recovery-retry-idempotence', facts({ retryObserved: true, retryCheck: unchanged }))]), 'recovery-retry-idempotence').status).toBe('exercised');
+    const double = check('recovery-retry-idempotence', facts({ retryObserved: true, observed: { ...accounting, applicationCount: 2 },
+      retryCheck: { status: 'failed', before: { ...accounting }, after: { ...accounting, applicationCount: 2 } } }), { outcome: 'failed' });
     expect(row(project([double]), 'recovery-retry-idempotence').status).toBe('failed-unconfirmed');
+  });
+  it('requires real retry before/after facts and preserves a mutation even when final accounting matches', () => {
+    const missing = check('recovery-retry-idempotence', facts({ retryObserved: true }));
+    expect(row(project([missing]), 'recovery-retry-idempotence').status).toBe('inconclusive');
+    const changed = check('recovery-retry-idempotence', facts({ retryObserved: true,
+      retryCheck: { status: 'failed', before: { ...accounting }, after: { ...accounting, filledQuantity: 11 } } }), { outcome: 'failed', violationId: 'v-retry' });
+    const finding = { id: 'f-retry', experimentIndex: 0, sourceHash: context.sourceHash, violationId: 'v-retry', invariant: 'execution_idempotency', reproduced: true, cleanControlPassed: true };
+    expect(row(project([changed], [finding]), 'recovery-retry-idempotence').status).toBe('confirmed');
+    changed.facts = { ...changed.facts, retryCheck: { status: 'failed', before: accounting, after: accounting } } as CoverageRecoveryFacts;
+    expect(row(project([changed], [finding]), 'recovery-retry-idempotence').status).toBe('inconclusive');
   });
   it('early stop preserves confirmed deadline evidence and the pending retry intention, with stop reason', () => {
     const failed = check('recovery-by-deadline', facts({ observed: { ...accounting, applicationCount: 2 } }), { outcome: 'failed', violationId: 'v-early' });

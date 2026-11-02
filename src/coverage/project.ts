@@ -6,8 +6,9 @@ import type { CoverageExperimentInput, CoverageFindingInput, CoveragePlan, Cover
 
 type Result = { status: CoverageStatus; reason: string; findingId?: string };
 const inconclusive = (reason: string): Result => ({ status: 'inconclusive', reason });
+const accountingKeys = ['filledQuantity', 'remainingQuantity', 'usedCredit', 'reservedCredit', 'applicationCount'] as const;
 function accounting(v: unknown): v is RecoveryAccountingFacts {
-  return isRecord(v) && ['filledQuantity', 'remainingQuantity', 'usedCredit', 'reservedCredit', 'applicationCount'].every(k => amount(v[k]))
+  return isRecord(v) && accountingKeys.every(k => amount(v[k]))
     && Number.isSafeInteger(Number(v.filledQuantity) + Number(v.remainingQuantity))
     && Number.isSafeInteger(Number(v.usedCredit) + Number(v.reservedCredit));
 }
@@ -15,13 +16,22 @@ function recoveryTruth(f: CoverageRecoveryFacts, retry: boolean): boolean | null
   if (![f.reportId, f.executionId, f.orderId].every(text) || !amount(f.acceptedAtTick) || !amount(f.horizonTick)
     || f.horizonTick < f.acceptedAtTick || typeof f.acceptedDuringDisconnection !== 'boolean') return null;
   if (f.acceptedDuringDisconnection !== true) return null;
+  if (!accounting(f.expected) || f.expected.applicationCount !== 1 || !accounting(f.observed)) return null;
+  if (retry && f.retryObserved !== true) return null;
+  if (retry) {
+    if (!f.retryCheck || !accounting(f.retryCheck.before) || !accounting(f.retryCheck.after)) return null;
+    const unchanged = accountingKeys
+      .every(k => f.retryCheck!.before![k] === f.retryCheck!.after![k]);
+    // A mutation at retry is a failure even if later work repairs accounting.
+    if (!unchanged) return f.retryCheck.status === 'failed' ? false : null;
+    if (f.retryCheck.status !== 'passed') return null;
+  }
+  // A proven retry mutation is local evidence even before reconnect. Positive
+  // recovery accounting still requires the complete reconnect/deadline context.
   if (!amount(f.reconnectTick) || f.reconnectTick < f.acceptedAtTick || !amount(f.deadlineTick)
     || !Number.isSafeInteger(f.reconnectTick + 5) || f.deadlineTick !== f.reconnectTick + 5 || f.horizonTick < f.reconnectTick) return null;
-  if (!accounting(f.expected) || f.expected.applicationCount !== 1 || !accounting(f.observed)) return null;
   if (f.completionTick !== undefined && (!amount(f.completionTick) || f.completionTick < f.reconnectTick || f.completionTick > f.horizonTick)) return null;
-  if (retry && f.retryObserved !== true) return null;
-  const matches = (Object.keys(f.expected) as (keyof RecoveryAccountingFacts)[])
-    .filter(k => ['filledQuantity', 'remainingQuantity', 'usedCredit', 'reservedCredit', 'applicationCount'].includes(k))
+  const matches = accountingKeys
     .every(k => f.expected[k] === f.observed![k]);
   if (retry) return matches;
   if (f.completionTick !== undefined) return matches && f.completionTick <= f.deadlineTick;
@@ -84,7 +94,7 @@ function evaluate(check: ScenarioCheckEvidence, experiment: CoverageExperimentIn
   if (passed) return check.violationId === undefined ? { status: 'exercised', reason: 'Reached trigger and recorded facts satisfy the applicable check' }
     : inconclusive('Passing check carries a contradictory violation identity');
   const compatible = check.scenarioId === 'accepted-order-credit-limit' ? ['credit_limit_respected']
-    : check.scenarioId === 'recovery-by-deadline' ? ['recovery_deadline'] : ['recovery_deadline', 'recovery_retry_idempotence'];
+    : check.scenarioId === 'recovery-by-deadline' ? ['recovery_deadline'] : ['recovery_deadline', 'recovery_retry_idempotence', 'execution_idempotency'];
   const matches = findings.filter(f => isRecord(f) && text(f.id) && text(check.violationId) && f.violationId === check.violationId
     && f.experimentIndex === check.experimentIndex && f.sourceHash === plan.context.sourceHash && compatible.includes(f.invariant)
     && f.reproduced === true && f.cleanControlPassed === true);

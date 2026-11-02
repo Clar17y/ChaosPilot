@@ -18,13 +18,17 @@ import { computeSnapshotHash, validateSystemBrief } from './systems/index.ts';
 import { getPromptIdentity } from './investigation/prompt.ts';
 import { evaluateRequirementRules } from './requirements/evaluator.ts';
 import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from './requirements/identity.ts';
+import { getRecoveryEvaluatorIdentity, isRecoveryEvaluatorIdentity, recoveryEvaluatorAvailable } from './recovery/index.ts';
+import { pinCoveragePlan, recordScenarioChecks } from './investigation/coverage-evidence.ts';
 export {
   SEEDED_TRADING_BRIEF,
+  SEEDED_RECOVERY_BRIEF,
   validateSystemId,
   validateSystemBrief,
   computeSnapshotHash,
   resolveSystemPath,
   ensureSeededSystem,
+  ensureRecoverySeededSystem,
   getSystemBrief,
   listSystemBriefs,
   saveSystemBrief,
@@ -72,12 +76,15 @@ export interface ReplayExperimentOutcome {
   /** Present only when the saved result or pinned snapshot carries requirement-rule evidence. */
   ruleResultsMatched?: boolean;
   deliveryObservationsMatched?: boolean;
+  /** Present when the saved or replayed result carries recovery evidence. */
+  recoveryMatched?: boolean;
+  scenarioChecksMatched?: boolean;
 }
 
 export type ReplayContextStatus = 'identical' | 'drifted' | 'unknown' | 'unverified-legacy';
 
 export interface ReplayContextCheck {
-  kind: 'prompt' | 'contract' | 'contract-hash' | 'clean-source' | 'target-source' | 'system-brief' | 'requirement-evaluator';
+  kind: 'prompt' | 'contract' | 'contract-hash' | 'clean-source' | 'target-source' | 'system-brief' | 'requirement-evaluator' | 'recovery-evaluator' | 'coverage-evaluator';
   status: ReplayContextStatus;
   detail: string;
   saved?: string;
@@ -523,6 +530,13 @@ function replayOneExperiment(
     throw new Error('Cannot replay: Selected experiment execution returned a malformed result.');
   }
   const origResult = expRecord.result;
+  if (record.coveragePlan !== undefined) {
+    try {
+      const plan = pinCoveragePlan(record.coveragePlan, record.systemBrief, record.variant, record.sourceHash);
+      if ((record.systemBrief!.brief.requirementRules?.length ?? 0) > 0) replayedResult.requirementRuleResults = evaluateRequirementRules(replayedResult, record.systemBrief!, expRecord.index);
+      recordScenarioChecks(replayedResult, plan, record.systemBrief!, expRecord.index);
+    } catch { /* Context audit gates exactness; absent fresh checks also cannot compare equal. */ }
+  }
   const comparison = compareSemanticReplay(origResult, replayedResult);
   // Category consistency between saved findings and saved result violations:
   // a finding that retains an oracle category proves the evidence is
@@ -591,12 +605,14 @@ function replayOneExperiment(
     rejectionsMatched: comparison.rejectionsMatched,
     validityMatched: comparison.validityMatched,
     exactMatched: comparison.matched,
-    behaviorMatched: comparison.traceMatched && comparison.snapshotMatched && comparison.violationsMatched && comparison.rejectionsMatched && comparison.validityMatched,
+    behaviorMatched: comparison.traceMatched && comparison.snapshotMatched && comparison.violationsMatched && comparison.rejectionsMatched && comparison.validityMatched && (comparison.recoveryMatched ?? true),
     mismatches: comparison.mismatches,
     valid: replayedResult.valid,
     replayedResult,
     ...(ruleResultsMatched !== undefined ? { ruleResultsMatched } : {}),
     ...(deliveryObservationsMatched !== undefined ? { deliveryObservationsMatched } : {}),
+    ...(comparison.recoveryMatched !== undefined ? { recoveryMatched: comparison.recoveryMatched } : {}),
+    ...(comparison.scenarioChecksMatched !== undefined ? { scenarioChecksMatched: comparison.scenarioChecksMatched } : {}),
   };
   return { outcome, exactMatched: comparison.matched };
 }
@@ -668,6 +684,69 @@ async function prepareReplay(
     addCheck({ kind: 'system-brief', status: 'unknown', detail: 'Legacy record without a pinned system brief snapshot; brief/contract context was not recorded.' }, false);
     if (record.experiments.some(e => (e.result?.requirementRuleResults?.length ?? 0) > 0)) {
       addCheck({ kind: 'requirement-evaluator', status: 'unknown', detail: 'Saved requirement rule outcomes have no pinned rule snapshot or evaluator identity; exact rule replay cannot be claimed.' }, true);
+    }
+  }
+
+  if (record.coveragePlan !== undefined) {
+    try {
+      pinCoveragePlan(record.coveragePlan, record.systemBrief, record.variant, record.sourceHash);
+      addCheck({ kind: 'coverage-evaluator', status: 'identical', detail: 'Pinned coverage catalog, evaluator and saved context match the available coverage implementation.' }, true);
+    } catch (err) {
+      addCheck({ kind: 'coverage-evaluator', status: 'drifted', detail: err instanceof Error ? err.message : 'Pinned coverage context is unavailable' }, true);
+    }
+  } else if (record.experiments.some(e => e.result?.scenarioCheckEvidence !== undefined)) {
+    addCheck({ kind: 'coverage-evaluator', status: 'unknown', detail: 'Saved scenario checks have no pinned coverage plan.' }, true);
+  }
+
+  const hasRecoveryEvidence = record.experiments.some(e => e.result?.recovery !== undefined);
+  if (adapterId === 'synthetic-trading-recovery' || hasRecoveryEvidence) {
+    const currentEval = getRecoveryEvaluatorIdentity();
+    const currentTag = `${currentEval.id}@${currentEval.version}:${currentEval.hash}`;
+    const evals = record.experiments.map(e => e.result?.recovery?.evaluator);
+    const missingOrInvalid =
+      record.experiments.length === 0 ||
+      record.experiments.some(
+        e =>
+          (adapterId === 'synthetic-trading-recovery' || e.result?.recovery !== undefined) &&
+          !isRecoveryEvaluatorIdentity(e.result?.recovery?.evaluator),
+      );
+    if (missingOrInvalid) {
+      addCheck(
+        {
+          kind: 'recovery-evaluator',
+          status: 'unknown',
+          detail: 'Saved recovery outcomes have no valid recorded recovery evaluator identity; exact recovery replay cannot be claimed.',
+          current: currentTag,
+        },
+        true,
+      );
+    } else {
+      const validEvals = evals.filter(isRecoveryEvaluatorIdentity);
+      const tags = new Set(validEvals.map(ev => `${ev.id}@${ev.version}:${ev.hash}`));
+      const firstTag = `${validEvals[0]!.id}@${validEvals[0]!.version}:${validEvals[0]!.hash}`;
+      if (tags.size !== 1 || !validEvals.every(ev => recoveryEvaluatorAvailable(ev))) {
+        addCheck(
+          {
+            kind: 'recovery-evaluator',
+            status: 'drifted',
+            detail: 'Recorded recovery evaluator identity differs from the current recovery evaluator; exact recovery replay cannot be claimed.',
+            saved: firstTag,
+            current: currentTag,
+          },
+          true,
+        );
+      } else {
+        addCheck(
+          {
+            kind: 'recovery-evaluator',
+            status: 'identical',
+            detail: 'Recorded recovery evaluator identity matches the current recovery evaluator.',
+            saved: firstTag,
+            current: currentTag,
+          },
+          true,
+        );
+      }
     }
   }
 
@@ -979,7 +1058,7 @@ export async function replaySelectedExperiment(
   // the recorded result's source hash as well as its trace and outcomes.
   // Behaviour can still match when source identity differs; report that
   // separately without treating it as an exact reproduction.
-  const semanticMatched = outcome.traceMatched && outcome.snapshotMatched && outcome.violationsMatched && outcome.rejectionsMatched && outcome.validityMatched;
+  const semanticMatched = outcome.traceMatched && outcome.snapshotMatched && outcome.violationsMatched && outcome.rejectionsMatched && outcome.validityMatched && (outcome.recoveryMatched ?? true);
   const experimentsReproduced = exactMatched ? 1 : 0;
 
   let note: string;
