@@ -43,7 +43,7 @@ later exceptions while aggregate failure and genuine pending/mutated failures
 remain visible. Raw recovery evaluator v2, coverage evaluator v3 and catalog v2
 identify the new semantics; earlier incompatible evidence is not reinterpreted.
 
-Final host validation on 2 November 2026:
+Host validation for checkpoint `f15f862` on 2 November 2026:
 
 - `npm run typecheck`: both configurations passed.
 - `npm test -- --maxWorkers=4`: build and **73 files / 1,294 tests passed**, with
@@ -79,5 +79,6 @@ The bound Jev preparation is retained with its actual coverage limits. Browser
 visual acceptance remains unproved because automation is disabled; live-model
 execution remains unauthorised. Raw review output, cessation records, before-fix
 regression failure, test JSON/log and HTTP/CLI evidence remain locally under
-`.llm-output/`; review claims themselves are not test evidence. Main is preserved;
-this follow-up is a local commit, with no push or PR.
+`.llm-output/`; review claims themselves are not test evidence. These results
+describe `f15f862` before its later integration and publication. The PR
+description records the current integration and simplification validation.

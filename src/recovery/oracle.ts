@@ -153,23 +153,14 @@ export class RecoveryOracle {
 
   private computeExpectedFacts(orderId: string): RecoveryFacts {
     const order = this.expectedOrders.get(orderId);
-    let orderFilled = 0;
-    for (const rec of this.acceptedReports.values()) {
-      if (rec.report.orderId === orderId) {
-        orderFilled += rec.report.quantity;
-      }
-    }
+    // Both ledgers update together for each accepted original business identity.
+    const orderFilled = this.confirmedDeliveredFills.get(orderId) ?? 0;
     const orderRemaining = order ? order.initialQuantity - orderFilled : 0;
 
     let reservedCredit = 0;
     let usedCredit = 0;
     for (const o of this.expectedOrders.values()) {
-      let filled = 0;
-      for (const rec of this.acceptedReports.values()) {
-        if (rec.report.orderId === o.orderId) {
-          filled += rec.report.quantity;
-        }
-      }
+      const filled = this.confirmedDeliveredFills.get(o.orderId) ?? 0;
       const remaining = o.initialQuantity - filled;
       reservedCredit += remaining * o.price;
       usedCredit += filled * o.price;
@@ -210,9 +201,7 @@ export class RecoveryOracle {
     };
   }
 
-  private isObligationReconciled(ob: RecoveryObligation, snapshot: RecoverySnapshot, tick: number): boolean {
-    const expected = this.computeExpectedFacts(ob.report.orderId);
-    const observed = this.computeObservedFacts(snapshot, ob.report.orderId, ob.key, tick);
+  private isObligationReconciled(snapshot: RecoverySnapshot, expected: RecoveryFacts, observed: RecoveryFacts): boolean {
     if (
       observed.applicationCount !== 1 ||
       observed.filledQuantity !== expected.filledQuantity ||
@@ -227,12 +216,7 @@ export class RecoveryOracle {
     for (const o of this.expectedOrders.values()) {
       const actualOrder = snapshot.orders[o.orderId];
       if (!actualOrder) return false;
-      let expectedFilled = 0;
-      for (const rec of this.acceptedReports.values()) {
-        if (rec.report.orderId === o.orderId) {
-          expectedFilled += rec.report.quantity;
-        }
-      }
+      const expectedFilled = this.confirmedDeliveredFills.get(o.orderId) ?? 0;
       const expectedRemaining = o.initialQuantity - expectedFilled;
       if (actualOrder.filledQuantity !== expectedFilled || actualOrder.remainingQuantity !== expectedRemaining) {
         return false;
@@ -251,7 +235,7 @@ export class RecoveryOracle {
         ob.checkTraceIndex = traceIndex;
         ob.expected = this.computeExpectedFacts(ob.report.orderId);
         ob.observed = this.computeObservedFacts(snapshot, ob.report.orderId, ob.key, tick);
-        if (!ob.deadlineMissed && this.isObligationReconciled(ob, snapshot, tick)) {
+        if (!ob.deadlineMissed && this.isObligationReconciled(snapshot, ob.expected, ob.observed)) {
           ob.completionTick = tick;
           ob.status = 'passed';
         }
@@ -294,7 +278,7 @@ export class RecoveryOracle {
         ob.checkTraceIndex = traceIndex;
         ob.expected = expected;
         ob.observed = observed;
-        if (ob.deadlineTick !== undefined && tick <= ob.deadlineTick && this.isObligationReconciled(ob, targetSnapshot, tick)) {
+        if (ob.deadlineTick !== undefined && tick <= ob.deadlineTick && this.isObligationReconciled(targetSnapshot, expected, observed)) {
           ob.completionTick = tick;
           ob.status = 'passed';
         }
@@ -313,13 +297,15 @@ export class RecoveryOracle {
       if (ob.deadlineTick === undefined || tick < ob.deadlineTick) continue;
 
       if (!ob.deadlineMissed && ob.completionTick === undefined) {
-        if (tick <= ob.deadlineTick && this.isObligationReconciled(ob, snapshot, tick)) {
+        const expected = this.computeExpectedFacts(ob.report.orderId);
+        const observed = this.computeObservedFacts(snapshot, ob.report.orderId, ob.key, ob.deadlineTick);
+        if (tick <= ob.deadlineTick && this.isObligationReconciled(snapshot, expected, observed)) {
           ob.completionTick = tick;
           ob.status = 'passed';
           ob.checkedTick = tick;
           ob.checkTraceIndex = traceIndex;
-          ob.expected = this.computeExpectedFacts(ob.report.orderId);
-          ob.observed = this.computeObservedFacts(snapshot, ob.report.orderId, ob.key, tick);
+          ob.expected = expected;
+          ob.observed = observed;
           continue;
         }
 
@@ -328,8 +314,8 @@ export class RecoveryOracle {
         ob.status = 'failed';
         ob.checkedTick = ob.deadlineTick;
         ob.checkTraceIndex = traceIndex;
-        ob.expected = this.computeExpectedFacts(ob.report.orderId);
-        ob.observed = this.computeObservedFacts(snapshot, ob.report.orderId, ob.key, ob.deadlineTick);
+        ob.expected = expected;
+        ob.observed = observed;
         newlyMissed.push(ob);
 
         this.pushViolation({
@@ -551,12 +537,7 @@ export class RecoveryOracle {
           // First time seeing this [orderId, executionId]
           const expectedOrder = this.expectedOrders.get(extractedReport.orderId);
           const previousOrder = previousSnapshot.orders[extractedReport.orderId];
-          let committedForOrder = 0;
-          for (const rec of this.acceptedReports.values()) {
-            if (rec.report.orderId === extractedReport.orderId) {
-              committedForOrder += rec.report.quantity;
-            }
-          }
+          const committedForOrder = this.confirmedDeliveredFills.get(extractedReport.orderId) ?? 0;
           if (!expectedOrder || !previousOrder) {
             publicError = 'Execution references unknown order';
           } else if (extractedReport.price !== expectedOrder.price) {
@@ -880,7 +861,7 @@ export class RecoveryOracle {
         ob.checkTraceIndex = clampedTraceIndex;
         ob.expected = expected;
         ob.observed = observed;
-        if (this.isObligationReconciled(ob, finalSnapshot, horizonTick)) {
+        if (this.isObligationReconciled(finalSnapshot, expected, observed)) {
           ob.completionTick = horizonTick;
           ob.status = 'passed';
         } else {

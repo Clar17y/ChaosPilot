@@ -1,8 +1,18 @@
 import type { ExperimentResult, SystemBriefSnapshot, TargetVariant } from '../domain.ts';
 import { computeContractHash } from '../evidence.ts';
 import { adaptCreditEvidenceToScenarioCheck, COVERAGE_EVALUATOR, prepareCoverage, validateCoveragePlan } from '../coverage/index.ts';
-import type { CoveragePlan, CoveragePreparationInput, CoverageScenarioSuggestion, CoverageTraceReference, ScenarioCheckEvidence } from '../coverage/types.ts';
+import type { CoveragePlan, CoveragePreparationInput, CoverageRecoveryFacts, CoverageScenarioSuggestion, CoverageTraceReference, ScenarioCheckEvidence } from '../coverage/types.ts';
 import { isRecoveryEvaluatorIdentity, recoveryEvaluatorAvailable } from '../recovery/oracle.ts';
+import type { RecoveryRetryCheck } from '../recovery/types.ts';
+
+function formatRetryCheck(retry: RecoveryRetryCheck): NonNullable<CoverageRecoveryFacts['retryCheck']> {
+  return {
+    status: retry.status === 'passed' || retry.status === 'failed' ? retry.status : 'inconclusive',
+    ...(retry.before ? { before: { ...retry.before } } : {}),
+    ...(retry.after ? { after: { ...retry.after } } : {}),
+    ...(retry.expected ? { expected: { ...retry.expected } } : {}),
+  };
+}
 
 /** Trusted execution context. Neither browser hashes nor today's profile replace the pinned snapshot. */
 export function coveragePreparation(snapshot: SystemBriefSnapshot, variant: TargetVariant, sourceHash: string): CoveragePreparationInput {
@@ -49,16 +59,17 @@ export function recordScenarioChecks(result: ExperimentResult, plan: CoveragePla
       const ingress = raw.ingress.find(i => i.traceIndex === ob.acceptanceTraceIndex && i.status === 'accepted' && !i.duplicate);
       if (!ingress || !ingress.report || JSON.stringify([ingress.report.orderId, ingress.report.executionId]) !== ob.key) continue;
       const retries = raw.retries.filter(r => r.key === ob.key);
+      const baseTraceIndices = [ob.acceptanceTraceIndex, ob.checkTraceIndex,
+        ...result.trace.flatMap((t, index) => t.time === ob.checkedTick || t.time === ob.completionTick
+          || t.action === 'connection:reconnect' && t.time === ob.reconnectTick ? [index] : [])];
       for (const intention of plan.intentions) {
         if (intention.scenarioId === 'accepted-order-credit-limit') continue;
         const retry = intention.scenarioId === 'recovery-retry-idempotence';
         const applicableRetries = retry && retries.length ? retries : [undefined];
         for (const retryResult of applicableRetries) {
           const horizon = retryResult ? Math.max(ob.checkedTick, retryResult.tick) : ob.checkedTick;
-          const refs = [ref(ob.acceptanceTraceIndex), ref(ob.checkTraceIndex),
-            ...result.trace.flatMap((t, index) => t.time === ob.checkedTick || t.time === ob.completionTick
-              || t.action === 'connection:reconnect' && t.time === ob.reconnectTick ? [ref(index)] : []),
-            ...(retryResult ? [ref(retryResult.traceIndex)] : [])].filter((r): r is CoverageTraceReference => r !== undefined);
+          const refs = [...baseTraceIndices, ...(retryResult ? [retryResult.traceIndex] : [])]
+            .map(ref).filter((r): r is CoverageTraceReference => r !== undefined);
           const violation = result.violations.find(v => v.evidence?.key === ob.key &&
             (retry ? v.invariant === 'execution_idempotency' && v.step === result.trace[retryResult?.traceIndex ?? -1]?.step : v.invariant === 'recovery_deadline'));
           let outcome: ScenarioCheckEvidence['outcome'] = ob.status === 'passed' ? 'passed' : ob.status === 'failed' ? 'failed' : 'inconclusive';
@@ -72,9 +83,7 @@ export function recordScenarioChecks(result: ExperimentResult, plan: CoveragePla
               acceptedAtTick: ob.acceptedTick, acceptedDuringDisconnection: ingress.disconnected,
               reconnectTick: ob.reconnectTick, deadlineTick: ob.deadlineTick, horizonTick: horizon,
               completionTick: ob.completionTick, ...(retry ? { retryObserved: retries.length > 0 } : {}),
-              ...(retryResult ? { retryCheck: { status: retryResult.status === 'passed' || retryResult.status === 'failed' ? retryResult.status : 'inconclusive',
-                ...(retryResult.before ? { before: { ...retryResult.before } } : {}), ...(retryResult.after ? { after: { ...retryResult.after } } : {}),
-                ...(retryResult.expected ? { expected: { ...retryResult.expected } } : {}) } } : {}),
+              ...(retryResult ? { retryCheck: formatRetryCheck(retryResult) } : {}),
               expected: { ...ob.expected }, ...(ob.observed ? { observed: { ...ob.observed } } : {}) },
             ...(outcome === 'failed' && violation ? { violationId: violation.id } : {}),
             detail: retry ? (retryResult ? 'Recorded duplicate delivery, before/after facts and independent recovery accounting' : 'No duplicate delivery observed')
@@ -111,8 +120,7 @@ export function recordScenarioChecks(result: ExperimentResult, plan: CoveragePla
           facts: { kind: 'recovery', reportId: ingress.messageId, executionId: ingress.report.executionId, orderId: ingress.report.orderId,
             acceptedAtTick: ingress.tick, acceptedDuringDisconnection: false, horizonTick: retryResult.tick,
             retryObserved: true,
-            retryCheck: { status: retryResult.status === 'passed' || retryResult.status === 'failed' ? retryResult.status : 'inconclusive',
-              before: { ...retryResult.before }, after: { ...retryResult.after }, expected: { ...retryResult.expected } },
+            retryCheck: formatRetryCheck(retryResult),
             expected: { ...retryResult.expected }, observed: { ...retryResult.after } },
           ...(outcome === 'failed' && violation ? { violationId: violation.id } : {}),
           detail: 'Recorded connected duplicate delivery, before/after facts and independent expected accounting',

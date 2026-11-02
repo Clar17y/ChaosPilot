@@ -104,7 +104,6 @@ export function isRecoveryDeadlineCleanControlConfirmed(
       cleanOb.status !== 'passed' ||
       cleanOb.deadlineMissed ||
       cleanOb.completionTick === undefined ||
-      cleanOb.deadlineTick === undefined ||
       cleanOb.completionTick < cleanOb.reconnectTick ||
       cleanOb.completionTick > cleanOb.deadlineTick ||
       cleanOb.acceptedTick > cleanOb.reconnectTick ||
