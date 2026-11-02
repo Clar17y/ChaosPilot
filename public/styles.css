@@ -3018,3 +3018,171 @@ textarea.form-input { min-height: 96px; resize: vertical; line-height: 1.6; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Coverage UI */
+.coverage-preparation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.coverage-prep-header h3 {
+  margin: 0 0 var(--space-1);
+}
+
+.coverage-suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.coverage-intention-card {
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.intention-review-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.intention-desc {
+  margin: var(--space-1) 0 var(--space-1) 1.6rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.intention-links {
+  margin: 0 0 0 1.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.coverage-plan-valid {
+  font-weight: 500;
+  margin: var(--space-1) 0;
+}
+
+.coverage-context-only-details {
+  margin-top: var(--space-2);
+  font-size: 0.85rem;
+}
+
+.coverage-context-list {
+  margin: var(--space-2) 0 0 var(--space-4);
+  padding: 0;
+  color: var(--text-dim);
+}
+
+.coverage-projection-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.coverage-pinned-context {
+  overflow-wrap: anywhere;
+}
+
+.coverage-proj-header h3 {
+  margin: 0 0 var(--space-1);
+}
+
+.coverage-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.coverage-table th,
+.coverage-table td {
+  padding: var(--space-2) var(--space-3);
+  vertical-align: top;
+}
+
+.coverage-row-reason {
+  margin: 0 0 var(--space-1);
+}
+
+.coverage-evidence-expander {
+  margin-top: var(--space-2);
+  font-size: 0.8rem;
+}
+
+.coverage-evidence-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.check-evidence-card {
+  padding: var(--space-2);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* Coverage Status Badges */
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.badge-status-confirmed {
+  background: rgba(46, 160, 67, 0.2);
+  color: #3fb950;
+  border: 1px solid rgba(46, 160, 67, 0.4);
+}
+
+.badge-status-failed-unconfirmed {
+  background: rgba(210, 153, 34, 0.2);
+  color: #e3b341;
+  border: 1px solid rgba(210, 153, 34, 0.4);
+}
+
+.badge-status-exercised {
+  background: rgba(56, 139, 253, 0.2);
+  color: #58a6ff;
+  border: 1px solid rgba(56, 139, 253, 0.4);
+}
+
+.badge-status-planned {
+  background: rgba(137, 87, 229, 0.2);
+  color: #bc8cff;
+  border: 1px solid rgba(137, 87, 229, 0.4);
+}
+
+.badge-status-suggested {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.badge-status-inconclusive {
+  background: rgba(240, 136, 62, 0.2);
+  color: #f0883e;
+  border: 1px solid rgba(240, 136, 62, 0.4);
+}
+
+.badge-status-invalid {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.4);
+}
+
+.badge-status-unsupported {
+  background: rgba(110, 118, 129, 0.2);
+  color: #8b949e;
+  border: 1px solid rgba(110, 118, 129, 0.4);
+}

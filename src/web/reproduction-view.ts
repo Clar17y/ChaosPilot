@@ -3,6 +3,29 @@
  * Kept DOM-free so app.ts wiring is covered by production-logic tests. */
 import type { Violation } from '../domain.ts';
 import type { PlaybackStep } from './reproduction-player.ts';
+import type { ScenarioCheckEvidence } from '../coverage/types.ts';
+
+/** Presentation of recorded checks only; payload prose is never recovery evidence.
+ * The recorded outcome is an unverified claim here, not a coverage verdict.
+ * When the selected trace entry is supplied, a reference must match its
+ * step, tick and message exactly or the check is omitted. */
+export function recordedRecoveryFacts(checks: readonly ScenarioCheckEvidence[] | undefined, tracePosition: number, adapterId: string | null,
+  traceEntry?: { step: number; time: number; messageId?: string } | null): string[] {
+  if (adapterId !== 'synthetic-trading-recovery' || !Array.isArray(checks)) return [];
+  return checks.flatMap(check => {
+    if (check?.facts?.kind !== 'recovery' || !Array.isArray(check.traceRefs)
+      || !check.traceRefs.some((ref: ScenarioCheckEvidence['traceRefs'][number]) => ref?.traceIndex === tracePosition
+        && (!traceEntry || (ref.step === traceEntry.step && ref.tick === traceEntry.time
+          && (ref.messageId === undefined || ref.messageId === traceEntry.messageId))))) return [];
+    const f = check.facts;
+    const tick = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? `${value} simulated ticks` : 'not recorded';
+    return [`Recorded recovery check (unverified recorded outcome claim, not a coverage verdict): ${check.id} (recorded outcome: ${check.outcome})`, `Report: ${f.reportId}; execution: ${f.executionId}; order: ${f.orderId}`,
+      `Target accepted: ${tick(f.acceptedAtTick)}; during disconnection: ${String(f.acceptedDuringDisconnection)}`,
+      `Reconnect: ${tick(f.reconnectTick)}; inclusive deadline: ${tick(f.deadlineTick)}; checked horizon: ${tick(f.horizonTick)}; completion: ${tick(f.completionTick)}`,
+      `Retry observed: ${f.retryObserved === undefined ? 'not recorded' : String(f.retryObserved)}`,
+      `Expected accounting: ${JSON.stringify(f.expected)}`, `Observed accounting: ${f.observed === undefined ? 'not recorded' : JSON.stringify(f.observed)}`];
+  });
+}
 
 /** Compare recorded behaviour independently of the source fingerprint. */
 export function replayBehaviourStatus(outcome: {

@@ -235,7 +235,7 @@ export function stateKindForInspectedRun(
   hasPinnedBrief: boolean,
 ): StateAdapterKind {
   if (adapterId === 'inventory-reservation') return 'inventory';
-  if (adapterId === 'synthetic-trading') return 'trading';
+  if (adapterId === 'synthetic-trading' || adapterId === 'synthetic-trading-recovery') return 'trading';
   if (!hasPinnedBrief && (adapterId === null || adapterId === undefined)) return 'trading';
   return 'unknown';
 }

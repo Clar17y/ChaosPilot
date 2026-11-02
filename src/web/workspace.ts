@@ -14,6 +14,22 @@ export const WORKSPACE_VIEWS: readonly WorkspaceView[] = [
   'overview', 'brief', 'capabilities', 'prepare', 'investigations', 'findings', 'functional',
 ];
 
+export type OptionalFeatureLoad<T> =
+  | { available: true; module: T }
+  | { available: false; error: string };
+
+/** Load an optional workspace feature behind a caught module boundary.
+ * A failed load must never prevent the baseline workspace from starting;
+ * callers show the feature as unavailable instead. The importer is injected
+ * so production wiring and tests exercise the same boundary. */
+export async function loadOptionalFeature<T>(importer: () => Promise<T>): Promise<OptionalFeatureLoad<T>> {
+  try {
+    return { available: true, module: await importer() };
+  } catch (error) {
+    return { available: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export interface RunPartition {
   /** Runs pinned to the selected system. */
   scoped: RunSummary[];
@@ -58,17 +74,21 @@ export function groupRunsByRevision(runs: readonly RunSummary[]): RevisionGroup[
     });
 }
 
-/** Adapters with a deterministic executable contract on this server. Keep in step with src/adapters/index.ts; an adapter becomes executable only when the backend can save, snapshot and run it. */
-export const EXECUTABLE_ADAPTER_IDS = ['synthetic-trading', 'inventory-reservation'] as const;
+/** Adapters the workspace recognizes for UI capability (choices/readiness only).
+ * Actual execution requires the backend to save, snapshot and run the adapter;
+ * server-side authorization/allowlist remains authoritative. Keep in step with src/adapters/index.ts. */
+export const EXECUTABLE_ADAPTER_IDS = ['synthetic-trading', 'inventory-reservation', 'synthetic-trading-recovery'] as const;
 export const INVENTORY_ADAPTER_ID = 'inventory-reservation';
 export const TRADING_ADAPTER_ID = 'synthetic-trading';
+export const RECOVERY_ADAPTER_ID = 'synthetic-trading-recovery';
 export const ADAPTER_LABELS: Record<string, string> = {
   'synthetic-trading': 'Synthetic trading',
   'inventory-reservation': 'Synthetic inventory reservation',
+  'synthetic-trading-recovery': 'Synthetic trading recovery',
   unconfigured: 'No adapter configured',
 };
 export function isExecutableAdapter(adapterId: string | null | undefined): boolean {
-  return adapterId === TRADING_ADAPTER_ID || adapterId === INVENTORY_ADAPTER_ID;
+  return adapterId === TRADING_ADAPTER_ID || adapterId === INVENTORY_ADAPTER_ID || adapterId === RECOVERY_ADAPTER_ID;
 }
 export function adapterLabel(adapterId: string | null | undefined): string {
   return ADAPTER_LABELS[adapterId ?? ''] ?? 'No adapter configured';
@@ -390,7 +410,7 @@ export function effectiveAdapterId(state: {
 
 /** Only the synthetic-trading adapter exposes the trading operations/vocabulary/checks. */
 export function tradingContractVisible(adapterId: string | null | undefined): boolean {
-  return adapterId === 'synthetic-trading';
+  return adapterId === 'synthetic-trading' || adapterId === 'synthetic-trading-recovery';
 }
 
 /** Any executable adapter exposes its own snapshot contract lists (not trading by default). */
@@ -620,6 +640,9 @@ export function functionalExecutionBlockedReason(state: FunctionalGuardState): s
   if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE RUNNING';
   if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE RUNNING';
   if (!state.hasSelectedSystem) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId === 'synthetic-trading-recovery') {
+    return 'FUNCTIONAL BASELINES DO NOT SUPPORT RECOVERY ADAPTER';
+  }
   if (state.selectedAdapterId !== 'synthetic-trading') {
     return 'FUNCTIONAL BASELINES ONLY SUPPORT SYNTHETIC-TRADING';
   }
@@ -684,6 +707,9 @@ export function regressionCaptureBlockedReason(
   if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE CAPTURING A REGRESSION';
   if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE CAPTURING A REGRESSION';
   if (!state.hasSelectedSystem || !state.selectedSystemId) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId === 'synthetic-trading-recovery') {
+    return 'REGRESSION CAPTURE DOES NOT SUPPORT RECOVERY ADAPTER';
+  }
   if (state.selectedAdapterId !== 'synthetic-trading') {
     return 'REGRESSION CAPTURE ONLY SUPPORTS SYNTHETIC-TRADING';
   }
@@ -729,6 +755,9 @@ export function regressionExecutionBlockedReason(
   if (state.isDraftMode) return 'SAVE THE NEW SYSTEM PROFILE BEFORE RUNNING';
   if (state.hasUnsavedSystemEdits) return 'SAVE OR DISCARD YOUR REQUIREMENT EDITS BEFORE RUNNING';
   if (!state.hasSelectedSystem) return 'SELECT A SAVED SYSTEM PROFILE';
+  if (state.selectedAdapterId === 'synthetic-trading-recovery') {
+    return 'REGRESSION TESTS DO NOT SUPPORT RECOVERY ADAPTER';
+  }
   if (state.selectedAdapterId !== 'synthetic-trading') {
     return 'REGRESSION TESTS ONLY SUPPORT SYNTHETIC-TRADING';
   }
