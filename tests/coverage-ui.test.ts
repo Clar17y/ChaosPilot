@@ -326,6 +326,9 @@ class El {
   appendChild(n: unknown) { this.children.push(n); return n; }
   replaceChildren(...nodes: unknown[]) { this.children = nodes; this.text = ''; }
   setAttribute(k: string, v: string) { this.attrs.set(k, v); }
+  getAttribute(k: string) { return this.attrs.get(k) ?? null; }
+  contains(node: unknown) { return this.findAll(e => e === node).length > 0; }
+  focus() { (document as unknown as { activeElement: El }).activeElement = this; }
   addEventListener(name: string, fn: () => void) { this.listeners.set(name, [...this.listeners.get(name) ?? [], fn]); }
   dispatch(name: string) { this.listeners.get(name)?.forEach(fn => fn()); }
   findAll(pred: (e: El) => boolean): El[] {
@@ -335,12 +338,46 @@ class El {
 afterEach(() => vi.unstubAllGlobals());
 function stubDom() {
   vi.stubGlobal('document', {
+    activeElement: null,
     createElement: () => new El(),
     createTextNode: (t: string) => ({ textContent: t }),
   });
 }
 
 describe('production coverage renderers (safe DOM binding)', () => {
+  it.each(['recovery-by-deadline', 'recovery-retry-idempotence'])(
+    'keeps keyboard focus on %s across a review update without stealing outside focus', scenarioId => {
+      stubDom();
+      const context: CoverageViewContext = { ...ctxA, selectedAdapterId: RECOVERY_ADAPTER_ID,
+        contractRuleIds: ['recovery_deadline', 'execution_idempotency'] };
+      const preparation = prepareCoverage({ context: serverContext(context), requirements: context.requirements!,
+        contractRuleIds: context.contractRuleIds });
+      const state: Parameters<typeof renderCoveragePreparation>[1] = {
+        context, preparationPending: false, preparation, preparationError: null, reviewedIntentions: {},
+        plan: null, planValidation: null, blockedReason: null, backendEndpointAvailable: true,
+        selectedRunId: null, projectionPending: false, projection: null, projectionError: null,
+      };
+      const container = new El();
+      const render = () => renderCoveragePreparation(container as never, state, (id, reviewed) => {
+        state.reviewedIntentions[id] = reviewed;
+        render();
+      });
+      const checkbox = () => container.findAll(e => e.attrs.get('data-coverage-scenario') === scenarioId)[0]!;
+      render();
+      const original = checkbox();
+      original.focus();
+      original.checked = true;
+      original.dispatch('change');
+      expect(checkbox()).not.toBe(original);
+      expect(checkbox().checked).toBe(true);
+      expect(document.activeElement).toBe(checkbox());
+      const outside = new El();
+      outside.focus();
+      render();
+      expect(document.activeElement).toBe(outside);
+    }
+  );
+
   it('preparation renderer binds hostile text as text, checkbox changes call back, pinned context shown', () => {
     stubDom();
     const hostile = '<img src=x onerror=alert(1)>';

@@ -2483,7 +2483,18 @@ alertClose.addEventListener('click', () => {
 
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(btn => { btn.addEventListener('click', () => showView(btn.dataset.view as WorkspaceView)); });
 document.getElementById('btn-open-active-run')?.addEventListener('click', openActiveRun);
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !replayModal.classList.contains('hidden')) { replayModal.classList.add('hidden'); lastFocusedElement?.focus(); } });
+document.addEventListener('keydown', (event) => {
+  if (replayModal.classList.contains('hidden')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    replayModal.classList.add('hidden');
+    lastFocusedElement?.focus();
+  } else if (event.key === 'Tab') {
+    // Keep both Close and the keyboard-scrollable report inside the dialog.
+    event.preventDefault();
+    (document.activeElement === btnCloseReplay ? replayReportBody : btnCloseReplay).focus();
+  }
+});
 btnCloseReplay.addEventListener('click', () => { lastFocusedElement?.focus();
   replayModal.classList.add('hidden');
 });
