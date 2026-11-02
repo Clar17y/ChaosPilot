@@ -131,6 +131,127 @@ describe('CoverageController async ownership', () => {
     expect(failing.state.projectionError).toContain('offline');
   });
 
+  it('R-01: same-identity readiness reload preserves review and historical inspection; launch blocked while unready', async () => {
+    const controller = new CoverageController(vi.fn(async () => prepareResponse(ctxA)) as never, () => {});
+    await controller.setContext(ctxA);
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    controller.inspectRun({ id: 'history-1', status: 'completed', experiments: [], findings: [] });
+    expect(controller.state.projection?.runId).toBe('history-1');
+    // Transient: context not ready, DOM variant temporarily empty.
+    await controller.setContext({ ...ctxA, selectedVariant: null, isContextReady: false });
+    expect(controller.state.reviewedIntentions['accepted-order-credit-limit']).toBe(true);
+    expect(controller.state.projection?.runId).toBe('history-1');
+    expect(controller.getLaunchPlan()).toBeUndefined();
+    expect(() => controller.captureLaunch()).toThrow();
+    // Ready again with the identical pinned identity: server revalidation restores the review.
+    await controller.setContext({ ...ctxA, isContextReady: true });
+    expect(controller.state.reviewedIntentions['accepted-order-credit-limit']).toBe(true);
+    expect(controller.captureLaunch().plan?.intentions).toHaveLength(1);
+    expect(controller.state.projection?.runId).toBe('history-1');
+  });
+
+  it('R-01: genuine identity change invalidates the review visibly but keeps the historical record itself', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? '{}') as { expectedRevision?: number };
+      return prepareResponse(body.expectedRevision === 2 ? { ...ctxA, revision: 2 } : ctxA);
+    });
+    const controller = new CoverageController(fetchMock as never, () => {});
+    await controller.setContext(ctxA);
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    controller.inspectRun({ id: 'history-1', status: 'completed', experiments: [], findings: [] });
+    await controller.setContext({ ...ctxA, revision: 2 });
+    expect(controller.state.reviewedIntentions['accepted-order-credit-limit']).toBe(false);
+    expect(controller.state.reviewInvalidatedReason).toContain('invalidated');
+    expect(controller.getLaunchPlan()).toBeUndefined();
+    expect(controller.state.projection?.runId).toBe('history-1'); // pinned record remains itself
+  });
+
+  it('R-01: failed revalidation leaves no executable plan and does not silently empty the review', async () => {
+    let fail = false;
+    const controller = new CoverageController(vi.fn(async () => fail ? notFound : prepareResponse(ctxA)) as never, () => {});
+    await controller.setContext(ctxA);
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    expect(controller.getLaunchPlan()).toBeDefined();
+    fail = true;
+    await controller.setContext({ ...ctxA, isContextReady: false });
+    await controller.setContext(ctxA); // revalidation now 404s
+    expect(controller.state.plan).toBeNull();
+    expect(controller.getLaunchPlan()).toBeUndefined();
+    expect(controller.state.reviewedIntentions['accepted-order-credit-limit']).toBe(true); // not silently emptied
+    expect(controller.state.preparationError).toContain('unavailable');
+  });
+
+  it('R-05: automatic live refresh does not revoke launch ownership; explicit selection does', async () => {
+    const controller = new CoverageController(vi.fn(async () => prepareResponse(ctxA)) as never, () => {});
+    await controller.setContext(ctxA);
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    controller.inspectRun(null);
+    const token = controller.captureLaunch();
+    const echo = { id: 'new-run', variant: 'clean', provider: 'mock',
+      systemBrief: { id: 'system-alpha', revision: 1, hash: 'snap-system-alpha' }, coveragePlan: token.plan };
+    // A poll may still show the previous record during start preparation,
+    // followed by the new run before the POST response is handled.
+    controller.inspectRun({ id: 'previous-live-run', status: 'completed', experiments: [], findings: [] }, { automatic: true });
+    expect(controller.validateLaunchResponse(echo, token).current).toBe(true);
+    controller.inspectRun({ id: 'new-run', status: 'running', experiments: [], findings: [] }, { automatic: true });
+    expect(controller.validateLaunchResponse(echo, token)).toEqual({ current: true });
+    expect(controller.validateLaunchResponse({ ...echo, coveragePlan: undefined }, token).error).toContain('not acknowledged');
+    // Automatic refresh of the same run again still does not revoke.
+    controller.inspectRun({ id: 'new-run', status: 'running', experiments: [], findings: [] }, { automatic: true });
+    expect(controller.validateLaunchResponse(echo, token).current).toBe(true);
+    // Explicit different history selection revokes.
+    controller.inspectRun({ id: 'other-history', status: 'completed', experiments: [], findings: [] });
+    expect(controller.validateLaunchResponse(echo, token).current).toBe(false);
+  });
+
+  it('R-06: no reviewed intention means no launch plan and no reviewed-ready claim; unchecking all is explicit', async () => {
+    const controller = new CoverageController(vi.fn(async () => prepareResponse(ctxA)) as never, () => {});
+    await controller.setContext(ctxA);
+    expect(controller.state.plan?.intentions).toEqual([]); // empty plan stays valid pure data
+    expect(controller.getLaunchPlan()).toBeUndefined();
+    expect(controller.captureLaunch().plan).toBeUndefined();
+    expect(controller.state.blockedReason).toBeNull(); // ordinary trading launch still proceeds without a plan
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    expect(controller.getLaunchPlan()?.intentions).toHaveLength(1);
+    controller.toggleIntention('accepted-order-credit-limit', false);
+    expect(controller.getLaunchPlan()).toBeUndefined();
+    expect(controller.captureLaunch().plan).toBeUndefined();
+  });
+
+  it('R-09: a known snapshot hash is compared to preparation; temporarily absent hash is not a different identity', async () => {
+    const mismatched = new CoverageController(vi.fn(async () => prepareResponse(ctxA)) as never, () => {});
+    await mismatched.setContext({ ...ctxA, snapshotHash: 'snap-different' });
+    expect(mismatched.state.preparation).toBeNull();
+    expect(mismatched.state.preparationError).toContain('hash differs');
+
+    const controller = new CoverageController(vi.fn(async () => prepareResponse(ctxA)) as never, () => {});
+    await controller.setContext({ ...ctxA, snapshotHash: 'snap-system-alpha' });
+    controller.toggleIntention('accepted-order-credit-limit', true);
+    await controller.setContext({ ...ctxA, isContextReady: false }); // snapshot metadata temporarily absent
+    expect(controller.state.reviewedIntentions['accepted-order-credit-limit']).toBe(true);
+    await controller.setContext({ ...ctxA, snapshotHash: 'snap-system-alpha' });
+    expect(controller.captureLaunch().plan?.intentions).toHaveLength(1);
+  });
+
+  it('R-03: explicit null scenario evidence on reopen surfaces as inconclusive with warnings', async () => {
+    const pinned = serverContext(ctxA);
+    const preparation: CoveragePreparationInput = { context: pinned, requirements: ctxA.requirements!, requirementRules: ctxA.requirementRules, contractRuleIds: ctxA.contractRuleIds! };
+    const savedPlan = buildCoveragePlan({ preparation, intentions: [{ scenarioId: 'accepted-order-credit-limit', reviewed: true, links: [{ kind: 'requirement-text', text: reqText }] }] }).plan;
+    const record = {
+      id: 'saved-null', status: 'completed', variant: 'clean', sourceHash: pinned.sourceHash, coveragePlan: savedPlan,
+      systemBrief: { hash: pinned.snapshotHash, brief: { id: pinned.systemId, revision: 1, adapterId: 'synthetic-trading', requirements: ctxA.requirements, requirementRules: ctxA.requirementRules },
+        contract: { invariants: [{ id: 'credit_limit_respected' }] } },
+      contextAudit: { contractHash: pinned.contractHash, adapterId: 'synthetic-trading', variant: 'clean' },
+      experiments: [{ index: 0, result: { valid: true, executionComplete: true, sourceHash: pinned.sourceHash, trace: [], scenarioCheckEvidence: null } }],
+      findings: [],
+    };
+    const controller = new CoverageController(vi.fn(async () => notFound) as never, () => {});
+    controller.inspectRun(record);
+    const row = controller.state.projection?.rows.find(r => r.scenarioId === 'accepted-order-credit-limit');
+    expect(row?.status).toBe('inconclusive');
+    expect(controller.state.projection?.warnings.length).toBeGreaterThan(0);
+  });
+
   it('inspectRun uses the pinned snapshot, not the current profile, for a full saved record', async () => {
     const pinned = serverContext(ctxA);
     const preparation: CoveragePreparationInput = { context: pinned, requirements: ctxA.requirements!, requirementRules: ctxA.requirementRules, contractRuleIds: ctxA.contractRuleIds! };
@@ -163,6 +284,23 @@ describe('optional coverage module boundary', () => {
     await expect(loadOptionalFeature(async () => { throw new Error('404 /coverage/identity.js'); }))
       .resolves.toEqual({ available: false, error: '404 /coverage/identity.js' });
     await expect(loadOptionalFeature(async () => ({ ok: 1 }))).resolves.toEqual({ available: true, module: { ok: 1 } });
+  });
+  it('app wiring: session selection + snapshot hash, automatic live inspect, consistent openRun failure clear (R-01/R-02/R-05/R-09)', async () => {
+    const app = await readFile(new URL('../src/web/app.ts', import.meta.url), 'utf8');
+    expect(app).toContain('selectedVariant: targetSelection.selection');
+    expect(app).toContain('snapshotHash: snapshotHash ?? undefined');
+    expect(app).toContain('snapshotHash = snapshot.hash ?? null');
+    expect(app).toContain("coverageController?.inspectRun(rec, { automatic: true })");
+    const openRun = app.slice(app.indexOf('async function openRun'));
+    const failure = openRun.slice(openRun.indexOf('} catch (err)'), openRun.indexOf('function buildRunRow'));
+    expect(failure).toContain('recordSequencer.isCurrent(token)'); // late failures cannot clear a newer selection
+    expect(failure).toContain('currentInvestigationRecord = null');
+    expect(failure).toContain('lifecycle.clearInspection()');
+    expect(failure).toContain('renderEmptyDashboard(');
+    expect(app).toContain('result?.trace?.[step.tracePosition]'); // R-08 selected-entry validation in production wiring
+    const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+    expect(html).not.toContain('Executable synthetic trading recovery'); // R-10 premature executable claim neutralized
+    expect(html).toContain('execution requires confirmed backend support');
   });
   it('app loads coverage only behind the dynamic boundary (no static coverage-core imports)', async () => {
     const app = await readFile(new URL('../src/web/app.ts', import.meta.url), 'utf8');
@@ -251,6 +389,38 @@ describe('production coverage renderers (safe DOM binding)', () => {
     expect(onOpenExperiment).toHaveBeenCalledWith(3);
     const region = container.findAll(e => e.attrs.get('role') === 'region')[0];
     expect(region.tabIndex).toBe(0); // keyboard-focusable scroll region
+  });
+
+  it('R-06/R-03: preparation shows no-reviewed copy only, and ready projection renders warnings', () => {
+    stubDom();
+    const input: CoveragePreparationInput = { context: serverContext(ctxA), requirements: ctxA.requirements!, requirementRules: ctxA.requirementRules, contractRuleIds: ctxA.contractRuleIds! };
+    const prep = prepareCoverage(input);
+    const emptyPlan = buildCoveragePlan({ preparation: input, intentions: [] });
+    const container = new El();
+    const viewState: Parameters<typeof renderCoveragePreparation>[1] = {
+      context: ctxA, preparationPending: false, preparation: prep, preparationError: null,
+      reviewedIntentions: { 'accepted-order-credit-limit': false }, plan: emptyPlan.plan!, planValidation: emptyPlan,
+      blockedReason: null, backendEndpointAvailable: true, selectedRunId: null, projectionPending: false, projection: null, projectionError: null,
+      reviewInvalidatedReason: 'Reviewed coverage intentions were invalidated for test.',
+    };
+    renderCoveragePreparation(container as never, viewState, vi.fn());
+    expect(container.textContent).toContain('No intentions reviewed. No coverage plan will be attached');
+    expect(container.textContent).not.toContain('Reviewed coverage plan ready');
+    expect(container.textContent).toContain('invalidated for test');
+    for (const unavailable of [{ preparationPending: true }, { preparation: null }, { preparationError: 'offline' }]) {
+      renderCoveragePreparation(container as never, { ...viewState, ...unavailable }, vi.fn());
+      expect(container.textContent).toContain('invalidated for test');
+    }
+
+    const proj = new El();
+    renderCoverageProjection(proj as never, {
+      runId: 'run-1', state: 'ready', context: serverContext(ctxA), stop: { status: 'completed' },
+      rows: [{ scenarioId: 'accepted-order-credit-limit', title: 'Credit', status: 'inconclusive', reason: 'unreadable',
+        links: [], evidence: [], experimentIndices: [], findingIds: [] }],
+      warnings: ['Unreadable scenario check evidence in experiment 0: a check entry is null or not an object.'],
+    });
+    expect(proj.textContent).toContain('Coverage evidence warnings:');
+    expect(proj.textContent).toContain('Unreadable scenario check evidence in experiment 0');
   });
 
   it('status helpers cover all eight statuses', () => {

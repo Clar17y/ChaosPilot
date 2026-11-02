@@ -39,6 +39,8 @@ export interface CoverageViewState {
   projectionPending: boolean;
   projection: CoverageProjection | null;
   projectionError: string | null;
+  /** Visible reason a previously reviewed intention set was invalidated. */
+  reviewInvalidatedReason?: string | null;
 }
 type Fetch = (url: string, init?: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
 export interface CoverageLaunchToken {
@@ -57,6 +59,21 @@ function eligible(c: CoverageViewContext | null): c is CoverageViewContext & { s
 function preparationInput(c: CoverageViewContext, context: CoverageContext): CoveragePreparationInput {
   return { context, requirements: c.requirements ?? [], requirementRules: c.requirementRules ?? [], contractRuleIds: c.contractRuleIds ?? [] };
 }
+/** Identity fields that pin a review. Readiness flags and temporarily absent
+ * variant/snapshot metadata are transient and never by themselves a change. */
+function stableIdentityKey(c: CoverageViewContext | null): string | null {
+  if (!c) return null;
+  return JSON.stringify([c.systemId, c.revision, c.selectedAdapterId, c.isDraftMode, c.hasUnsavedSystemEdits,
+    c.requirements ?? [], c.requirementRules ?? [], c.contractRuleIds ?? []]);
+}
+function transientOnlyChange(prev: CoverageViewContext | null, next: CoverageViewContext): boolean {
+  if (!prev || stableIdentityKey(prev) !== stableIdentityKey(next)) return false;
+  if (next.selectedVariant && prev.selectedVariant && next.selectedVariant !== prev.selectedVariant) return false;
+  if (next.snapshotHash !== undefined && prev.snapshotHash !== undefined && next.snapshotHash !== prev.snapshotHash) return false;
+  if (next.sourceHash !== undefined && prev.sourceHash !== undefined && next.sourceHash !== prev.sourceHash) return false;
+  if (next.contractHash !== undefined && prev.contractHash !== undefined && next.contractHash !== prev.contractHash) return false;
+  return true;
+}
 /** Fetch-injected owner of preparation and coverage inspection. App-owned history
  * and record sequencers continue to own navigation; there is no second poller. */
 export class CoverageController {
@@ -68,13 +85,35 @@ export class CoverageController {
   private generation = 0;
   private inspection = 0;
   private prepareRequest = 0;
+  private preservedReview: { stableKey: string | null; variant: string | null; preparationJson: string; reviewedIntentions: Record<string, boolean> } | null = null;
   constructor(private readonly fetchFn: Fetch, private readonly render: (state: CoverageViewState) => void) {}
+  private rememberReview(): void {
+    if (this.state.preparation && Object.values(this.state.reviewedIntentions).some(Boolean)) {
+      this.preservedReview = { stableKey: stableIdentityKey(this.state.context), variant: this.state.context?.selectedVariant ?? null,
+        preparationJson: JSON.stringify(this.state.preparation), reviewedIntentions: { ...this.state.reviewedIntentions } };
+    }
+  }
   setContext(context: CoverageViewContext): Promise<void> | null {
     if (JSON.stringify(context) === JSON.stringify(this.state.context)) return null;
-    this.generation++; this.inspection++; this.prepareRequest++;
+    const prev = this.state.context;
+    const hashConflictsPreparation = Boolean(this.state.preparation && ((['snapshotHash', 'sourceHash', 'contractHash'] as const)
+      .some(k => context[k] !== undefined && context[k] !== this.state.preparation!.context[k])));
+    if (transientOnlyChange(prev, context) && !hashConflictsPreparation) {
+      // Readiness/DOM reload for the same pinned identity: keep the review
+      // and the historical inspection. Launch stays blocked while unready
+      // because eligibility is re-evaluated from the new context.
+      this.state.context = structuredClone(context);
+      if (!eligible(context)) { this.state.plan = null; this.state.planValidation = null; }
+      this.publish();
+      return eligible(context) && prev && !eligible(prev) ? this.prepare() : eligible(context) && !this.state.preparation ? this.prepare() : null;
+    }
+    this.rememberReview();
+    const hadReview = this.preservedReview !== null && Object.values(this.preservedReview.reviewedIntentions).some(Boolean);
+    this.generation++; this.prepareRequest++;
+    // Historical inspection is independent: app owns explicit clear/selection.
     Object.assign(this.state, { context: structuredClone(context), preparationPending: false, preparation: null, preparationError: null,
       reviewedIntentions: {}, plan: null, planValidation: null, backendEndpointAvailable: null,
-      selectedRunId: null, projectionPending: false, projection: null, projectionError: null });
+      reviewInvalidatedReason: hadReview ? 'Reviewed coverage intentions were invalidated because the pinned system, revision, adapter, variant, snapshot or requirement mapping changed. Review the new preparation before launching with a plan.' : null });
     this.publish();
     return eligible(context) ? this.prepare() : null;
   }
@@ -97,7 +136,12 @@ export class CoverageController {
     if (!eligible(c)) return;
     const generation = this.generation, request = ++this.prepareRequest;
     const current = () => generation === this.generation && request === this.prepareRequest;
-    Object.assign(this.state, { preparationPending: true, preparation: null, plan: null, planValidation: null, reviewedIntentions: {}, preparationError: null });
+    this.rememberReview();
+    const priorPreparationJson = this.state.preparation ? JSON.stringify(this.state.preparation) : null;
+    const priorReviewed = { ...this.state.reviewedIntentions };
+    // No executable plan survives an in-flight or failed revalidation, but
+    // reviewed intentions are not silently emptied before the server reply.
+    Object.assign(this.state, { preparationPending: true, plan: null, planValidation: null, preparationError: null });
     this.publish();
     try {
       const data = await this.json('/api/coverage/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -115,19 +159,36 @@ export class CoverageController {
         throw new Error('Coverage preparation has unsupported scenarios or requirement links');
       this.state.backendEndpointAvailable = true;
       this.state.preparation = canonical;
-      this.state.reviewedIntentions = Object.fromEntries(canonical.suggestions.map(s => [s.scenarioId, false]));
+      const canonicalJson = JSON.stringify(canonical);
+      const restore = (priorPreparationJson !== null && priorPreparationJson === canonicalJson)
+        ? priorReviewed
+        : this.preservedReview && this.preservedReview.preparationJson === canonicalJson
+          && this.preservedReview.stableKey === stableIdentityKey(this.state.context)
+          && this.preservedReview.variant === c.selectedVariant
+          ? this.preservedReview.reviewedIntentions : null;
+      if (restore) {
+        this.state.reviewedIntentions = Object.fromEntries(canonical.suggestions.map(s => [s.scenarioId, restore[s.scenarioId] === true]));
+        this.state.reviewInvalidatedReason = null;
+      } else {
+        if (Object.values(priorReviewed).some(Boolean) || (this.preservedReview && Object.values(this.preservedReview.reviewedIntentions).some(Boolean) && priorPreparationJson !== null))
+          this.state.reviewInvalidatedReason = 'Reviewed coverage intentions were invalidated because server preparation confirmed a different pinned context, catalog, evaluator or requirement links. Review the new preparation before launching with a plan.';
+        this.state.reviewedIntentions = Object.fromEntries(canonical.suggestions.map(s => [s.scenarioId, false]));
+      }
+      this.preservedReview = null;
     } catch (error) {
       if (!current()) return;
+      this.state.plan = null; this.state.planValidation = null;
       if (error instanceof HttpError && error.status === 404) {
         this.state.backendEndpointAvailable = false;
         this.state.preparationError = 'Coverage preparation is unavailable. Supported investigations can still run without a coverage plan. Recovery requires preparation.';
       } else this.state.preparationError = String(error);
     } finally {
-      if (current()) { this.state.preparationPending = false; this.recomputePlan(); this.publish(); }
+      if (current()) { this.state.preparationPending = false; if (!this.state.preparationError) this.recomputePlan(); else { this.state.plan = null; this.state.planValidation = null; } this.publish(); }
     }
   }
   toggleIntention(scenarioId: CoverageScenarioId, reviewed: boolean): void {
     if (!this.state.preparation?.suggestions.some(s => s.scenarioId === scenarioId)) return;
+    this.state.reviewInvalidatedReason = null;
     this.state.reviewedIntentions[scenarioId] = reviewed;
     this.recomputePlan(); this.publish();
   }
@@ -141,7 +202,10 @@ export class CoverageController {
     this.state.plan = validation.valid ? validation.plan! : null;
   }
   getLaunchPlan(): CoveragePlan | undefined {
-    return eligible(this.state.context) && this.state.backendEndpointAvailable === true && this.state.planValidation?.valid && this.state.plan
+    // R-06: an empty (unreviewed) plan is valid pure data but is never
+    // attached by the UI; at least one reviewed intention is required.
+    return eligible(this.state.context) && !this.state.preparationPending && !this.state.preparationError
+      && this.state.backendEndpointAvailable === true && this.state.planValidation?.valid && this.state.plan && this.state.plan.intentions.length > 0
       ? structuredClone(this.state.plan) : undefined;
   }
   captureLaunch(): CoverageLaunchToken {
@@ -168,8 +232,13 @@ export class CoverageController {
     } else if (value.coveragePlan !== undefined) return { current, error: 'Investigation started with an unexpected coverage plan. Reload its saved record.' };
     return { current };
   }
-  inspectRun(value: unknown): void {
-    this.inspection++;
+  inspectRun(value: unknown, options?: { automatic?: boolean }): void {
+    // Polls may show the previous run and then the newly launched run before
+    // the start response arrives. Neither refresh is a user selection.
+    // Explicit selection and clear remain the owners of this token.
+    const incomingId = isRecord(value) && typeof value.id === 'string' ? value.id : null;
+    const automaticRefresh = options?.automatic === true && incomingId !== null;
+    if (!automaticRefresh) this.inspection++;
     Object.assign(this.state, { projection: null, projectionError: null, projectionPending: false, selectedRunId: null });
     if (value === null) { this.publish(); return; }
     try {
@@ -192,7 +261,9 @@ export class CoverageController {
         experiments: (record.experiments ?? []).map(e => {
           const result = e.result as ExperimentResult & CoverageResultFields;
           return { index: e.index, valid: result?.valid, executionComplete: result?.executionComplete, sourceHash: result?.sourceHash,
-            trace: result?.trace, checks: result?.scenarioCheckEvidence ?? [] };
+            // Explicit null/invalid evidence is preserved for the projector
+            // to surface as unreadable; only an absent field means no checks.
+            trace: result?.trace, checks: result?.scenarioCheckEvidence as never };
         }),
         findings: (record.findings ?? []).map(f => ({ id: f.id, experimentIndex: f.experimentIndex, sourceHash: f.sourceHash, violationId: f.violation?.id,
           invariant: f.violation?.invariant, reproduced: f.reproduced, cleanControlPassed: f.cleanControlPassed })),
@@ -208,9 +279,9 @@ export class CoverageController {
       const record = await this.json(`/api/runs/${encodeURIComponent(id)}`);
       if (!current()) return;
       if (!isRecord(record) || record.id !== id) throw new Error('Historical run response identity mismatch');
-      this.inspectRun(record);
+      this.inspectRun(record, { automatic: true }); // open() already took explicit ownership above
     } catch (error) {
-      if (current()) { this.state.projection = null; this.state.projectionError = String(error); this.state.projectionPending = false; this.publish(); }
+      if (current()) { this.state.selectedRunId = null; this.state.projection = null; this.state.projectionError = String(error); this.state.projectionPending = false; this.publish(); }
     }
   }
 }
@@ -249,6 +320,17 @@ export function renderCoveragePreparation(
   onToggle: (scenarioId: CoverageScenarioId, reviewed: boolean) => void
 ): void {
   container.replaceChildren();
+
+  // A revalidation failure or missing preparation must not hide why a
+  // previously reviewed plan was invalidated.
+  if (state.reviewInvalidatedReason) {
+    const note = document.createElement('div');
+    note.className = 'note warn';
+    const p = document.createElement('p');
+    p.textContent = state.reviewInvalidatedReason;
+    note.appendChild(p);
+    container.appendChild(note);
+  }
 
   if (state.preparationPending) {
     const p = document.createElement('p');
@@ -364,12 +446,17 @@ export function renderCoveragePreparation(
     }
     note.append(p, ul);
     panel.appendChild(note);
-  } else if (state.plan && state.planValidation?.valid) {
+  } else if (state.plan && state.planValidation?.valid && state.plan.intentions.length > 0) {
     const validP = document.createElement('p');
     validP.className = 'coverage-plan-valid text-success';
     const count = state.plan.intentions.length;
     validP.textContent = ` Reviewed coverage plan ready with ${count} intention${count === 1 ? '' : 's'}. Plan will be pinned to next run.`;
     panel.appendChild(validP);
+  } else if (state.plan && state.planValidation?.valid) {
+    const p = document.createElement('p');
+    p.className = 'muted coverage-plan-none';
+    p.textContent = 'No intentions reviewed. No coverage plan will be attached to the next launch.';
+    panel.appendChild(p);
   }
 
   const contextOnly = prep.contextOnly ?? [];
@@ -457,6 +544,12 @@ export function renderCoverageProjection(
     p.className = 'muted';
     p.textContent = 'No coverage scenarios recorded for this run.';
     empty.appendChild(p);
+    for (const w of projection.warnings ?? []) {
+      const wp = document.createElement('p');
+      wp.className = 'coverage-warnings';
+      wp.textContent = w;
+      empty.appendChild(wp);
+    }
     container.appendChild(empty);
     return;
   }
@@ -495,6 +588,21 @@ export function renderCoverageProjection(
     header.appendChild(pStop);
   }
   panel.appendChild(header);
+
+  if (projection.warnings?.length) {
+    const note = document.createElement('div');
+    note.className = 'note warn coverage-warnings';
+    const p = document.createElement('p');
+    p.textContent = 'Coverage evidence warnings:';
+    const ul = document.createElement('ul');
+    for (const w of projection.warnings) {
+      const li = document.createElement('li');
+      li.textContent = w;
+      ul.appendChild(li);
+    }
+    note.append(p, ul);
+    panel.appendChild(note);
+  }
 
   const tableResp = document.createElement('div');
   tableResp.className = 'table-responsive';

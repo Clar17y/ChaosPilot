@@ -74,8 +74,9 @@ function evaluate(check: ScenarioCheckEvidence, experiment: CoverageExperimentIn
     if (check.scenarioId === 'recovery-retry-idempotence' && f.retryObserved === false && check.outcome === 'not-checked')
       return { status: 'planned', reason: 'No actual retry was observed' };
     const recordedTicks = new Set(check.traceRefs.map(ref => ref.tick));
-    if (!recordedTicks.has(f.horizonTick) || (f.completionTick !== undefined && !recordedTicks.has(f.completionTick)))
-      return inconclusive('Recovery horizon or completion has no matching recorded trace reference');
+    if (!recordedTicks.has(f.acceptedAtTick) || (f.reconnectTick !== undefined && !recordedTicks.has(f.reconnectTick))
+      || !recordedTicks.has(f.horizonTick) || (f.completionTick !== undefined && !recordedTicks.has(f.completionTick)))
+      return inconclusive('Recovery acceptance, reconnect, horizon or completion has no matching recorded trace reference');
     passed = recoveryTruth(f, check.scenarioId === 'recovery-retry-idempotence');
   }
   if (passed === null || check.outcome === 'not-checked' || check.outcome === 'inconclusive')
@@ -103,6 +104,22 @@ export function projectCoverage(input: CoverageProjectionInput): CoverageProject
   const preparation = prepareCoverage(input.preparation!);
   const experiments = Array.isArray(input.experiments) ? input.experiments : [];
   const findings = Array.isArray(input.findings) ? input.findings : [];
+  const warnings: string[] = [];
+  if (input.experiments !== undefined && !Array.isArray(input.experiments))
+    warnings.push('Unreadable scenario check evidence: experiments are not a list; affected intentions cannot be shown as passed or unexercised.');
+  const knownScenarioIds = new Set(preparation.suggestions.map(s => s.scenarioId));
+  let unattributedCorruption = input.experiments !== undefined && !Array.isArray(input.experiments);
+  for (const experiment of experiments) {
+    const label = isRecord(experiment) && amount(experiment.index) ? `experiment ${experiment.index}` : 'an experiment with no recorded index';
+    if (!isRecord(experiment)) { unattributedCorruption = true; warnings.push(`Unreadable scenario check evidence in ${label}: experiment entry is not an object.`); continue; }
+    if (experiment.checks === undefined) continue;
+    if (!Array.isArray(experiment.checks)) { unattributedCorruption = true; warnings.push(`Unreadable scenario check evidence in ${label}: checks are present but not a list.`); continue; }
+    for (const raw of experiment.checks) {
+      if (!isRecord(raw)) { unattributedCorruption = true; warnings.push(`Unreadable scenario check evidence in ${label}: a check entry is null or not an object.`); }
+      else if (typeof raw.scenarioId !== 'string' || !raw.scenarioId) { unattributedCorruption = true; warnings.push(`Unreadable scenario check evidence in ${label}: a check entry has no scenario identity.`); }
+      else if (!knownScenarioIds.has(raw.scenarioId as never)) { unattributedCorruption = true; warnings.push(`Unreadable scenario check evidence in ${label}: unknown scenario "${raw.scenarioId}".`); }
+    }
+  }
   const rows: CoverageRow[] = preparation.suggestions.map(suggestion => {
     const intention = plan.intentions.find(i => i.scenarioId === suggestion.scenarioId);
     const row: CoverageRow = { scenarioId: suggestion.scenarioId, title: suggestion.title, links: structuredClone(intention?.links ?? suggestion.links),
@@ -128,7 +145,18 @@ export function projectCoverage(input: CoverageProjectionInput): CoverageProject
     row.findingIds = [...new Set(row.findingIds)];
     return row;
   });
+  if (unattributedCorruption) {
+    for (const row of rows) {
+      // Genuine confirmed/failed verdicts stay, qualified by the warnings.
+      // A pass or unexercised claim beside unattributed corruption is not
+      // unqualified. Suggested and context-only rows keep their status.
+      if (row.status === 'planned' || row.status === 'exercised') {
+        row.status = 'inconclusive';
+        row.reason = 'Unreadable scenario check evidence was recorded; this intention cannot be shown as passed or unexercised';
+      }
+    }
+  }
   rows.push(...preparation.contextOnly.map(requirement => ({ scenarioId: null, title: requirement, links: [{ kind: 'requirement-text' as const, text: requirement }],
     status: 'unsupported' as const, reason: 'Context-only requirement; no reviewed executable mapping', evidence: [], experimentIndices: [], findingIds: [] })));
-  return { ...base, state: 'ready', context: { ...plan.context }, rows };
+  return { ...base, state: 'ready', context: { ...plan.context }, rows, warnings };
 }

@@ -131,6 +131,7 @@ const snapshotSequencer = new RequestSequencer();
 let snapshotState: SnapshotLoadState = 'none';
 let snapshotSystemId: string | null = null;
 let snapshotIdentity: { id: string; revision: number; adapterId: string } | null = null;
+let snapshotHash: string | null = null;
 const targetSequencer = new RequestSequencer();
 const targetSelection = new TargetSelectionSession();
 const lifecycle = new InvestigationLifecycle();
@@ -225,7 +226,12 @@ function syncCoverageContext(): void {
     systemId: selectedSystem?.id ?? null,
     revision: selectedSystem?.revision ?? null,
     selectedAdapterId: adapterId,
-    selectedVariant: targetSelect?.value ?? null,
+    // The confirmed session selection is authoritative; a temporarily
+    // emptied DOM select must not appear as a variant change. Source and
+    // contract hashes stay server-resolved (backend authority); only the
+    // saved snapshot hash known from loadSystemContract is compared here.
+    selectedVariant: targetSelection.selection ?? (targetSelect?.value ? targetSelect.value : null),
+    snapshotHash: snapshotHash ?? undefined,
     isDraftMode,
     hasUnsavedSystemEdits,
     isSystemSavePending,
@@ -1005,7 +1011,10 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
   renderProposals(rec, proposalDisplay);
   renderSelectedExperimentTrace();
   renderReproduction();
-  coverageController?.inspectRun(rec);
+  // Live/status renders refresh the launch-owned run automatically; they
+  // must not revoke a pending launch's inspection ownership. Explicit
+  // history selection goes through openRun's own clear/selection.
+  coverageController?.inspectRun(rec, { automatic: true });
 }
 
 function renderProposals(rec: InvestigationRecord, display = describeProposals(rec)): void {
@@ -1779,7 +1788,7 @@ function renderReproductionDetail(): void {
   observedBox?.classList.toggle('is-violation', explanation.observedIsViolation);
   set('repro-observed-text', explanation.observed);
   const factsEl = reproEl('repro-generic-facts');
-  if (factsEl) { factsEl.textContent=''; const result = currentInvestigationRecord?.experiments[selectedExperimentIndex]?.result as (ExperimentResult & CoverageResultFields) | undefined; const facts = [...step.facts, ...(!reproUseRerun && !step.isGroup ? recordedRecoveryFacts(result?.scenarioCheckEvidence, step.tracePosition, currentInvestigationRecord?.systemBrief?.brief.adapterId ?? null) : [])]; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
+  if (factsEl) { factsEl.textContent=''; const result = currentInvestigationRecord?.experiments[selectedExperimentIndex]?.result as (ExperimentResult & CoverageResultFields) | undefined; const facts = [...step.facts, ...(!reproUseRerun && !step.isGroup ? recordedRecoveryFacts(result?.scenarioCheckEvidence, step.tracePosition, currentInvestigationRecord?.systemBrief?.brief.adapterId ?? null, result?.trace?.[step.tracePosition] ?? null) : [])]; if (!facts.length) { const li=document.createElement('li'); li.textContent='No recorded facts for this entry.'; factsEl.appendChild(li); } for (const f of facts) { const li=document.createElement('li'); li.textContent=f; factsEl.appendChild(li); } }
   const creditWrap = reproEl('repro-credit-wrap');
   if (creditWrap) creditWrap.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).creditVisible || !!step.isGroup);
   reproEl('repro-generic-facts-wrap')?.classList.toggle('hidden', !detailVisibility(true, model.evidence.creditRelevant).factsVisible);
@@ -1893,7 +1902,13 @@ async function openRun(id: string): Promise<void> {
     announce(`Opened saved run ${rec.id}.`);
   } catch (err) {
     if (!recordSequencer.isCurrent(token)) return;
-    coverageController?.inspectRun(null);
+    // Consistent cleared outcome: dashboard, current record, lifecycle
+    // inspection and coverage all clear together. Global live/stop
+    // bookkeeping (latestLive, start/stop state) is untouched.
+    currentInvestigationRecord = null;
+    lifecycle.clearInspection();
+    isInspectingHistory = false;
+    renderEmptyDashboard('Failed to open the selected saved run. Open a saved run explicitly.');
     showAlert(`Failed to open run: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -2129,7 +2144,7 @@ function setSystemSavePending(pending: boolean): void {
 function markUnsavedEdits(): void {
   renderRequirementRulePanel();
   hasUnsavedSystemEdits = true;
-  snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null;
+  snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; snapshotHash = null;
   setSaveStatus('draft', isDraftMode ? 'New Profile (Draft)' : 'Unsaved Edits (Draft)');
   clearContractDisplay();
   updateAdapterBadge(systemAdapterSelect.value);
@@ -2169,7 +2184,7 @@ function selectSystem(system: SystemBrief): void { recordSequencer.invalidate();
   updateActiveOtherSystemNotice();
   snapshotSequencer.invalidate();
   snapshotSystemId = system.id;
-  snapshotIdentity = null;
+  snapshotIdentity = null; snapshotHash = null;
   snapshotState = isExecutableAdapter(system.adapterId) ? 'loading' : 'none';
   clearContractDisplay();
   resetTargetChoices(isExecutableAdapter(system.adapterId) ? 'loading' : 'idle');
@@ -2273,24 +2288,25 @@ async function fetchSystemContract(systemId: string): Promise<void> {
       && !isDraftMode && !hasUnsavedSystemEdits,
     ),
     onLoading: () => {
-      snapshotState = 'loading'; snapshotSystemId = systemId; snapshotIdentity = null;
+      snapshotState = 'loading'; snapshotSystemId = systemId; snapshotIdentity = null; snapshotHash = null;
       updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
     },
     onReady: (snapshot) => {
       snapshotState = 'ready'; snapshotSystemId = snapshot.brief.id;
       snapshotIdentity = { id: snapshot.brief.id, revision: snapshot.brief.revision, adapterId: snapshot.brief.adapterId };
+      snapshotHash = snapshot.hash ?? null;
       currentContractRules = (snapshot.contract?.invariants ?? []).map(i => i.id);
       renderContract(snapshot.contract!);
       syncCoverageContext();
       updateRunReadiness();
     },
     onIncompatible: () => {
-      snapshotState = 'incompatible'; snapshotIdentity = null; currentContractRules = []; clearContractDisplay();
+      snapshotState = 'incompatible'; snapshotIdentity = null; snapshotHash = null; currentContractRules = []; clearContractDisplay();
       syncCoverageContext();
       updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
     },
     onError: (err) => {
-      snapshotState = 'error'; snapshotIdentity = null; currentContractRules = []; clearContractDisplay();
+      snapshotState = 'error'; snapshotIdentity = null; snapshotHash = null; currentContractRules = []; clearContractDisplay();
       syncCoverageContext();
       updateAdapterBadge(effectiveAdapter() ?? 'unconfigured'); updateRunReadiness();
       if (systemFeedback) {
@@ -2511,7 +2527,7 @@ if (btnNewSystem) {
     }
     isDraftMode = true;
     hasUnsavedSystemEdits = true;
-    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; clearContractDisplay(); resetTargetChoices();
+    snapshotSequencer.invalidate(); snapshotState = 'none'; snapshotSystemId = null; snapshotIdentity = null; snapshotHash = null; clearContractDisplay(); resetTargetChoices();
     const newId = `profile-${Date.now().toString(36)}`;
     systemIdInput.value = newId;
     systemIdInput.readOnly = false;

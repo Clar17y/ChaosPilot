@@ -88,6 +88,21 @@ describe('recovery deadline transitions', () => {
       violationId: 'v-unobserved', invariant: 'recovery_deadline', reproduced: true, cleanControlPassed: true };
     expect(row(project([lost], [finding]), 'recovery-by-deadline').status).toBe('inconclusive');
   });
+  it('acceptance and reconnect ticks each require an actual trace anchor; a shifted reconnect without one is inconclusive (R-04)', () => {
+    const completed = check('recovery-by-deadline', facts());
+    for (const missingTick of [5, 10, 14, 20]) {
+      const unreferenced = { ...completed, traceRefs: completed.traceRefs.filter(ref => ref.tick !== missingTick) };
+      expect(row(project([unreferenced]), 'recovery-by-deadline').status, `missing tick ${missingTick}`).toBe('inconclusive');
+    }
+    // Reconnect/deadline shifted to ticks with no trace entry at all.
+    const shifted = check('recovery-by-deadline', facts({ reconnectTick: 11, deadlineTick: 16, completionTick: 16, horizonTick: 20 }));
+    expect(row(project([shifted]), 'recovery-by-deadline').status).toBe('inconclusive');
+    // A lost-backlog failure also needs its acceptance/reconnect anchors.
+    const lost = check('recovery-by-deadline', facts({ completionTick: undefined, horizonTick: 15,
+      observed: { ...accounting, applicationCount: 0 } }), { outcome: 'failed', violationId: 'v-lost-anchor' });
+    const lostNoAccept = { ...lost, traceRefs: lost.traceRefs.filter(ref => ref.tick !== 5) };
+    expect(row(project([lostNoAccept]), 'recovery-by-deadline').status).toBe('inconclusive');
+  });
   it('cancellation preserves unexercised intentions and unresolved pre-deadline checks', () => {
     const stop = { status: 'cancelled' as const, reason: 'User stopped investigation' };
     expect(row(project([], [], stop, false), 'recovery-by-deadline').status).toBe('planned');

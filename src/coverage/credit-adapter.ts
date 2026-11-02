@@ -29,7 +29,7 @@ export function adaptCreditEvidenceToScenarioCheck(params: {
     || result.deliveryObservations.filter(o => o.traceIndex === d.traceIndex).length !== 1
     || !result.deliveryObservations.some(o => JSON.stringify(o) === JSON.stringify(d))
     || !['deliver', 'drain:deliver'].includes(d.action) || d.channel !== 'client' || d.messageType !== 'new_order'
-    || d.payloadValid !== true || !['accepted', 'rejected'].includes(d.status)) return null;
+    || d.payloadValid !== true || !['accepted', 'rejected', 'exception'].includes(d.status)) return null;
   const t = result.trace?.[d.traceIndex];
   if (!t || t.step !== d.step || t.messageId !== d.messageId || t.action !== d.action || !amount(t.time)) return null;
   const events = rule.evidence?.filter(e => e.traceIndex === d.traceIndex && e.step === d.step && e.action === d.action && e.messageId === d.messageId);
@@ -37,7 +37,11 @@ export function adaptCreditEvidenceToScenarioCheck(params: {
   const event = events[0];
   if (!event) return null;
   let outcome: ScenarioCheckEvidence['outcome'] = 'inconclusive';
-  if (d.status === 'rejected') {
+  if (d.status === 'exception') {
+    // Acceptance is unknown after a target exception; never claim reached.
+    if (event.status !== 'inconclusive') return null;
+    outcome = 'inconclusive';
+  } else if (d.status === 'rejected') {
     if (event.status !== 'target-rejected') return null;
     outcome = 'not-checked';
   } else if (amount(d.usedCredit) && amount(d.reservedCredit) && amount(d.creditLimit) && Number.isSafeInteger(d.usedCredit + d.reservedCredit)) {
@@ -49,7 +53,7 @@ export function adaptCreditEvidenceToScenarioCheck(params: {
   return {
     schemaVersion: 1, id: JSON.stringify(['credit', experimentIndex, rule.requirement, d.traceIndex, d.messageId]),
     scenarioId: 'accepted-order-credit-limit', evaluator: { ...COVERAGE_EVALUATOR }, context: { ...context }, experimentIndex,
-    trigger: d.status === 'accepted' ? 'reached' : 'not-reached', outcome,
+    trigger: d.status === 'accepted' ? 'reached' : d.status === 'exception' ? 'unknown' : 'not-reached', outcome,
     traceRefs: [{ traceIndex: d.traceIndex, step: d.step, tick: t.time, messageId: d.messageId }],
     facts: { kind: 'credit-admission', requirement: rule.requirement, requirementEvaluator: { ...rule.evaluator }, messageId: d.messageId,
       payloadValid: d.payloadValid, deliveryStatus: d.status, usedCredit: d.usedCredit, reservedCredit: d.reservedCredit, creditLimit: d.creditLimit },
