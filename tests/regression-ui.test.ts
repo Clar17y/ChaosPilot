@@ -837,4 +837,141 @@ describe('RegressionController: context/finding transitions, pending guards, and
     expect(elementsById.get('regression-results-card')!.classList.contains('hidden')).toBe(false);
     expect(elementsById.get('regression-run-badge')!.textContent).toBe('Failed');
   });
+
+  describe('Regression preview presentation & responsive readability', () => {
+    it('replaces the wide table with clean stacked delivery cards showing all assertions', async () => {
+      const { preview } = await createRegressionFixture();
+      const html = regressionPreviewHtml(preview, 1);
+
+      // Verify wide 5-column table is removed from deliveries
+      expect(html).not.toContain('<th>Expected Credit / Quote</th>');
+      expect(html).not.toContain('<th>Expected Orders &amp; Absence</th>');
+
+      // Verify stacked cards and container exist
+      expect(html).toContain('milestones-stack');
+      expect(html).toContain('milestone-card');
+
+      // Verify delivery details: step, trace, action, message ID, channel, type
+      for (const d of preview.expected.deliveries) {
+        expect(html).toContain(`Step ${d.step + 1}`);
+        expect(html).toContain(`trace ${d.traceIndex}`);
+        expect(html).toContain(d.messageId);
+        expect(html).toContain(d.channel);
+        expect(html).toContain(d.messageType);
+        expect(html).toContain(d.expectedStatus.toUpperCase());
+        if (d.expectedReason) {
+          expect(html).toContain(d.expectedReason);
+        }
+        if (d.expectedState.stateUnchangedFromPrevious) {
+          expect(html).toContain('state unchanged');
+        }
+        // Labelled credit and quote metrics
+        expect(html).toContain(`Used credit:</span> <span class="metric-val">${d.expectedState.usedCredit}</span>`);
+        expect(html).toContain(`Reserved credit:</span> <span class="metric-val">${d.expectedState.reservedCredit}</span>`);
+      }
+    });
+
+    it('renders complete reviewable order fields and discriminates zero/null/absent states', async () => {
+      const { preview } = await createRegressionFixture();
+
+      // Create a cloned preview with specific test cases:
+      // 1. A delivery with populated order with all 9 persisted fields
+      // 2. A delivery with empty orders ({})
+      // 3. A delivery with asserted absent order IDs
+      // 4. A delivery with empty absent order IDs and null quote/limit
+      const customPreview = structuredClone(preview);
+      const deliveryWithOrder = customPreview.expected.deliveries[0]!;
+      deliveryWithOrder.expectedState.orders = {
+        'test-ord-1': {
+          orderId: 'test-ord-1',
+          quoteId: 'q-99',
+          price: 150,
+          initialQuantity: 10,
+          remainingQuantity: 6,
+          filledQuantity: 4,
+          cancelledQuantity: 0,
+          cancellationRequested: false,
+          status: 'OPEN',
+        },
+      };
+      deliveryWithOrder.expectedState.absentOrderIds = ['absent-ord-x', 'absent-ord-y'];
+
+      const deliveryEmpty = customPreview.expected.deliveries[1]!;
+      deliveryEmpty.expectedState.orders = {};
+      deliveryEmpty.expectedState.absentOrderIds = [];
+      deliveryEmpty.expectedState.creditLimit = null;
+      deliveryEmpty.expectedState.quote = null;
+
+      const html = regressionPreviewHtml(customPreview, 1);
+
+      // Verify all 9 order fields are rendered for test-ord-1
+      expect(html).toContain('Order <code>test-ord-1</code>');
+      expect(html).toContain('q-99');
+      expect(html).toContain('>150<');
+      expect(html).toContain('>10<');
+      expect(html).toContain('>6<');
+      expect(html).toContain('>4<');
+      expect(html).toContain('>0<');
+      expect(html).toContain('>false<');
+      expect(html).toContain('OPEN');
+
+      // Verify explicit absent orders
+      expect(html).toContain('absent-ord-x');
+      expect(html).toContain('absent-ord-y');
+
+      // Verify explicit empty states
+      expect(html).toContain('No orders expected in active state');
+      expect(html).toContain('No absence assertions');
+      expect(html).toContain('Credit limit:</span> <span class="metric-val">null</span>');
+      expect(html).toContain('Active quote:</span> <span class="metric-val">null</span>');
+    });
+
+    it('escapes hostile dynamic values in orders, reasons, and message fields', async () => {
+      const { preview } = await createRegressionFixture();
+      const hostilePreview = structuredClone(preview);
+      const d = hostilePreview.expected.deliveries[0]!;
+      const hostile = '<script>alert("xss")</script>';
+      d.expectedReason = hostile;
+      d.targetOrderId = hostile;
+      d.expectedState.orders = {
+        [hostile]: {
+          orderId: hostile,
+          quoteId: hostile,
+          price: 100,
+          initialQuantity: 1,
+          remainingQuantity: 1,
+          filledQuantity: 0,
+          cancelledQuantity: 0,
+          cancellationRequested: true,
+          status: 'OPEN',
+        },
+      };
+      d.expectedState.absentOrderIds = [hostile];
+
+      const html = regressionPreviewHtml(hostilePreview, 1);
+
+      // HTML escaping must prevent any unescaped tags
+      expect(html).not.toContain('<script>alert("xss")</script>');
+      expect(html).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    });
+
+    it('preserves clean-control provenance, review requirements, and disclosure keys', async () => {
+      const { preview } = await createRegressionFixture();
+      const html = regressionPreviewHtml(preview, 1);
+
+      expect(html).toContain(preview.expected.referenceProvenance.reviewLabel);
+      expect(html).toContain(preview.expected.referenceProvenance.note);
+      expect(html).toContain('data-disclosure-key="preview-deliveries"');
+      expect(html).toContain('data-disclosure-key="preview-origin"');
+      expect(html).toContain('Proposed definition ID:');
+      expect(html).toContain('Clean reference source');
+      const visibleSummary = html.slice(0, html.indexOf('<details'));
+      expect(visibleSummary).not.toContain(preview.origin.sourceHash);
+      expect(visibleSummary).not.toContain(preview.origin.cleanSourceHash);
+      const originDetails = html.slice(html.indexOf('data-disclosure-key="preview-origin"'));
+      expect(originDetails).toContain(preview.origin.sourceHash);
+      expect(originDetails).toContain(preview.origin.cleanSourceHash);
+      expect(originDetails).toContain('expectedDeliveries');
+    });
+  });
 });
