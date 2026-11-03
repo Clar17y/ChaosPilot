@@ -1,10 +1,11 @@
 import {
-  TARGET_VARIANTS, INVENTORY_TARGET_VARIANTS,
+  TARGET_VARIANTS, INVENTORY_TARGET_VARIANTS, RECOVERY_TARGET_VARIANTS,
   type Experiment, type ExperimentResult, type SourceBundle,
   type SystemBriefSnapshot, type SystemContract, type TargetVariant,
 } from '../domain.ts';
 import * as trading from '../simulator/index.ts';
 import * as inventory from '../inventory/index.ts';
+import * as recovery from '../recovery/index.ts';
 import { canonicalJson } from '../evidence.ts';
 
 /**
@@ -43,6 +44,14 @@ const ADAPTER_REGISTRY: ReadonlyMap<string, AdapterRegistration> = new Map([
     getSourceBundle: inventory.getSourceBundle,
     parseExperiment: inventory.parseExperiment,
     executeExperiment: inventory.executeExperiment,
+  }],
+  ['synthetic-trading-recovery', {
+    id: 'synthetic-trading-recovery',
+    variants: RECOVERY_TARGET_VARIANTS,
+    getContract: recovery.getContract,
+    getSourceBundle: recovery.getSourceBundle,
+    parseExperiment: recovery.parseExperiment,
+    executeExperiment: recovery.executeExperiment,
   }],
 ]);
 

@@ -5,6 +5,7 @@ import { canonicalJson, compareSemanticReplay, computeContractHash, computeLegac
 import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { evidenceHashOf, type ExplanationTransport } from '../explanations/index.ts';
 import { metaExplanationTransport } from '../explanations/meta-transport.ts';
+import { isRecoveryDeadlineCleanControlConfirmed } from '../investigation/index.ts';
 import { replaySelectedExperiment } from '../storage.ts';
 import { challengeInFlight, readChallenges, readChallengeSource, saveChallenge, withChallengeGeneration } from './storage.ts';
 import type { ChallengeBinding, ChallengeProposal, ChallengeRecord, ChallengeRequest, ChallengeVariant, ChallengeView } from './types.ts';
@@ -69,6 +70,7 @@ export function parseChallengeExperiment(raw: unknown, adapter: AdapterRegistrat
     send: ['op', 'id', 'to', 'payload', 'delay'], duplicate: ['op', 'messageId', 'id', 'delay'],
     deliver: ['op', 'messageId'], advance: ['op', 'ticks'], drain: ['op'],
     fill: ['op', 'messageId', 'orderId', 'executionId', 'quantity', 'delay'], confirm_cancel: ['op', 'messageId', 'orderId', 'delay'],
+    disconnect: ['op'], reconnect: ['op'],
   };
   for (const step of raw.steps) {
     if (!object(step) || typeof step.op !== 'string' || !Object.hasOwn(fields, step.op)) throw new Error('Unsupported challenge action');
@@ -172,7 +174,8 @@ export async function prepareChallenge(record: InvestigationRecord, findingId: s
     if (cv.category) cleanViolatedCategories.add(cv.category);
   }
   const cleanBlocks = cleanViolatedInvariants.has(invariant)
-    || Boolean(category && cleanViolatedCategories.has(category));
+    || Boolean(category && cleanViolatedCategories.has(category))
+    || ((invariant === 'recovery_deadline' || category === 'recovery_deadline') && !isRecoveryDeadlineCleanControlConfirmed(finding.violation, saved.result, clean));
   if (clean.sourceHash !== cleanSourceHash || !completed(clean) || cleanBlocks) throw new Error('Recorded original clean control cannot be independently verified');
   return { adapter, original, finding, binding: {
     runId: record.id, findingId, evidenceHash: evidenceHashOf(record), runRevision: revision,
@@ -198,7 +201,32 @@ export function classifyVariant(proposal: ChallengeProposal, binding: ChallengeB
   if (replay && replay.sourceHash !== binding.sourceHash) replayMismatches.push('Replay does not have the expected source identity');
   const replayStatus = evidence.replayError ? 'error' : !comparison ? 'unavailable' : comparison.matched && !replayMismatches.length ? 'matched' : 'mismatch';
   const cleanViolates = clean?.violations.some(v => v.invariant === binding.invariant || (Boolean(binding.category) && v.category === binding.category)) === true;
-  const cleanStatus = evidence.cleanError ? 'error' : !clean ? 'unavailable' : clean.sourceHash !== binding.cleanSourceHash ? 'source-mismatch' : !completed(clean) ? 'invalid-or-incomplete' : cleanViolates ? 'failed' : 'passed';
+  const recoveryCleanConfirmed =
+    binding.invariant === 'recovery_deadline' || binding.category === 'recovery_deadline'
+      ? Boolean(
+          clean &&
+            candidate &&
+            same &&
+            isRecoveryDeadlineCleanControlConfirmed(
+              candidate.violations.find(v => v.invariant === binding.invariant)!,
+              candidate,
+              clean,
+            ),
+        )
+      : true;
+  const cleanStatus = evidence.cleanError
+    ? 'error'
+    : !clean
+      ? 'unavailable'
+      : clean.sourceHash !== binding.cleanSourceHash
+        ? 'source-mismatch'
+        : !completed(clean)
+          ? 'invalid-or-incomplete'
+          : cleanViolates
+            ? 'failed'
+            : !recoveryCleanConfirmed
+              ? 'invalid-or-incomplete'
+              : 'passed';
   return {
     ...proposal, ...(candidate ? { candidate } : {}), ...(replay ? { replay } : {}), ...(clean ? { clean } : {}),
     candidateStatus, sameInvariant: same ? 'observed' : candidateStatus === 'completed' ? 'absent' : 'unavailable',

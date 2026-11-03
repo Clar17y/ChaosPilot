@@ -3,6 +3,9 @@ import type { ProviderContext } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
 import { INVENTORY_PROMPT_VERSION, INVENTORY_SYSTEM_PROMPT, INVENTORY_PROMPT_TEMPLATE_HASH } from './inventory-prompt.ts';
 import { buildLanguagePromptInstruction } from '../output-language.ts';
+import { RECOVERY_PROMPT_VERSION, RECOVERY_SYSTEM_PROMPT, RECOVERY_PROMPT_TEMPLATE_HASH } from './recovery-prompt.ts';
+
+export { RECOVERY_PROMPT_VERSION, RECOVERY_SYSTEM_PROMPT, RECOVERY_PROMPT_TEMPLATE_HASH };
 
 export const PROMPT_VERSION = '3.1';
 
@@ -162,6 +165,9 @@ export function buildInvestigationPrompt(context: ProviderContext, historyWindow
   if (userBriefSection) {
     userMessageParts.push(userBriefSection);
   }
+  if (context.reviewedScenarios?.length) {
+    userMessageParts.push('', 'REVIEWED PUBLIC SCENARIO GOALS (intentions, not execution evidence):', JSON.stringify(context.reviewedScenarios, null, 2));
+  }
   userMessageParts.push(
     '',
     'SYSTEM CONTRACT:',
@@ -195,5 +201,6 @@ export function buildInvestigationPrompt(context: ProviderContext, historyWindow
 export function getPromptIdentity(adapterId = 'synthetic-trading') {
   if (adapterId === 'synthetic-trading') return { promptVersion: PROMPT_VERSION, promptTemplateHash: PROMPT_TEMPLATE_HASH, systemMessage: SYSTEM_PROMPT_TEMPLATE };
   if (adapterId === 'inventory-reservation') return { promptVersion: INVENTORY_PROMPT_VERSION, promptTemplateHash: INVENTORY_PROMPT_TEMPLATE_HASH, systemMessage: INVENTORY_SYSTEM_PROMPT };
+  if (adapterId === 'synthetic-trading-recovery') return { promptVersion: RECOVERY_PROMPT_VERSION, promptTemplateHash: RECOVERY_PROMPT_TEMPLATE_HASH, systemMessage: RECOVERY_SYSTEM_PROMPT };
   throw new Error(`Unsupported prompt adapter: ${adapterId}`);
 }

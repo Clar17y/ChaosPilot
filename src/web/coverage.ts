@@ -319,6 +319,10 @@ export function renderCoveragePreparation(
   state: CoverageViewState,
   onToggle: (scenarioId: CoverageScenarioId, reviewed: boolean) => void
 ): void {
+  const focused = document.activeElement;
+  const focusedScenario = focused && container.contains(focused)
+    ? focused.getAttribute('data-coverage-scenario') : null;
+  let focusTarget: HTMLInputElement | undefined;
   container.replaceChildren();
 
   // A revalidation failure or missing preparation must not hide why a
@@ -408,8 +412,10 @@ export function renderCoveragePreparation(
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'coverage-intention-checkbox';
+      cb.setAttribute('data-coverage-scenario', sug.scenarioId);
       cb.checked = state.reviewedIntentions[sug.scenarioId] === true;
       cb.addEventListener('change', () => onToggle(sug.scenarioId, cb.checked));
+      if (sug.scenarioId === focusedScenario) focusTarget = cb;
 
       const title = document.createElement('strong');
       title.textContent = sug.title;
@@ -480,6 +486,7 @@ export function renderCoveragePreparation(
   }
 
   container.appendChild(panel);
+  focusTarget?.focus({ preventScroll: true });
 }
 
 export function renderCoverageProjection(

@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { assertAdapterVariant } from './adapters/index.ts';
-import { SEEDED_INVENTORY_BRIEF } from './systems/index.ts';
+import { SEEDED_INVENTORY_BRIEF, SEEDED_RECOVERY_BRIEF } from './systems/index.ts';
 import { replayOutcome } from './web/presentation.ts';
 import {
   TARGET_VARIANTS,
@@ -207,6 +207,7 @@ Usage:
 
 Commands:
   inventory-init    Save the default inventory profile (create only)
+  recovery-init     Save the default recovery profile (create only)
   investigate       Launch an investigation against a target variant
   evaluate          Compare baseline conventional generator vs provider
   benchmark         Run controlled 3-way benchmarking (Baseline vs Wonder vs Spark)
@@ -235,7 +236,11 @@ Options:
 `);
 }
 
-function defaultTargetForAdapter(adapterId: string): TargetVariant { return adapterId === 'inventory-reservation' ? 'inventory-candidate-a' : 'candidate-a'; }
+function defaultTargetForAdapter(adapterId: string): TargetVariant {
+  if (adapterId === 'inventory-reservation') return 'inventory-candidate-a';
+  if (adapterId === 'synthetic-trading-recovery') return 'recovery-candidate-a';
+  return 'candidate-a';
+}
 
 async function handleInvestigate(args: ParsedArgs): Promise<void> {
   const providerKind = args.provider;
@@ -654,6 +659,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const saved = await getSystemBrief(SEEDED_INVENTORY_BRIEF.id, systemsDir);
       if (!saved) throw new Error('Failed to seed inventory system');
       console.log(`Saved inventory system ${saved.id} in ${systemsDir}`);
+      break;
+    }
+    case 'recovery-init': {
+      const systemsDir = args.systemsDir ?? path.join(args.runsDir ?? 'runs', 'systems');
+      const saved = await getSystemBrief(SEEDED_RECOVERY_BRIEF.id, systemsDir);
+      if (!saved) throw new Error('Failed to seed recovery system');
+      console.log(`Saved recovery system ${saved.id} in ${systemsDir}`);
       break;
     }
     case 'investigate':

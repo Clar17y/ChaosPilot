@@ -1,3 +1,6 @@
+import { normalizeOutputLanguage } from '../output-language.ts';
+import type { ApiResponseLike } from './request-boundaries.ts';
+
 export type ReportUiState =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -25,6 +28,36 @@ export class FindingExplanationSession {
   begin(runId: string, kind: 'loading' | 'generating'): number { this.runId = runId; this.state = { kind }; return ++this.seq; }
   isCurrent(token: number, runId: string): boolean { return token === this.seq && this.runId === runId; }
   settle(token: number, runId: string, state: ReportUiState): boolean { if (!this.isCurrent(token, runId)) return false; this.state = state; return true; }
+
+  async create(
+    record: { id: string; status: string; findings: unknown[] },
+    mode: 'meta' | 'offline',
+    language: string,
+    changed: () => void,
+    fetcher: (url: string, init: RequestInit) => Promise<ApiResponseLike> = (url, init) => fetch(url, init),
+  ): Promise<boolean> {
+    if (this.state.kind === 'generating' || record.status === 'running' || !record.findings.length) return false;
+    const operationLanguage = normalizeOutputLanguage(language);
+    const token = this.begin(record.id, 'generating');
+    changed();
+    try {
+      const res = await fetcher(`/api/runs/${encodeURIComponent(record.id)}/explanation-report`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, language: operationLanguage }),
+      });
+      const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `Report creation failed (${res.status})`);
+      if (!this.settle(token, record.id, {
+        kind: 'saved', generatedAt: String(data.generatedAt ?? ''), mode: String(data.mode ?? mode),
+        model: String(data.model ?? ''), language: normalizeOutputLanguage(data.language ?? operationLanguage),
+      })) return false;
+      changed();
+      return true;
+    } catch (error) {
+      if (this.settle(token, record.id, { kind: 'error', message: error instanceof Error ? error.message : String(error) })) changed();
+      return false;
+    }
+  }
 }
 export function reportStatusToUi(s: { exists?: boolean; stale?: boolean; inFlight?: boolean; terminal?: boolean; findingsCount?: number; generatedAt?: string; mode?: string; model?: string; language?: string } | null): ReportUiState {
   if (!s) return { kind: 'unavailable', message: 'Report status unavailable.' };

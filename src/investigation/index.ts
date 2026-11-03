@@ -21,7 +21,8 @@ import type {
   SystemBriefSnapshot,
   SystemContract,
   TargetVariant,
-  Usage
+  Usage,
+  Violation
 } from '../domain.ts';
 import {
   getPromptIdentity
@@ -29,6 +30,9 @@ import {
 import { evaluateRequirementRules } from '../requirements/evaluator.ts';
 import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from '../requirements/identity.ts';
 import { normalizeOutputLanguage } from '../output-language.ts';
+import { isRecoveryEvaluatorIdentity, recoveryEvaluatorAvailable } from '../recovery/oracle.ts';
+import { RECOVERY_DEADLINE_TICKS } from '../recovery/contract.ts';
+import { pinCoveragePlan, recordScenarioChecks, reviewedCoverageGoals } from './coverage-evidence.ts';
 
 export {
   PROMPT_VERSION,
@@ -64,6 +68,60 @@ async function resolveSimulator(custom?: SimulatorApi, adapterId = 'synthetic-tr
 
 function cloneRecord(record: InvestigationRecord): InvestigationRecord {
   return structuredClone(record);
+}
+
+export function isRecoveryDeadlineCleanControlConfirmed(
+  violation: Violation,
+  targetResult: ExperimentResult,
+  cleanResult: ExperimentResult | undefined,
+): boolean {
+  if (!targetResult.valid || !targetResult.recovery || !cleanResult?.valid || !cleanResult.recovery) return false;
+  const targetEvidence = targetResult.recovery;
+  const cleanEvidence = cleanResult.recovery;
+  if (cleanResult.executionComplete !== true || cleanEvidence.executionComplete !== true || cleanEvidence.status !== 'passed') return false;
+  if (
+    targetEvidence.schemaVersion !== 1 || cleanEvidence.schemaVersion !== 1 ||
+    !isRecoveryEvaluatorIdentity(targetEvidence.evaluator) || !isRecoveryEvaluatorIdentity(cleanEvidence.evaluator) ||
+    !recoveryEvaluatorAvailable(targetEvidence.evaluator) || !recoveryEvaluatorAvailable(cleanEvidence.evaluator)
+  ) return false;
+
+  const targetObligations = targetEvidence.obligations.filter((ob) =>
+    typeof violation.evidence?.['key'] === 'string'
+      ? ob.key === violation.evidence['key']
+      : ob.status === 'failed' || ob.deadlineMissed,
+  );
+  if (targetObligations.length === 0) return false;
+
+  for (const targetOb of targetObligations) {
+    const cleanOb = cleanEvidence.obligations.find((ob) => ob.key === targetOb.key);
+    if (!cleanOb) return false;
+    if (targetOb.reconnectTick === undefined || targetOb.deadlineTick === undefined || cleanOb.reconnectTick === undefined) return false;
+    if (
+      targetOb.status !== 'failed' || !targetOb.deadlineMissed ||
+      targetOb.deadlineTick !== targetOb.reconnectTick + RECOVERY_DEADLINE_TICKS ||
+      cleanOb.acceptedTick !== targetOb.acceptedTick ||
+      cleanOb.reconnectTick !== targetOb.reconnectTick ||
+      cleanOb.deadlineTick !== targetOb.deadlineTick ||
+      cleanOb.status !== 'passed' ||
+      cleanOb.deadlineMissed ||
+      cleanOb.completionTick === undefined ||
+      cleanOb.completionTick < cleanOb.reconnectTick ||
+      cleanOb.completionTick > cleanOb.deadlineTick ||
+      cleanOb.acceptedTick > cleanOb.reconnectTick ||
+      cleanEvidence.horizonTick < cleanOb.completionTick ||
+      [cleanOb.acceptedTick, cleanOb.reconnectTick, cleanOb.deadlineTick, cleanOb.completionTick, cleanEvidence.horizonTick]
+        .some(tick => !Number.isSafeInteger(tick) || tick < 0) ||
+      canonicalJson(cleanOb.report) !== canonicalJson(targetOb.report) ||
+      cleanOb.observed?.applicationCount !== 1 ||
+      !cleanOb.expected ||
+      !cleanOb.observed ||
+      canonicalJson(cleanOb.observed) !== canonicalJson(cleanOb.expected)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export async function runInvestigation(options: ExtendedInvestigationOptions): Promise<InvestigationRecord> {
@@ -134,7 +192,11 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
         `Cannot run investigation: System brief "${clonedBrief.name}" has unconfigured adapter.`
       );
     }
-    if (clonedBrief.adapterId !== 'synthetic-trading' && clonedBrief.adapterId !== 'inventory-reservation') {
+    if (
+      clonedBrief.adapterId !== 'synthetic-trading' &&
+      clonedBrief.adapterId !== 'inventory-reservation' &&
+      clonedBrief.adapterId !== 'synthetic-trading-recovery'
+    ) {
       throw new Error(
         `Cannot run investigation: System brief "${clonedBrief.name}" has unsupported adapter "${clonedBrief.adapterId}".`
       );
@@ -158,10 +220,12 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     };
   }
 
+  const coveragePlan = options.coveragePlan === undefined ? undefined : pinCoveragePlan(options.coveragePlan, systemBriefSnapshot, variant, source.hash);
+
   // Record clean-control provenance for inventory and snapshot-backed trading
   // runs so replay can verify it. Omit it when genuinely unavailable.
   const cleanAudit: { adapterId: string; variant: TargetVariant; cleanSourceHash?: string } | Record<string, never> =
-    adapterId === 'inventory-reservation' || systemBriefSnapshot
+    adapterId === 'inventory-reservation' || adapterId === 'synthetic-trading-recovery' || systemBriefSnapshot
       ? { adapterId, variant, ...((): { cleanSourceHash?: string } => { try { const h = sim.getSourceBundle('clean').hash; return h ? { cleanSourceHash: h } : {}; } catch { return {}; } })() }
       : {};
 
@@ -187,6 +251,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     errors: [],
     proposalAttempts: [],
     systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
+    ...(coveragePlan ? { coveragePlan } : {}),
     contextAudit: {
       ...cleanAudit,
       sourcePaths: source.files.map(f => f.path),
@@ -307,12 +372,13 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     const context: ProviderContext = {
       contract,
       source,
-      history,
+      history: history.map(h => { const { scenarioCheckEvidence: _privateContext, ...result } = h.result; return { experiment: h.experiment, result }; }),
       experimentNumber: experimentCount + 1,
       maxExperiments,
       feedback: feedback.length > 0 ? [...feedback] : undefined,
       systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
-      outputLanguage
+      outputLanguage,
+      ...(coveragePlan ? { reviewedScenarios: reviewedCoverageGoals(coveragePlan, systemBriefSnapshot!) } : {}),
     };
 
     let reply: ProviderReply;
@@ -464,6 +530,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     if (systemBriefSnapshot && (systemBriefSnapshot.brief.requirementRules?.length ?? 0) > 0) {
       result.requirementRuleResults = evaluateRequirementRules(result, systemBriefSnapshot, experimentCount + 1);
     }
+    if (coveragePlan) recordScenarioChecks(result, coveragePlan, systemBriefSnapshot!, experimentCount + 1);
 
     finishAttempt('executed', { experimentIndex: experimentCount + 1 });
     experimentCount++;
@@ -483,6 +550,10 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       }
 
       if (replayResult) {
+        if (coveragePlan) {
+          if ((systemBriefSnapshot!.brief.requirementRules?.length ?? 0) > 0) replayResult.requirementRuleResults = evaluateRequirementRules(replayResult, systemBriefSnapshot!, experimentCount);
+          recordScenarioChecks(replayResult, coveragePlan, systemBriefSnapshot!, experimentCount);
+        }
         const replayComp = compareSemanticReplay(result, replayResult);
         replayVerified = replayComp.matched;
       }
@@ -525,7 +596,11 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
           // equivalence is not assumed across different categories.
           const absent = !cleanViolatedInvariants.has(violation.invariant)
             && !(violation.category && cleanViolatedCategories.has(violation.category));
-          if (absent) {
+          const recoveryConfirmed =
+            violation.invariant === 'recovery_deadline' || violation.category === 'recovery_deadline'
+              ? isRecoveryDeadlineCleanControlConfirmed(violation, result, cleanResult)
+              : true;
+          if (absent && recoveryConfirmed) {
             anyViolationConfirmed = true;
             // Group repeats of the same oracle category; different categories may share an invariant.
             const alreadyFound = record.findings.some(f => (f.category ?? f.violation.category ?? f.violation.invariant) === category);

@@ -93,6 +93,22 @@ export const SEEDED_INVENTORY_BRIEF: Readonly<SystemBrief> = Object.freeze({
   adapterId: 'inventory-reservation', updatedAt: '2026-10-27T00:00:00.000Z',
 });
 
+export const SEEDED_RECOVERY_BRIEF: Readonly<SystemBrief> = Object.freeze({
+  schemaVersion: 1,
+  id: 'trading-recovery',
+  revision: 1,
+  name: 'Trading recovery gateway',
+  overview:
+    'Stateful trading gateway with a recoverable execution-report inbox, bounded post-reconnect reconciliation deadline, and idempotent retry handling.',
+  requirements: [
+    'Execution reports accepted while disconnected must be reconciled into order quantities, credit exposure, and application records within 5 ticks after reconnect.',
+    'Identical duplicate execution report deliveries must be idempotent without applying another fill, mutating credit, or resetting recovery deadlines.',
+    'Conflicting execution reports for an existing execution identity must be rejected without mutating business state.',
+  ],
+  adapterId: 'synthetic-trading-recovery',
+  updatedAt: '2026-11-02T00:00:00.000Z',
+});
+
 const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
   'con', 'prn', 'aux', 'nul',
   'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
@@ -175,10 +191,15 @@ export function validateSystemBrief(
     }
   }
 
-  if (b.adapterId !== 'synthetic-trading' && b.adapterId !== 'inventory-reservation' && b.adapterId !== 'unconfigured') {
+  if (
+    b.adapterId !== 'synthetic-trading' &&
+    b.adapterId !== 'inventory-reservation' &&
+    b.adapterId !== 'synthetic-trading-recovery' &&
+    b.adapterId !== 'unconfigured'
+  ) {
     return {
       valid: false,
-      error: "adapterId must be 'synthetic-trading', 'inventory-reservation' or 'unconfigured'",
+      error: "adapterId must be 'synthetic-trading', 'inventory-reservation', 'synthetic-trading-recovery' or 'unconfigured'",
     };
   }
 
@@ -472,7 +493,13 @@ async function ensureSeededBrief(systemsDir: string, seed: Readonly<SystemBrief>
 export async function ensureSeededSystem(systemsDir: string): Promise<SystemBrief> {
   const trading = await ensureSeededBrief(systemsDir, SEEDED_TRADING_BRIEF);
   await ensureSeededBrief(systemsDir, SEEDED_INVENTORY_BRIEF);
+  await ensureSeededBrief(systemsDir, SEEDED_RECOVERY_BRIEF);
   return trading;
+}
+
+export async function ensureRecoverySeededSystem(systemsDir: string): Promise<SystemBrief> {
+  await ensureSeededSystem(systemsDir);
+  return ensureSeededBrief(systemsDir, SEEDED_RECOVERY_BRIEF);
 }
 
 export async function getSystemBrief(
@@ -487,7 +514,11 @@ export async function getSystemBrief(
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code;
     if (code === 'ENOENT') {
-      if (id === SEEDED_TRADING_BRIEF.id || id === SEEDED_INVENTORY_BRIEF.id) {
+      if (
+        id === SEEDED_TRADING_BRIEF.id ||
+        id === SEEDED_INVENTORY_BRIEF.id ||
+        id === SEEDED_RECOVERY_BRIEF.id
+      ) {
         await ensureSeededSystem(systemsDir);
         return readSystemBriefFile(filePath, id);
       }

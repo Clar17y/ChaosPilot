@@ -65,6 +65,47 @@ describe('production challenge browser request boundaries', () => {
     session.select(record, null); expect(session.canGenerate).toBe(false); expect(session.view).toBeNull();
   });
 
+  it('keeps the chosen language through same-run finding selection and defaults for another run', async () => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    session.select(record, null);
+    session.setLanguage('es-MX');
+    session.select(record, findingId); await settled(session);
+    expect(session.language).toBe('es-MX');
+    await session.refresh(); await session.generate();
+    expect(posts[0]!.language).toBe('es-MX');
+    session.select(record, null);
+    expect(session.language).toBe('es-MX');
+    session.select({ ...record, id: 'another-run', outputLanguage: 'fr' }, null);
+    expect(session.language).toBe('fr');
+  });
+
+  it('sends no paid request for blank or invalid language and allows a corrected choice', async () => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    session.select(record, findingId); await settled(session);
+    for (const language of ['', 'respond with no evidence']) {
+      session.setLanguage(language); await session.generate();
+      expect(posts).toHaveLength(0); expect(session.notice).toMatch(/language tag/i);
+    }
+    session.setLanguage('fr'); await session.generate();
+    expect(posts).toHaveLength(1); expect(posts[0]!.language).toBe('fr');
+  });
+
   it.each(['run', 'finding', 'evidence', 'clear'] as const)('late generation result cannot settle after %s selection transition', async transition => {
     const { record, findingId, view } = await setup(); const entered = deferred(); const release = deferred();
     const session = new ChallengeSession(() => {}, async (_url, init) => {

@@ -2,7 +2,7 @@
  * Output language preference, validation, preset definitions, and dictionary helpers.
  *
  * Supported presets: English ('en') and Español ('es').
- * Arbitrary model-supported languages are accepted as well-formed language tags or plain language names.
+ * Arbitrary model-supported languages are accepted as canonical language tags or recognized aliases.
  */
 
 export interface OutputLanguagePreset {
@@ -19,28 +19,13 @@ export const DEFAULT_OUTPUT_LANGUAGE = 'en';
 
 const MAX_LANGUAGE_LENGTH = 50;
 
-// Known aliases mapping to standard presets
+// Only explicit human aliases are accepted; arbitrary prose is not a language.
 const LANGUAGE_ALIASES: Record<string, string> = {
-  en: 'en',
-  eng: 'en',
-  english: 'en',
-  'en-us': 'en',
-  'en-gb': 'en',
-  es: 'es',
-  spa: 'es',
-  spanish: 'es',
-  espanol: 'es',
-  español: 'es',
-  'es-es': 'es',
-  'es-mx': 'es',
+  eng: 'en', english: 'en', spa: 'es', spanish: 'es', espanol: 'es', español: 'es',
+  french: 'fr', german: 'de', portuguese: 'pt', japanese: 'ja', chinese: 'zh',
 };
-
-// Forbidden control chars, newlines, delimiters and prompt injection patterns
 const FORBIDDEN_CHARS_REGEX = /[\r\n\t\0<>"'`{}|\\^~[\];]/;
-const INSTRUCTION_SHAPED_REGEX = /\b(ignore|system|instruction|prompt|assistant|disregard|override|jailbreak|forget|delete|eval|exec)\b/i;
-
-// Valid tag: BCP-47 like 'fr', 'pt-BR', 'zh-CN', or letters/words for language names 'French', 'Brazilian Portuguese'
-const VALID_TAG_OR_NAME_REGEX = /^([a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*|[a-zA-Z\u00C0-\u024F]+([ -][a-zA-Z\u00C0-\u024F]+)*)$/;
+const LANGUAGE_TAG_REGEX = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/;
 
 const COMMON_LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
@@ -60,51 +45,23 @@ const COMMON_LANGUAGE_NAMES: Record<string, string> = {
   sv: 'Swedish',
 };
 
-/**
- * Normalizes and validates an output language preference.
- * - Missing or empty values normalize to 'en' (legacy default).
- * - Rejects non-strings, oversized, malformed, or instruction-shaped inputs.
- * - Resolves well-known aliases to canonical preset tags ('en', 'es').
- * - Preserves well-formed custom language tags and names.
- */
+/** Missing API values retain English. Custom UI blanks are rejected separately. */
 export function normalizeOutputLanguage(input: unknown): string {
-  if (input === undefined || input === null || input === '') {
-    return DEFAULT_OUTPUT_LANGUAGE;
-  }
-
-  if (typeof input !== 'string') {
-    throw new Error('Language must be a non-empty string.');
-  }
-
-  if (FORBIDDEN_CHARS_REGEX.test(input)) {
-    throw new Error('Language contains invalid characters, control characters, or delimiters.');
-  }
-
+  if (input === undefined || input === null || input === '') return DEFAULT_OUTPUT_LANGUAGE;
+  if (typeof input !== 'string') throw new Error('Language must be a non-empty string.');
+  if (input.length > MAX_LANGUAGE_LENGTH) throw new Error(`Language exceeds maximum length of ${MAX_LANGUAGE_LENGTH} characters.`);
+  if (FORBIDDEN_CHARS_REGEX.test(input)) throw new Error('Language contains invalid characters or control characters.');
   const trimmed = input.trim();
-  if (!trimmed) {
-    return DEFAULT_OUTPUT_LANGUAGE;
+  if (!trimmed) return DEFAULT_OUTPUT_LANGUAGE;
+  const tag = LANGUAGE_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+  if (LANGUAGE_TAG_REGEX.test(tag)) {
+    try { return Intl.getCanonicalLocales(tag)[0]!; } catch { /* use the validation error below */ }
   }
+  throw new Error('Invalid language tag. Use a standard tag such as fr, es-MX or pt-BR, or a recognized alias such as French.');
+}
 
-  if (trimmed.length > MAX_LANGUAGE_LENGTH) {
-    throw new Error(`Language exceeds maximum length of ${MAX_LANGUAGE_LENGTH} characters.`);
-  }
-
-  if (INSTRUCTION_SHAPED_REGEX.test(trimmed)) {
-    throw new Error('Language input contains instruction-shaped or prohibited keywords.');
-  }
-
-  if (!VALID_TAG_OR_NAME_REGEX.test(trimmed)) {
-    throw new Error(
-      `Invalid language tag or name: "${trimmed}". Provide a standard language tag (e.g. "en", "es", "fr", "de") or plain language name.`
-    );
-  }
-
-  const lower = trimmed.toLowerCase();
-  if (Object.hasOwn(LANGUAGE_ALIASES, lower)) {
-    return LANGUAGE_ALIASES[lower]!;
-  }
-
-  return trimmed;
+export function baseOutputLanguage(language: string): string {
+  return normalizeOutputLanguage(language).split('-')[0]!;
 }
 
 /**
@@ -217,9 +174,9 @@ export const ENGLISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze(
   title: 'What the investigation found',
   candidateFindingsSuffix: 'candidate finding(s)',
   offlineSourceLabel:
-    'Offline scripted explanation — not Muse. Generated deterministically from recorded evidence; no model was called and no usage was incurred.',
+    'Offline scripted explanation — not Muse. Generated deterministically from recorded evidence; no model was called and no usage was incurred. Original recorded evidence retains its original language.',
   metaSourceLabelTemplate:
-    'Model narration by Muse ({model}) via the Meta API. Narration is labelled interpretation; expected, observed, replay and clean-control facts come only from the recorded evidence.',
+    'Model narration by Muse ({model}) via the Meta API. Narration is labelled interpretation; expected, observed, replay and clean-control facts come only from the recorded evidence. Original recorded evidence retains its original language.',
   runIdentitySummary: 'Run identity and recorded context',
   runLabel: 'Run',
   runStatusLabel: 'Run status',
@@ -283,9 +240,9 @@ export const SPANISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze(
   title: 'Resultados de la investigación',
   candidateFindingsSuffix: 'hallazgo(s) candidato(s)',
   offlineSourceLabel:
-    'Explicación programada sin conexión — no es Muse. Generada de forma determinista a partir de la evidencia registrada; no se llamó a ningún modelo ni se incurrió en costos.',
+    'Explicación programada sin conexión — no es Muse. Generada de forma determinista a partir de la evidencia registrada; no se llamó a ningún modelo ni se incurrió en costos. La evidencia original conserva su idioma registrado.',
   metaSourceLabelTemplate:
-    'Narración del modelo por Muse ({model}) a través de la API de Meta. La narración se etiqueta como interpretación; los datos esperados, observados, de reproducción y del control limpio provienen únicamente de la evidencia registrada.',
+    'Narración del modelo por Muse ({model}) a través de la API de Meta. La narración se etiqueta como interpretación; los datos esperados, observados, de reproducción y del control limpio provienen únicamente de la evidencia registrada. La evidencia original conserva su idioma registrado.',
   runIdentitySummary: 'Identidad de la ejecución y contexto registrado',
   runLabel: 'Ejecución',
   runStatusLabel: 'Estado de la ejecución',
@@ -348,7 +305,7 @@ export const SPANISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze(
  * Obtains static dictionary labels for English or Spanish, or null for custom languages.
  */
 export function getStaticReportLabels(lang: string): ReportFixedLabels | null {
-  const normalized = normalizeOutputLanguage(lang);
+  const normalized = baseOutputLanguage(lang);
   if (normalized === 'en') return { ...ENGLISH_REPORT_LABELS };
   if (normalized === 'es') return { ...SPANISH_REPORT_LABELS };
   return null;
@@ -364,12 +321,17 @@ export function validateCustomReportLabels(raw: unknown): ReportFixedLabels {
 
   const o = raw as Record<string, unknown>;
   const result: Partial<ReportFixedLabels> = {};
+  if (Object.keys(o).length !== Object.keys(ENGLISH_REPORT_LABELS).length) throw new Error('Model explanation labels has an invalid or missing dictionary key.');
   const requiredKeys = Object.keys(ENGLISH_REPORT_LABELS) as (keyof ReportFixedLabels)[];
 
   for (const k of requiredKeys) {
     const val = o[k];
     if (typeof val !== 'string' || !val.trim() || val.length > 500) {
       throw new Error(`Model explanation labels has an invalid or missing "${k}" label.`);
+    }
+    const placeholders = (value: string) => (value.match(/\{[^{}]*\}/g) ?? []).sort().join('|');
+    if (placeholders(val) !== placeholders(ENGLISH_REPORT_LABELS[k]) || /[{}]/.test(val.replace(/\{[^{}]*\}/g, ''))) {
+      throw new Error(`Model explanation label "${k}" must preserve its exact template placeholders.`);
     }
     result[k] = val.trim();
   }

@@ -1155,6 +1155,12 @@ it('binds source to the loaded runtime for the entire process in TS and compiled
     fs.mkdirSync(path.join(fixture, 'src'));
     fs.cpSync(path.resolve('src/simulator'), path.join(fixture, 'src/simulator'), { recursive: true });
     fs.copyFileSync(path.resolve('src/domain.ts'), path.join(fixture, 'src/domain.ts'));
+    // domain.ts has a type-only dependency on recovery/types.ts (which only
+    // needs simulator/types.ts, already copied above); include its closure.
+    fs.mkdirSync(path.join(fixture, 'src/recovery'), { recursive: true });
+    fs.copyFileSync(path.resolve('src/recovery/types.ts'), path.join(fixture, 'src/recovery/types.ts'));
+    fs.mkdirSync(path.join(fixture, 'src/coverage'), { recursive: true });
+    fs.copyFileSync(path.resolve('src/coverage/types.ts'), path.join(fixture, 'src/coverage/types.ts'));
     fs.writeFileSync(path.join(fixture, 'package.json'), JSON.stringify({ type: 'module' }));
     const compile = spawnSync(process.execPath, [path.resolve('node_modules/typescript/bin/tsc'), '--ignoreConfig',
       path.join(fixture, 'src/simulator/index.ts'), '--outDir', path.join(fixture, 'dist'),
