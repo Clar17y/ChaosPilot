@@ -1,4 +1,5 @@
 import { OutputLanguageControl } from './language-controls.ts';
+import { computeReportLinks, computeFindingReportHref } from './report-links.ts';
 import type { CoverageResultFields } from '../coverage/types.ts';
 import { initFunctionalWorkspaceView } from './functional.ts';
 import { initTargetApiWorkspaceView, type TargetApiController } from './target-api.ts';
@@ -463,6 +464,8 @@ function renderRequirementRulePanel(): void {
     }
     if (uniqueLines.includes(previous)) requirementRuleSelect.value = previous;
     requirementRuleSelect.disabled = isSystemSavePending || adapter !== 'synthetic-trading' || lines.length === 0;
+    const selectedDisplay = document.getElementById('requirement-rule-selected-text');
+    if (selectedDisplay) selectedDisplay.textContent = requirementRuleSelect.value;
   }
   if (btnAttachRequirementRule) btnAttachRequirementRule.disabled = isSystemSavePending || adapter !== 'synthetic-trading';
   if (requirementRuleReviewed) requirementRuleReviewed.disabled = isSystemSavePending || adapter !== 'synthetic-trading';
@@ -668,7 +671,7 @@ function renderFindingsView(): void {
         const explain = document.createElement('button'); explain.type = 'button'; explain.className = 'btn btn-primary btn-xs'; explain.textContent = 'Explain this finding';
         explain.setAttribute('aria-label', `Explain finding ${index + 1}: ${conciseFindingTitle(f)}`);
         explain.addEventListener('click', () => {
-          if (reportSession.state.kind === 'saved') { openSavedReport(false, index + 1); return; }
+          if (reportSession.state.kind === 'saved') { openSavedFindingReport(index + 1); return; }
           document.getElementById('explanation-report-panel')?.scrollIntoView({ block: 'start' });
           document.getElementById('btn-report-meta')?.focus();
           announce('Choose how to create a report explaining every finding in this run.');
@@ -718,7 +721,11 @@ function renderFindingsView(): void {
             panel.focus();
           }
         });
-        card.append(status, explain, go, challenge, saveReg); opened.appendChild(card);
+        const actions = document.createElement('div');
+        actions.className = 'row opened-finding-actions';
+        actions.append(explain, go, challenge, saveReg);
+        card.append(status, actions);
+        opened.appendChild(card);
       }
     }
   }
@@ -738,8 +745,25 @@ function renderReportPanel(): void {
   }
   const refresh = document.getElementById('btn-report-refresh') as HTMLButtonElement | null;
   if (refresh) refresh.disabled = ['loading', 'generating'].includes(reportSession.state.kind);
-  const saved = reportSession.state.kind === 'saved';
-  for (const id of ['btn-report-view', 'btn-report-download']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = !saved; }
+  const links = computeReportLinks(rec ? rec.id : null, reportSession.state.kind);
+  for (const [id, href] of [
+    ['btn-report-view', links.viewHref],
+    ['btn-report-download', links.downloadHref],
+  ] as const) {
+    const link = document.getElementById(id) as HTMLAnchorElement | null;
+    if (!link) continue;
+    if (links.canAccess && href) {
+      link.href = href;
+      link.removeAttribute('aria-disabled');
+      link.classList.remove('disabled');
+      link.removeAttribute('tabindex');
+    } else {
+      link.removeAttribute('href');
+      link.setAttribute('aria-disabled', 'true');
+      link.classList.add('disabled');
+      link.tabIndex = -1;
+    }
+  }
   if (statusEl) statusEl.textContent = !rec ? 'No run is currently opened.' : `${identity}: ${reportStateText(reportSession.state)}${reportLanguage.error ? ` ${reportLanguage.error}` : ''}`;
   document.getElementById('explanation-report-panel')?.setAttribute('aria-busy', String(['loading', 'generating'].includes(reportSession.state.kind)));
 }
@@ -772,10 +796,17 @@ async function createReport(mode: 'meta' | 'offline'): Promise<void> {
   }
 }
 
-function openSavedReport(download: boolean, findingNumber?: number): void {
-  const rec = currentInvestigationRecord; if (!rec || reportSession.state.kind !== 'saved') return;
-  const fragment = !download && findingNumber !== undefined ? `#finding-${findingNumber}` : '';
-  window.open(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report${download ? '?download=1' : ''}${fragment}`, '_blank', 'noopener');
+function openSavedFindingReport(findingNumber: number): void {
+  const href = computeFindingReportHref(currentInvestigationRecord?.id ?? null, findingNumber, reportSession.state.kind);
+  if (!href) return;
+  // Preserve native link navigation and the selected finding fragment.
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function updateActiveOtherSystemNotice(): void {
@@ -2066,7 +2097,15 @@ function setSaveStatus(type: 'saved' | 'draft' | 'error', text: string): void {
   systemSaveStatus.textContent = text;
 }
 
+function updateAdapterSelectedText(): void {
+  const display = document.getElementById('system-adapter-selected-text');
+  if (!display || !systemAdapterSelect) return;
+  const selected = systemAdapterSelect.options[systemAdapterSelect.selectedIndex];
+  display.textContent = selected ? selected.textContent : systemAdapterSelect.value;
+}
+
 function updateAdapterBadge(adapterId: string): void {
+  updateAdapterSelectedText();
   if (!systemAdapterBadge) return;
   systemAdapterBadge.textContent = adapterId;
   systemAdapterBadge.className = isExecutableAdapter(adapterId) ? 'system-badge badge-adapter-exec' : 'system-badge badge-adapter-unconfigured';
@@ -2532,8 +2571,11 @@ document.getElementById('btn-challenge-cancel')?.addEventListener('click', () =>
 document.getElementById('btn-challenge-refresh')?.addEventListener('click', () => { void challengeSession.refresh(); });
 document.getElementById('btn-report-meta')?.addEventListener('click', () => { void createReport('meta'); });
 document.getElementById('btn-report-offline')?.addEventListener('click', () => { void createReport('offline'); });
-document.getElementById('btn-report-view')?.addEventListener('click', () => openSavedReport(false));
-document.getElementById('btn-report-download')?.addEventListener('click', () => openSavedReport(true));
+for (const id of ['btn-report-view', 'btn-report-download']) {
+  document.getElementById(id)?.addEventListener('click', (e) => {
+    if (reportSession.state.kind !== 'saved') e.preventDefault();
+  });
+}
 
 alertClose.addEventListener('click', () => {
   hideAlert();
@@ -2734,6 +2776,12 @@ if (systemNameInput) systemNameInput.addEventListener('input', markUnsavedEdits)
 if (systemAdapterSelect) systemAdapterSelect.addEventListener('change', markUnsavedEdits);
 if (systemOverviewInput) systemOverviewInput.addEventListener('input', markUnsavedEdits);
 if (systemRequirementsInput) systemRequirementsInput.addEventListener('input', markUnsavedEdits);
+if (requirementRuleSelect) {
+  requirementRuleSelect.addEventListener('change', () => {
+    const selectedDisplay = document.getElementById('requirement-rule-selected-text');
+    if (selectedDisplay) selectedDisplay.textContent = requirementRuleSelect.value;
+  });
+}
 if (btnAttachRequirementRule) btnAttachRequirementRule.addEventListener('click', () => {
   if (isSystemSavePending) return;
   const requirement = requirementRuleSelect?.value ?? '';

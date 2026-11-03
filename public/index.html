@@ -26,7 +26,7 @@
         <button type="button" class="nav-btn" data-view="functional">Functional tests</button>
       </nav>
       <button id="btn-prepare-nav" type="button" class="btn btn-primary rail-wide prepare-action" data-view="prepare">Prepare investigation</button>
-      <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator, and <strong>inventory-reservation</strong> tests the synthetic inventory reservation system. Neither tests an arbitrary application. Other systems can be described and saved as drafts.</p>
+      <p class="rail-note">Selecting <strong>synthetic-trading</strong> tests the synthetic trading simulator, <strong>synthetic-trading-recovery</strong> tests the synthetic trading recovery simulator, and <strong>inventory-reservation</strong> tests the synthetic inventory reservation system. None tests an arbitrary application. Other systems can be described and saved as drafts.</p>
       <p id="announcement" class="visually-hidden" role="status" aria-live="polite"></p>
     </aside>
 
@@ -127,8 +127,9 @@
                   <option value="synthetic-trading">synthetic-trading (Executable synthetic trading simulator)</option>
                   <option value="synthetic-trading-recovery">synthetic-trading-recovery (Synthetic trading recovery simulator — execution requires confirmed backend support)</option>
                   <option value="inventory-reservation">inventory-reservation (Executable synthetic inventory reservation system)</option>
-                  <option value="unconfigured">unconfigured (Draft spec - Run disabled)</option>
+                  <option value="unconfigured">unconfigured (Draft specification — Run disabled)</option>
                 </select>
+                <div id="system-adapter-selected-text" class="selected-value-text" aria-live="polite"></div>
               </div>
             </div>
             <div class="control-group">
@@ -147,6 +148,7 @@
                 <div class="control-group">
                   <label for="requirement-rule-select">Requirement text</label>
                   <select id="requirement-rule-select" class="form-input"></select>
+                  <div id="requirement-rule-selected-text" class="requirement-selected-text selected-value-text" aria-live="polite"></div>
                 </div>
                 <div class="control-group">
                   <label for="requirement-rule-reviewed"><input type="checkbox" id="requirement-rule-reviewed"> I reviewed this check</label>
@@ -578,8 +580,8 @@
               <button id="btn-report-meta" class="btn btn-primary" type="button">Create report with Muse (Meta API — incurs usage)</button>
               <button id="btn-report-offline" class="btn btn-secondary" type="button">Create offline scripted report (no model call)</button>
               <button id="btn-report-refresh" class="btn btn-secondary" type="button">Refresh report status</button>
-              <button id="btn-report-view" class="btn btn-secondary" type="button">View saved report</button>
-              <button id="btn-report-download" class="btn btn-secondary" type="button">Download saved report</button>
+              <a id="btn-report-view" class="btn btn-secondary disabled" aria-disabled="true" target="_blank" rel="noopener">View saved report</a>
+              <a id="btn-report-download" class="btn btn-secondary disabled" aria-disabled="true" download>Download saved report</a>
             </div>
             <p id="explanation-report-status" class="muted" role="status" aria-live="polite">No run is currently opened.</p>
           </section>
@@ -616,15 +618,15 @@
                 <label for="functional-target-select">Target variant</label>
                 <select id="functional-target-select" class="form-input"></select>
               </div>
-              <div class="actions" style="margin-top: 16px; display: flex; align-items: center;">
+              <div class="actions" style="margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <button type="button" class="btn btn-primary" id="btn-run-functional">Run baselines</button>
-                <span id="functional-run-status" class="muted" style="margin-left: 12px;"></span>
+                <span id="functional-run-status" class="muted"></span>
               </div>
             </section>
 
             <section class="card">
               <h2>Scenario catalog</h2>
-              <div id="functional-catalog-list">
+              <div id="functional-catalog-list" class="catalog-list">
                 <p class="muted">Loading catalog…</p>
               </div>
             </section>
@@ -738,7 +740,7 @@
                 <div class="actions" style="margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                   <button type="button" class="btn btn-primary" id="btn-run-target-api">Run API journeys</button>
                   <button type="button" class="btn btn-secondary" id="btn-compare-target-api" disabled>Rerun &amp; Compare</button>
-                  <span id="target-api-run-status" class="muted" style="margin-left: 8px;"></span>
+                  <span id="target-api-run-status" class="muted"></span>
                 </div>
               </section>
 
