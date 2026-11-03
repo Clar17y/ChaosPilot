@@ -420,6 +420,35 @@ describe('Output Language Implementation', () => {
       expect(report.html).toContain('[FR] whatWasTestedAndWhy');
     });
 
+    it('escapes custom model status labels as plain text in every outcome', () => {
+      const evidence = buildRunEvidence(createMockRecord('run-status-labels', 'fr'));
+      const finding = evidence.findings[0]!;
+      finding.reproduced = true;
+      finding.replayVerified = false;
+      finding.cleanControlPassed = true;
+      finding.experimentCleanControlPassed = false;
+      const labels = { ...ENGLISH_REPORT_LABELS,
+        verifiedRecorded: '<b>verified</b>',
+        notVerifiedRecorded: '<i>unverified</i>',
+        passedRecorded: '<a href="#spoof">passed</a>',
+        notPassedRecorded: '<em>failed</em>',
+        unknownNotRecorded: '<u>unknown & uncertain</u>',
+      };
+      const render = () => renderReportHtml(evidence, [], { mode: 'meta', model: 'fake', generatedAt: 'now', language: 'fr', labels });
+      const html = render();
+      for (const escaped of [
+        '&lt;b&gt;verified&lt;/b&gt;', '&lt;i&gt;unverified&lt;/i&gt;',
+        '&lt;a href=&quot;#spoof&quot;&gt;passed&lt;/a&gt;', '&lt;em&gt;failed&lt;/em&gt;',
+      ]) expect(html.includes(escaped), 'status label must be escaped').toBe(true);
+      for (const markup of [labels.verifiedRecorded, labels.notVerifiedRecorded, labels.passedRecorded, labels.notPassedRecorded]) {
+        expect(html.includes(markup), 'model markup must not become report HTML').toBe(false);
+      }
+      finding.reproduced = null;
+      const unknown = render();
+      expect(unknown.includes('&lt;u&gt;unknown &amp; uncertain&lt;/u&gt;')).toBe(true);
+      expect(unknown.includes(labels.unknownNotRecorded)).toBe(false);
+    });
+
     it('validates custom Meta labels and rejects malformed or missing label keys', () => {
       expect(() => validateCustomReportLabels(null)).toThrow(/dictionary structure/i);
       expect(() => validateCustomReportLabels({})).toThrow(/invalid or missing/i);

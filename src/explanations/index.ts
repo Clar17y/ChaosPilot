@@ -54,32 +54,32 @@ export function buildRunEvidence(record: InvestigationRecord): RunEvidence {
     const notes: string[] = [];
     let resolution: FindingEvidence['resolution'] = 'unresolved';
     if (position >= 0) resolution = hasExplicit ? 'explicit' : 'legacy';
-    if (position < 0) notes.push('The recorded experiment index could not be uniquely resolved (missing, ambiguous, duplicate or legacy-out-of-range). Action/trace evidence for this finding is unavailable; no sequence is invented.');
-    if (resolution === 'legacy') notes.push('Legacy record: experiment resolved by the shared one-based legacy fallback because no experiment carries an explicit index.');
-    if (!experiment) notes.push('No recorded experiment plan is available for this finding.');
-    if (!result?.trace?.length) notes.push('No recorded trace is available for this finding.');
-    if (!str(f?.violation?.invariant) && !str(experiment?.expectedInvariant)) notes.push('No expected invariant was recorded.');
+    if (position < 0) notes.push(ENGLISH_REPORT_LABELS.unresolvedExperimentNote);
+    if (resolution === 'legacy') notes.push(ENGLISH_REPORT_LABELS.legacyExperimentNote);
+    if (!experiment) notes.push(ENGLISH_REPORT_LABELS.missingPlanNote);
+    if (!result?.trace?.length) notes.push(ENGLISH_REPORT_LABELS.missingTraceNote);
+    if (!str(f?.violation?.invariant) && !str(experiment?.expectedInvariant)) notes.push(ENGLISH_REPORT_LABELS.noExpectedInvariant);
     const steps = Array.isArray(experiment?.steps) ? experiment.steps : [];
     const trace = Array.isArray(result?.trace) ? result.trace : [];
-    if (result?.executionComplete === false) notes.push('Recorded execution is incomplete; the available trace does not prove the entire plan executed.');
-    if (f?.sourceHash && f.sourceHash !== record.sourceHash) notes.push('The finding source hash differs from the run source hash; identical-source reproduction cannot be inferred from this report.');
-    if (!result) notes.push('No execution result was recorded; a plan alone does not prove execution.');
-    if (expRec?.replayVerified !== undefined && f?.reproduced !== undefined && expRec.replayVerified !== f.reproduced) notes.push('The experiment replay flag and finding reproduction flag disagree; both are shown separately.');
-    if (expRec?.cleanControlPassed !== undefined && f?.cleanControlPassed !== undefined && expRec.cleanControlPassed !== f.cleanControlPassed) notes.push('Experiment and finding clean-control flags disagree; do not infer a passed control.');
+    if (result?.executionComplete === false) notes.push(ENGLISH_REPORT_LABELS.incompleteExecutionNote);
+    if (f?.sourceHash && f.sourceHash !== record.sourceHash) notes.push(ENGLISH_REPORT_LABELS.sourceMismatchNote);
+    if (!result) notes.push(ENGLISH_REPORT_LABELS.missingExecutionNote);
+    if (expRec?.replayVerified !== undefined && f?.reproduced !== undefined && expRec.replayVerified !== f.reproduced) notes.push(ENGLISH_REPORT_LABELS.replayFlagsDisagreeNote);
+    if (expRec?.cleanControlPassed !== undefined && f?.cleanControlPassed !== undefined && expRec.cleanControlPassed !== f.cleanControlPassed) notes.push(ENGLISH_REPORT_LABELS.cleanFlagsDisagreeNote);
     return {
       findingId: str(f?.id, `missing-id-${ordinal + 1}`),
-      title: str(f?.title, 'Untitled finding'),
-      hypothesis: str(f?.hypothesis, str(experiment?.hypothesis, 'No hypothesis was recorded.')),
-      whyTested: str(experiment?.hypothesis, str(f?.hypothesis, 'No hypothesis was recorded.')),
+      title: str(f?.title, ENGLISH_REPORT_LABELS.untitledFinding),
+      hypothesis: str(f?.hypothesis, str(experiment?.hypothesis, ENGLISH_REPORT_LABELS.noHypothesis)),
+      whyTested: str(experiment?.hypothesis, str(f?.hypothesis, ENGLISH_REPORT_LABELS.noHypothesis)),
       expected: rule.ruleText ?? (invariant ? ENGLISH_REPORT_LABELS.expectedRuleUnavailableTemplate.replace('{invariant}', () => invariant) : ENGLISH_REPORT_LABELS.noExpectedInvariant),
       expectedFallbackInvariant: rule.ruleText == null ? invariant : undefined,
-      observed: str(f?.violation?.message, 'No violation message was recorded.'),
-      violationMessage: str(f?.violation?.message, 'No violation message was recorded.'),
-      category: str(f?.category, str(f?.violation?.category, 'uncategorised (legacy or generic)')),
+      observed: str(f?.violation?.message, ENGLISH_REPORT_LABELS.noViolationMessage),
+      violationMessage: str(f?.violation?.message, ENGLISH_REPORT_LABELS.noViolationMessage),
+      category: str(f?.category, str(f?.violation?.category, ENGLISH_REPORT_LABELS.uncategorized)),
       experimentIndex: typeof f?.experimentIndex === 'number' ? f.experimentIndex : -1,
       experimentPosition: position,
       resolution,
-      findingSourceHash: str(f?.sourceHash, 'not recorded'),
+      findingSourceHash: str(f?.sourceHash, ENGLISH_REPORT_LABELS.notRecordedLabel),
       replayArtifact: f?.replay ?? null,
       violation: f?.violation ?? null,
       outcome: result ? { valid: result.valid, snapshot: result.snapshot, violations: result.violations, rejections: result.rejections, requirementRuleResults: result.requirementRuleResults, executionComplete: result.executionComplete, deliveryObservations: result.deliveryObservations } : null,
@@ -97,7 +97,7 @@ export function buildRunEvidence(record: InvestigationRecord): RunEvidence {
   const base = {
     runId: record.id, status: record.status, variant: String(record.variant), provider: String(record.provider), model: String(record.model), mode: String(record.mode),
     startedAt: record.startedAt, finishedAt: record.finishedAt, stopReason: record.stopReason, errors: record.errors ?? [], sourceHash: record.sourceHash,
-    systemId: record.systemBrief?.brief?.id ?? null, systemRevision: record.systemBrief?.brief?.revision ?? null, systemName: record.systemBrief?.brief?.name ?? 'Legacy investigation / system unavailable', findings,
+    systemId: record.systemBrief?.brief?.id ?? null, systemRevision: record.systemBrief?.brief?.revision ?? null, systemName: record.systemBrief?.brief?.name ?? ENGLISH_REPORT_LABELS.legacySystemName, findings,
   };
   return { ...base, evidenceHash: evidenceHashOf(record) };
 }
@@ -162,7 +162,7 @@ export function offlineNarration(evidence: RunEvidence, language = 'en'): Findin
   return evidence.findings.map(f => ({
     findingId: f.findingId,
     headline: isEs ? localizeGeneratedText(f.title, labels) : conciseFindingTitle({ title: f.title, category: f.category }),
-    whyTested: f.whyTested === 'No hypothesis was recorded.'
+    whyTested: f.whyTested === ENGLISH_REPORT_LABELS.noHypothesis
       ? (isEs ? 'No se registró ninguna hipótesis para este hallazgo, por lo que no se puede indicar el motivo por el cual se probó.' : 'No hypothesis was recorded for this finding, so the reason it was tested cannot be stated.')
       : (isEs ? `Intención de prueba registrada: ${f.whyTested}` : `Recorded test intent: ${f.whyTested}`),
     whatHappened: f.experimentPosition < 0
@@ -179,7 +179,7 @@ export function escapeHtml(v: unknown): string {
 }
 function pretty(v: unknown): string { try { return typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? String(v); } catch { return String(v); } }
 
-const simpleActions: Record<string, string> = { drain: 'Deliver queued messages', duplicate: 'Repeat a recorded message', advance: 'Advance the clock', deliver: 'Deliver a recorded message', fill: 'Schedule an order fill', confirm_cancel: 'Schedule cancellation confirmation' };
+const simpleActions: Record<string, string> = { drain: ENGLISH_REPORT_LABELS.drainActionTitle, duplicate: ENGLISH_REPORT_LABELS.duplicateActionTitle, advance: ENGLISH_REPORT_LABELS.advanceActionTitle, deliver: ENGLISH_REPORT_LABELS.deliverActionTitle, fill: ENGLISH_REPORT_LABELS.fillActionTitle, confirm_cancel: ENGLISH_REPORT_LABELS.cancelActionTitle };
 
 const generatedTextKeys = [
   'untitledFinding', 'noHypothesis', 'noExpectedInvariant', 'noViolationMessage', 'uncategorized',
@@ -192,17 +192,19 @@ function localizeGeneratedText(text: string, labels: ReportFixedLabels): string 
   return key ? labels[key] : text;
 }
 
-function sequenceItem(value: unknown, index: number, kind: 'action' | 'trace', labels: ReportFixedLabels, language: string): string {
+type SequencePresentation = {
+  labels: ReportFixedLabels;
+  isEnglish: boolean;
+  actionTitles: Readonly<Record<string, string>>;
+};
+
+function sequenceItem(value: unknown, index: number, kind: 'action' | 'trace', presentation: SequencePresentation): string {
+  const { labels, isEnglish, actionTitles } = presentation;
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const action = kind === 'action' ? data.op : data.action;
   const actionName = typeof action === 'string' ? action : '';
   const entry = { step: 0, time: 0, action: actionName || 'recorded event', outcome: kind === 'action' ? 'scheduled' : typeof data.outcome === 'string' ? data.outcome : '', payload: data.payload, state: data.state && typeof data.state === 'object' ? data.state as Record<string, unknown> : {} };
-  const actionTitles: Record<string, string> = {
-    send: labels.sendActionTitle, drain: labels.drainActionTitle, duplicate: labels.duplicateActionTitle,
-    advance: labels.advanceActionTitle, deliver: labels.deliverActionTitle, fill: labels.fillActionTitle,
-    confirm_cancel: labels.cancelActionTitle, disconnect: labels.disconnectActionTitle, reconnect: labels.reconnectActionTitle,
-  };
-  const title = baseOutputLanguage(language) === 'en'
+  const title = isEnglish
     ? (kind === 'action' && simpleActions[actionName] ? simpleActions[actionName] : stepTitle(entry, creditFromState(entry.state)))
     : actionTitles[actionName] ?? `${labels.recordedEventTitle}${actionName ? ` (${actionName})` : ''}`;
   const label = kind === 'action' ? [data.id, data.to].filter(v => v != null).map(String).join(' → ') : data.time == null ? '' : `${labels.timeLabel} ${data.time}`;
@@ -221,6 +223,15 @@ export function renderReportHtml(
 ): string {
   const language = normalizeOutputLanguage(opts.language);
   const labels = opts.labels ? validateCustomReportLabels(opts.labels) : getStaticReportLabels(language) ?? ENGLISH_REPORT_LABELS;
+  const isEnglish = baseOutputLanguage(language) === 'en';
+  const sequencePresentation: SequencePresentation = {
+    labels, isEnglish,
+    actionTitles: {
+      send: labels.sendActionTitle, drain: labels.drainActionTitle, duplicate: labels.duplicateActionTitle,
+      advance: labels.advanceActionTitle, deliver: labels.deliverActionTitle, fill: labels.fillActionTitle,
+      confirm_cancel: labels.cancelActionTitle, disconnect: labels.disconnectActionTitle, reconnect: labels.reconnectActionTitle,
+    },
+  };
   const sourceLabel = opts.mode === 'offline'
     ? labels.offlineSourceLabel
     : labels.metaSourceLabelTemplate.replace('{model}', () => opts.model);
@@ -230,16 +241,16 @@ export function renderReportHtml(
   const cards = evidence.findings.map((f, i) => {
     const n = narrations[i];
     const steps = f.steps.length
-      ? f.steps.map((step, index) => sequenceItem(step, index, 'action', labels, language)).join('')
+      ? f.steps.map((step, index) => sequenceItem(step, index, 'action', sequencePresentation)).join('')
       : `<li class="missing">${escapeHtml(labels.noRecordedActions)}</li>`;
     const trace = f.trace.length
-      ? `<ol class="flow trace">${f.trace.map((event, index) => sequenceItem(event, index, 'trace', labels, language)).join('')}</ol>`
+      ? `<ol class="flow trace">${f.trace.map((event, index) => sequenceItem(event, index, 'trace', sequencePresentation)).join('')}</ol>`
       : `<p class="missing">${escapeHtml(labels.noRecordedTrace)}</p>`;
     const fallbackInvariant = f.expectedFallbackInvariant;
     const expected = fallbackInvariant !== undefined
       ? (fallbackInvariant ? labels.expectedRuleUnavailableTemplate.replace('{invariant}', () => fallbackInvariant) : labels.noExpectedInvariant)
       : localizeGeneratedText(f.expected, labels);
-    const comparison = recordedDifferences(f.violation, baseOutputLanguage(language) === 'en' ? undefined : {
+    const comparison = recordedDifferences(f.violation, isEnglish ? undefined : {
       pathLabel: path => path.join(' / ') || labels.recordedValueLabel,
       missingValue: labels.notPresentLabel, deliveryOutcome: labels.deliveryOutcomeLabel,
     });
@@ -254,7 +265,7 @@ export function renderReportHtml(
 ${differences}
 <section><h4>${escapeHtml(labels.whatHappenedNarration)}</h4><p>${escapeHtml(n?.whatHappened ?? '')}</p></section>
 <section><h4>${escapeHtml(labels.recordedActionSequence)}</h4><ol class="flow">${steps}</ol>${f.stepsTruncated ? `<p class="warn">${escapeHtml(labels.stepsTruncatedWarning)}</p>` : ''}<details><summary>${escapeHtml(labels.recordedTraceSummaryTemplate.replace('{count}', String(f.trace.length)))}</summary>${trace}</details><details><summary>${escapeHtml(labels.recordedOutcomeAndArtifact)}</summary><pre>${escapeHtml(pretty({ outcome: f.outcome, violation: f.violation, findingReplayArtifact: f.replayArtifact }))}</pre></details></section>
-<p class="status">${escapeHtml(labels.findingReproductionLabel)}: <strong>${booleanLabel(f.reproduced, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.experimentReplayLabel)}: <strong>${booleanLabel(f.replayVerified, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.findingCleanControlLabel)}: <strong>${booleanLabel(f.cleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.experimentCleanControlLabel)}: <strong>${booleanLabel(f.experimentCleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded)}</strong></p>
+<p class="status">${escapeHtml(labels.findingReproductionLabel)}: <strong>${escapeHtml(booleanLabel(f.reproduced, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded))}</strong> · ${escapeHtml(labels.experimentReplayLabel)}: <strong>${escapeHtml(booleanLabel(f.replayVerified, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded))}</strong> · ${escapeHtml(labels.findingCleanControlLabel)}: <strong>${escapeHtml(booleanLabel(f.cleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded))}</strong> · ${escapeHtml(labels.experimentCleanControlLabel)}: <strong>${escapeHtml(booleanLabel(f.experimentCleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded))}</strong></p>
 ${f.notes.map(note => `<p class="warn">${escapeHtml(labels.evidenceNoteLabel)}: ${escapeHtml(localizeGeneratedText(note, labels))}</p>`).join('')}
 <details class="ids"><summary>${escapeHtml(labels.identifiersSummary)}</summary><p>${escapeHtml(labels.findingIdLabel)}: <code>${escapeHtml(f.findingId)}</code> · ${escapeHtml(labels.findingSourceLabel)}: <code>${escapeHtml(localizeGeneratedText(f.findingSourceHash, labels))}</code> · ${escapeHtml(labels.experimentIndexLabel)}: ${escapeHtml(f.experimentIndex)} · ${escapeHtml(labels.resolvedPositionLabel)}: ${escapeHtml(f.experimentPosition)} (${escapeHtml(f.resolution)})</p></details>
 </article>`;
@@ -302,25 +313,25 @@ export async function generateReport(
   if (!evidence.findings.length) throw new Error('This run has no recorded findings, so no findings report can be created.');
 
   const language = normalizeOutputLanguage(opts.language ?? record.outputLanguage);
+  const staticLabels = getStaticReportLabels(language);
   let narrations: FindingNarration[];
   let usage: Usage | undefined;
   let model = 'offline-scripted';
   let labels: ReportFixedLabels;
 
   if (opts.mode === 'offline') {
-    if (!getStaticReportLabels(language)) {
+    if (!staticLabels) {
       throw new Error(`Offline report generation only supports English and Spanish. For "${language}", generate with Meta mode.`);
     }
     narrations = offlineNarration(evidence, language);
-    labels = getStaticReportLabels(language)!;
+    labels = staticLabels;
   } else {
     if (!opts.transport) throw new Error('Meta explanation transport is unavailable. No request was sent.');
     const prompt = buildExplanationPrompt(evidence, opts.maxPromptBytes, language);
     const res = await opts.transport.generate(prompt.systemMessage, prompt.userMessage, opts.signal);
     narrations = validateNarration(res.content, evidence);
-    const staticDict = getStaticReportLabels(language);
-    if (staticDict) {
-      labels = staticDict;
+    if (staticLabels) {
+      labels = staticLabels;
     } else {
       const parsed = JSON.parse(res.content) as { labels?: unknown };
       labels = validateCustomReportLabels(parsed.labels);
