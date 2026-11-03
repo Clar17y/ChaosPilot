@@ -1,6 +1,7 @@
 import { OutputLanguageControl } from './language-controls.ts';
 import type { CoverageResultFields } from '../coverage/types.ts';
 import { initFunctionalWorkspaceView } from './functional.ts';
+import { initTargetUiWorkspaceView, type TargetUiWorkspaceController } from './functional.ts';
 import { initTargetApiWorkspaceView, type TargetApiController } from './target-api.ts';
 import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { initRegressionWorkspaceView, type RegressionController } from './regressions.ts';
@@ -2127,6 +2128,13 @@ function updateRequestPreflight(): void {
     snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
     selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
   });
+  targetUiController.setContext({
+    systemId: selectedSystem?.id ?? null, revision: selectedSystem?.revision ?? null,
+    isDraftMode, hasUnsavedSystemEdits, isSystemSavePending,
+    hasSelectedSystem: Boolean(selectedSystem), selectedAdapterId: effectiveAdapter(),
+    snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
+    selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
+  });
   const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
     && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
     && scopedVariants().includes(targetSelect.value);
@@ -2828,6 +2836,12 @@ const regressionController: RegressionController = initRegressionWorkspaceView({
 });
 
 const targetApiController: TargetApiController = initTargetApiWorkspaceView(variant => {
+  targetSelection.select(variant);
+  targetSelect.value = targetSelection.selection ?? '';
+  updateRunReadiness();
+});
+
+const targetUiController: TargetUiWorkspaceController = initTargetUiWorkspaceView(variant => {
   targetSelection.select(variant);
   targetSelect.value = targetSelection.selection ?? '';
   updateRunReadiness();

@@ -66,6 +66,15 @@ Engineers can also exercise real target-facing HTTP journeys on isolated ephemer
 5. Immutable, versioned records are persisted under `runs/api-journeys/<id>/record.json` with SHA-256 integrity seal, supporting read-only reopening and semantic rerun comparison.
 6. Available via CLI (`npm run api-journey -- --target clean`) and an understandable UI panel within the **Functional tests** workspace view. Detailed documentation is in [docs/TARGET_API_JOURNEY.md](docs/TARGET_API_JOURNEY.md).
 
+## Interactive target trading UI & browser journey
+
+Engineers can interact with a dedicated synthetic trading target terminal served on the loopback listener's own origin (`127.0.0.1:<port>`), or execute an automated browser journey:
+1. **Target Terminal**: A distinct terminal interface where engineers can initialize setups, submit orders, simulate execution fills, and observe business status and quantities with zero AI model calls.
+2. **Truthful Transport Acknowledgement**: HTTP 202 transport receipts are explicitly distinct from eventual business settlement.
+3. **Freshness & Stale Detection**: Pure `FreshnessEngine` tracks monotonic age and sequence. Intentional hold simulates delayed UI updates: retained older data is truthfully labeled `STALE`, the underlying target continues running, and upon resuming updates the interface converges to `FRESH` and `FILLED`.
+4. **Automated Browser Journey**: Real headless Chrome or Edge (installed browser required; `CHROME_BIN`/`EDGE_BIN` override) operates the DOM controls, verifies wire correlation (`instanceId`, `orderId`, `requestId`, `receiptId`), proves upstream `FILLED` while the held DOM stays `OPEN`, and awaits convergence within an explicit deadline (`npm run ui-journey`). Sessions and journeys require a saved `synthetic-trading` profile at an explicit revision, and the system snapshot, target source and contract identities are pinned into the evidence. The default `npm test` suite needs no browser; real-browser tests are opt-in via `CHAOSPILOT_BROWSER_TESTS=1`.
+5. **Inspectable Evidence**: Full correlated evidence JSON and per-run phase screenshots are saved under `.llm-output/issue13-repair/` by the CLI journey. Incomplete or unverifiable evidence is classified inconclusive, never a pass. Detailed documentation is in [docs/TARGET_UI_JOURNEY.md](docs/TARGET_UI_JOURNEY.md).
+
 At commit `5e4270e`, the integrated application and development tooling passed 754 tests in 43 files, the TypeScript checks and production build. See the [initial browser workflow check](docs/design/implemented/BROWSER_CHECK.md) and [workspace integration checks](design-qa.md) for browser evidence and limitations. The current prompt and larger request limits have not been evaluated in a new live comparison.
 
 ## Watch verification (Challenge with Muse)

@@ -67,6 +67,9 @@ import {
   validateApiJourneyRunId,
   compareApiJourneys,
 } from './target-api/index.ts';
+import { TargetUiSessionManager } from './target-ui/session.ts';
+import { createUiProvenance } from './target-ui/provenance.ts';
+import type { TargetUiProvenance } from './target-ui/types.ts';
 import {
   previewRegressionFromFinding,
   captureRegressionFromFinding,
@@ -100,6 +103,7 @@ export interface ServerOptions {
   explanationTransport?: ExplanationTransport;
   challengeTransport?: ExplanationTransport;
   regressionAdapterResolver?: (adapterId: string) => AdapterRegistration;
+  targetUiSessionManager?: TargetUiSessionManager;
   publicDir?: string;
   distDir?: string;
 }
@@ -148,12 +152,14 @@ export class ChaosPilotServer {
   private challengeTransportOverride?: ExplanationTransport;
   private regressionAdapterResolverOverride?: (adapterId: string) => AdapterRegistration;
   private explanationInFlight = new Set<string>();
+  public targetUiSessionManager: TargetUiSessionManager;
 
   constructor(options: ServerOptions = {}) {
     this.runsDir = options.runsDir || 'runs';
     this.systemsDir = options.systemsDir || path.join(this.runsDir, 'systems');
     this.publicDir = options.publicDir || path.resolve(process.cwd(), 'public');
     this.distDir = options.distDir || path.resolve(process.cwd(), 'dist');
+    this.targetUiSessionManager = options.targetUiSessionManager || new TargetUiSessionManager();
     this.runnerOverride = options.investigationRunner;
     this.providerFactoryOverride = options.providerFactory;
     this.explanationTransportOverride = options.explanationTransport;
@@ -167,6 +173,56 @@ export class ChaosPilotServer {
 
   public getLatestRecord(): InvestigationRecord | null {
     return this.latestRecord;
+  }
+
+  /** Closes the HTTP server and awaits target UI session/job cleanup. */
+  public async shutdown(server: http.Server): Promise<void> {
+    const cleanup = this.targetUiSessionManager.closeAll();
+    const drained = new Promise<void>((resolve) => server.close(() => resolve()));
+    await Promise.all([cleanup, drained]);
+  }
+
+  /**
+   * Validates a target UI selection exactly like the target API run route and
+   * pins provenance before any listener or browser is created.
+   */
+  private async resolveTargetUiContext(body: Record<string, unknown>): Promise<
+    | { ok: true; variant: TargetVariant; provenance: TargetUiProvenance }
+    | { ok: false; status: number; error: string }
+  > {
+    const allowedKeys = new Set(['systemId', 'expectedRevision', 'variant']);
+    if (
+      Object.keys(body).some((key) => !allowedKeys.has(key)) ||
+      typeof body.systemId !== 'string' ||
+      !validateSystemId(body.systemId) ||
+      body.systemId !== body.systemId.trim() ||
+      typeof body.variant !== 'string' ||
+      !body.variant ||
+      !Number.isSafeInteger(body.expectedRevision) ||
+      (body.expectedRevision as number) < 1
+    ) {
+      return { ok: false, status: 400, error: 'Required selection: valid systemId, variant and positive expectedRevision; unknown fields are not allowed' };
+    }
+    const variant = body.variant as TargetVariant;
+    let brief: SystemBrief | null;
+    try {
+      brief = await getSystemBrief(body.systemId, this.systemsDir);
+    } catch (err) {
+      return { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) };
+    }
+    if (!brief) return { ok: false, status: 404, error: `System brief "${body.systemId}" not found` };
+    if (brief.revision !== body.expectedRevision) {
+      return { ok: false, status: 409, error: `Revision conflict: expected revision ${body.expectedRevision}, but current is ${brief.revision}` };
+    }
+    if (brief.adapterId !== 'synthetic-trading') {
+      return { ok: false, status: 400, error: `Target UI is only supported for the "synthetic-trading" adapter (profile uses "${brief.adapterId}")` };
+    }
+    try {
+      const provenance = createUiProvenance(await createSystemSnapshot(brief), variant);
+      return { ok: true, variant, provenance };
+    } catch (err) {
+      return { ok: false, status: 400, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /**
@@ -1763,6 +1819,108 @@ export class ChaosPilotServer {
           return;
         }
 
+        // GET /api/target-ui/session - Active target UI session status
+        if (method === 'GET' && pathname === '/api/target-ui/session') {
+          const sessions = this.targetUiSessionManager.listSessions();
+          const session = sessions[0] ?? null;
+          this.sendJson(res, 200, { active: session !== null, session, sessions });
+          return;
+        }
+
+        // POST /api/target-ui/session - Launch an isolated target UI session
+        if (method === 'POST' && pathname === '/api/target-ui/session') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 4096);
+          if (error) { this.sendJson(res, status || 400, { error }); return; }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+            return;
+          }
+          const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
+          if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
+          const controller = new AbortController();
+          const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Target UI launch cancelled by client disconnect', 'AbortError')); };
+          res.once?.('close', disconnected);
+          try {
+            const session = await this.targetUiSessionManager.createSession({
+              variant: resolved.variant, provenance: resolved.provenance, signal: controller.signal,
+            });
+            if (controller.signal.aborted) {
+              await this.targetUiSessionManager.closeSession(session.sessionId).catch(() => {});
+              this.sendJson(res, 409, { error: 'Target UI launch cancelled' });
+              return;
+            }
+            this.sendJson(res, 201, { session });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const code = controller.signal.aborted ? 409 : /Maximum concurrent|Session manager is closed/.test(msg) ? 409 : 500;
+            this.sendJson(res, code, { error: msg });
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
+        // DELETE /api/target-ui/session - Close active target UI session(s)
+        const targetUiSessionMatch = pathname.match(/^\/api\/target-ui\/session(?:\/([a-z0-9-]+))?$/);
+        if (method === 'DELETE' && targetUiSessionMatch) {
+          const id = targetUiSessionMatch[1];
+          try {
+            if (id) {
+              const closed = await this.targetUiSessionManager.closeSession(id);
+              this.sendJson(res, closed ? 200 : 404, { closed, sessionId: id });
+            } else {
+              await this.targetUiSessionManager.closeAllSessions();
+              this.sendJson(res, 200, { closed: true });
+            }
+          } catch (err) {
+            this.sendJson(res, 500, { closed: false, error: err instanceof Error ? err.message : String(err) });
+          }
+          return;
+        }
+
+        // POST /api/target-ui/journey - Execute automated browser target UI journey
+        if (method === 'POST' && pathname === '/api/target-ui/journey') {
+          const contentType = req.headers['content-type'] || '';
+          if (!contentType.toLowerCase().includes('application/json')) {
+            this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
+            return;
+          }
+          const { data, error, status } = await this.readJsonBody(req, 4096);
+          if (error) { this.sendJson(res, status || 400, { error }); return; }
+          if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+            return;
+          }
+          const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
+          if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
+          const controller = new AbortController();
+          const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Target UI journey cancelled by client disconnect', 'AbortError')); };
+          res.once?.('close', disconnected);
+          try {
+            const { runTargetUiBrowserJourney } = await import('./target-ui/runner.ts');
+            const outcome = await this.targetUiSessionManager.runJob(
+              (signal) => runTargetUiBrowserJourney({
+                variant: resolved.variant, provenance: resolved.provenance, signal,
+                screenshotsDir: path.join(this.runsDir, 'target-ui-screenshots'),
+              }),
+              controller.signal,
+            );
+            this.sendJson(res, 200, outcome);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const code = /Maximum concurrent browser jobs|Session manager is closed/.test(msg) ? 409 : 500;
+            this.sendJson(res, code, { error: msg });
+          } finally {
+            res.off?.('close', disconnected);
+          }
+          return;
+        }
+
         // GET /api/runs - List persisted runs
         if (method === 'GET' && pathname === '/api/runs') {
           const runs = await listRuns(this.runsDir);
@@ -1981,6 +2139,10 @@ export class ChaosPilotServer {
           details: err instanceof Error ? err.message : String(err),
         });
       }
+    });
+
+    server.on('close', () => {
+      void this.targetUiSessionManager.closeAll();
     });
 
     return server;

@@ -778,6 +778,75 @@
               </div>
             </section>
           </section>
+
+          <!-- Target Trading UI & Browser Journey Section -->
+          <section class="card" id="target-ui-journey-section" style="margin-top: 20px;" aria-labelledby="target-ui-title">
+            <div class="rowtop" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+              <div>
+                <p class="eyebrow" style="margin:0 0 4px 0;">Target Trading Interface</p>
+                <h2 id="target-ui-title" style="margin:0;">Target UI journey &amp; trading session</h2>
+                <p class="muted" style="margin:4px 0 0 0;">Launch an isolated target trading session on loopback 127.0.0.1 or execute the verified browser UI -&gt; HTTP API -&gt; event journey.</p>
+              </div>
+            </div>
+
+            <!-- Eligibility Banner -->
+            <div id="target-ui-eligibility-banner" class="alert-banner hidden" role="alert" style="margin: 16px 0;">
+              <span id="target-ui-eligibility-message"></span>
+            </div>
+
+            <!-- Controls -->
+            <div class="grid grid-cols-2" style="gap: 16px; margin-top: 16px;">
+              <div>
+                <label for="target-ui-system-display">Selected system</label>
+                <input type="text" id="target-ui-system-display" class="form-input" readonly>
+              </div>
+              <div>
+                <label for="target-ui-target-select">Target variant</label>
+                <select id="target-ui-target-select" class="form-input"></select>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-primary" id="btn-launch-target-ui">Launch Target UI session</button>
+              <button type="button" class="btn btn-secondary" id="btn-run-target-ui">Run Target UI journey</button>
+              <span id="target-ui-run-status" class="muted" style="margin-left: 8px;"></span>
+            </div>
+
+            <!-- Active Target UI Session Card -->
+            <div id="target-ui-active-session-card" class="card hidden" style="margin-top: 16px; background: rgba(0, 210, 255, 0.05); border: 1px solid rgba(0, 210, 255, 0.3);">
+              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                <div>
+                  <h4 style="margin:0;color:var(--text-bright);">Active Target UI Session</h4>
+                  <p class="muted" id="target-ui-session-meta" style="margin:2px 0 0 0;"></p>
+                </div>
+                <div style="display:flex;gap:8px;">
+                  <a id="link-open-target-ui" class="btn btn-primary" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Open Target UI</a>
+                  <button type="button" class="btn btn-secondary" id="btn-close-target-ui">Close Session</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Browser Journey Results Card -->
+            <section class="card hidden" id="target-ui-results-card" style="margin-top: 20px;">
+              <div class="rowtop" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+                <div>
+                  <h3 style="margin:0;">Browser Journey Outcome</h3>
+                  <p class="muted" id="target-ui-result-meta" style="margin:4px 0 0 0;"></p>
+                </div>
+                <span id="target-ui-result-badge" class="system-badge"></span>
+              </div>
+              <div class="stats-row" style="display:flex;gap:24px;margin:16px 0;flex-wrap:wrap;">
+                <div><div class="big" id="target-ui-stat-exchanges">0</div><small>wire exchanges</small></div>
+                <div><div class="big" id="target-ui-stat-events">0</div><small>business events</small></div>
+                <div><div class="big" id="target-ui-stat-observations">0</div><small>UI observations</small></div>
+                <div><div class="big" id="target-ui-stat-classification">-</div><small>classification</small></div>
+              </div>
+              <div id="target-ui-journey-details"></div>
+              <div style="margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" id="btn-download-target-ui-evidence">Download Correlated Evidence JSON</button>
+              </div>
+            </section>
+          </section>
         </section>
 
       </main>

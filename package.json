@@ -4,7 +4,9 @@
   "private": true,
   "description": "Source-aware investigation of negative scenarios in event-driven trading systems",
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
@@ -28,10 +30,13 @@
     "prereplay": "npm run build",
     "replay": "node --env-file-if-exists=.env dist/cli.js replay",
     "preapi-journey": "npm run build",
-    "api-journey": "node --env-file-if-exists=.env dist/cli.js api-journey"
+    "api-journey": "node --env-file-if-exists=.env dist/cli.js api-journey",
+    "preui-journey": "npm run build",
+    "ui-journey": "node scripts/target-ui-browser.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "puppeteer-core": "^25.16.0",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
   }

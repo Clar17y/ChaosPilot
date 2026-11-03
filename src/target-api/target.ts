@@ -1,4 +1,7 @@
 import * as http from 'node:http';
+import * as fs from 'node:fs/promises';
+import { resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
 import type { Action, Experiment, TargetVariant } from '../domain.ts';
@@ -6,9 +9,23 @@ import { assertAdapterVariant } from '../adapters/index.ts';
 import { executeExperiment } from '../simulator/index.ts';
 import type { TargetSnapshot } from '../simulator/types.ts';
 import type { BusinessEvent, Command, Observation, OrderView, Receipt } from './types.ts';
+import type { TargetUiProvenance, TargetUiThresholds } from '../target-ui/types.ts';
 
 const id = (v: unknown): v is string => typeof v === 'string' && /^[a-z][a-z0-9-]{0,47}$/.test(v);
 const number = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 1000;
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+const staticUiFiles: Record<string, { relative: string; fallback?: string; contentType: string }> = {
+  '/': { relative: 'public/target-ui.html', contentType: 'text/html; charset=utf-8' },
+  '/index.html': { relative: 'public/target-ui.html', contentType: 'text/html; charset=utf-8' },
+  '/target-ui.html': { relative: 'public/target-ui.html', contentType: 'text/html; charset=utf-8' },
+  '/target-ui.css': { relative: 'public/target-ui.css', contentType: 'text/css; charset=utf-8' },
+  '/target-ui.js': { relative: 'dist/web/target-ui.js', fallback: 'public/target-ui.js', contentType: 'application/javascript; charset=utf-8' },
+  '/target-ui.js.map': { relative: 'dist/web/target-ui.js.map', contentType: 'application/json; charset=utf-8' },
+  '/target-ui/freshness.js': { relative: 'dist/target-ui/freshness.js', contentType: 'application/javascript; charset=utf-8' },
+  '/target-ui/validation.js': { relative: 'dist/target-ui/validation.js', contentType: 'application/javascript; charset=utf-8' },
+  '/target-ui/freshness.js.map': { relative: 'dist/target-ui/freshness.js.map', contentType: 'application/json; charset=utf-8' },
+};
+
 export const commandPath = (command: Command): string => command.kind === 'setup' ? '/setup' : command.kind === 'order' ? '/orders' : '/executions';
 export function parseCommand(path: string, raw: unknown): Command {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Expected command object');
@@ -35,6 +52,7 @@ export function orderViews(state: TargetSnapshot): Record<string, OrderView> {
 
 export interface TargetOptions {
   variant: TargetVariant;
+  uiContext?: { provenance?: TargetUiProvenance; thresholds?: TargetUiThresholds };
   /** Local validation seams; never exposed by CLI or control HTTP. */
   processingDelayMs?: number;
   execute?: typeof executeExperiment;
@@ -128,17 +146,49 @@ export async function startTarget(options: TargetOptions): Promise<TargetHandle>
     const hostValid = req.headers.host === authority;
     const originValid = req.headers.origin === undefined || req.headers.origin === `http://${authority}`;
     const secFetch = req.headers['sec-fetch-site'];
-    const secFetchValid = !secFetch || secFetch === 'same-origin' || secFetch === 'none';
+    const documentNavigation = req.method === 'GET' && ['/', '/index.html', '/target-ui.html'].includes(req.url ?? '')
+      && secFetch === 'same-site' && req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document'
+      && req.headers.origin === undefined;
+    const secFetchValid = !secFetch || secFetch === 'same-origin' || secFetch === 'none' || documentNavigation;
     if (!hostValid || !originValid || !secFetchValid) {
       reply(res, 403, { error: 'Loopback host/origin required' });
       return;
     }
     const path = req.url ?? '';
     if (closed) { reply(res, 503, { error: 'Target closed' }); return; }
+    if (req.method === 'GET' && path === '/ui-context') {
+      reply(res, 200, { instanceId, variant: options.variant, ...options.uiContext }); return;
+    }
     if (req.method === 'GET' && (path === '/state' || path === '/events')) { reply(res, 200, observe()); return; }
     const orderMatch = path.match(/^\/orders\/([a-z][a-z0-9-]{0,47})$/);
     if (req.method === 'GET' && orderMatch) {
       const o = observe(); reply(res, 200, { instanceId, orderId: orderMatch[1], processed: o.processed, order: o.orders[orderMatch[1]!] ?? null }); return;
+    }
+    const staticEntry = staticUiFiles[path];
+    if (req.method === 'GET' && staticEntry) {
+      try {
+        let content: Buffer;
+        try {
+          content = await fs.readFile(resolvePath(repoRoot, staticEntry.relative));
+        } catch (e) {
+          if (staticEntry.fallback) {
+            content = await fs.readFile(resolvePath(repoRoot, staticEntry.fallback));
+          } else {
+            throw e;
+          }
+        }
+        res.writeHead(200, {
+          'Content-Type': staticEntry.contentType,
+          'Content-Length': content.length,
+          'Cache-Control': 'no-store',
+          Connection: 'close',
+        });
+        res.end(content);
+        return;
+      } catch {
+        reply(res, 404, { error: 'Static UI file not found' });
+        return;
+      }
     }
     if (req.method !== 'POST' || !['/setup', '/orders', '/executions'].includes(path)) { reply(res, 404, { error: 'Unknown target endpoint' }); return; }
     if (req.headers['content-type']?.split(';')[0]?.trim().toLowerCase() !== 'application/json') { reply(res, 415, { error: 'JSON required' }); return; }
