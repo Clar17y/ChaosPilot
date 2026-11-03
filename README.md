@@ -142,6 +142,8 @@ npm run build
 
 ChaosPilot supports natural-language model output in languages other than English, with first-class Spanish (`es`) support and arbitrary model-supported languages (e.g. `fr`, `de`, `ja`, canonical BCP-47 tags or recognized aliases such as French):
 
+Custom tags use two- or three-letter language codes with optional region, script, variant, Unicode or private-use extensions, canonicalized by `Intl`. Standalone private-use tags and forms rejected by `Intl` are not accepted. This validates syntax; language capability depends on the selected model.
+
 - **CLI options**: `investigate` and `evaluate` accept `--language <tag>` (or `-l <tag>`). Commands with frozen benchmark identity (`benchmark`, `benchmark-freeze`) or deterministically replayed runs (`replay`) reject `--language` to protect baseline identity.
 - **Machine identifier preservation**: JSON keys, actions (`send`, `deliver`, `drain`, `fill`, etc.), channels (`market`, `credit`, `client`, etc.), payload schemas, and contract invariant IDs strictly remain in exact untranslated English.
 - **Findings reports**: HTML finding reports can be generated in English or Spanish offline, or in arbitrary languages with Muse. Each run retains one saved report; generating a report in a different language atomically replaces it with clear UI status and sets the appropriate HTML `lang` and `title`.

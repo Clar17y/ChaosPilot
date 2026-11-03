@@ -81,6 +81,8 @@ describe('Output Language Implementation', () => {
       expect(normalizeOutputLanguage('French')).toBe('fr');
       expect(normalizeOutputLanguage('German')).toBe('de');
       expect(normalizeOutputLanguage('pt-br')).toBe('pt-BR');
+      expect(normalizeOutputLanguage('en-u-ca-gregory')).toBe('en-u-ca-gregory');
+      expect(normalizeOutputLanguage('en-x-demo')).toBe('en-x-demo');
       expect(() => normalizeOutputLanguage('Brazilian Portuguese')).toThrow(/language tag/i);
     });
 
@@ -337,6 +339,36 @@ describe('Output Language Implementation', () => {
       expect(report.html).toContain('finding-1');
     });
 
+    it('localizes generated legacy notes and expected-rule fallbacks while retaining recorded text', async () => {
+      const record = createMockRecord('run-es-legacy', 'es');
+      record.findings[0]!.experimentIndex = 99;
+      const report = await generateReport(record, { mode: 'offline' });
+      expect(report.html).toContain(SPANISH_REPORT_LABELS.unresolvedExperimentNote);
+      expect(report.html).toContain(SPANISH_REPORT_LABELS.missingPlanNote);
+      expect(report.html).toContain('Se registró la regla inv_1, pero su descripción no está disponible.');
+      expect(report.html).toContain(SPANISH_REPORT_LABELS.legacySystemName);
+      expect(report.html).not.toContain(ENGLISH_REPORT_LABELS.unresolvedExperimentNote);
+      expect(report.html).not.toContain('legacy / unavailable');
+      expect(report.html).toContain('Hypothesis A'); // Original evidence remains exact.
+    });
+
+    it('localizes generated action/time/comparison labels and preserves raw schema field names', async () => {
+      const record = createMockRecord('run-es-actions', 'es');
+      record.experiments[0]!.experiment.steps = [{ op: 'drain' }, { op: 'disconnect' }, { op: 'reconnect' }];
+      record.experiments[0]!.result!.trace = [{ step: 1, time: 7, action: 'drain', outcome: 'delivered', state: {} }];
+      record.findings[0]!.violation.evidence = { expected: { stock: { sku: { onHand: 5 } } }, actual: { stock: { sku: {} } } };
+      const report = await generateReport(record, { mode: 'offline' });
+      expect(report.html).toContain('Entregar los mensajes en cola');
+      expect(report.html).toContain('Desconectar la sesión');
+      expect(report.html).toContain('Reconectar la sesión');
+      expect(report.html).toContain('Tiempo 7');
+      expect(report.html).toContain('stock / sku / onHand');
+      expect(report.html).toContain('no presente');
+      expect(report.html).not.toContain('Deliver queued messages');
+      expect(report.html).not.toContain('Time 7');
+      expect(report.html).not.toContain('Stock sku: on hand');
+    });
+
     it('rejects unsupported offline custom languages honestly without claiming translated English', async () => {
       const record = createMockRecord('run-fr-1', 'fr');
       await expect(
@@ -383,6 +415,7 @@ describe('Output Language Implementation', () => {
       expect(report.language).toBe('fr');
       expect(report.html).toContain('lang="fr"');
       expect(report.html).toContain('Titre en français');
+      expect(report.html).toContain('<title>[FR] reportTitle ChaosPilot findings report');
       expect(report.html).toContain('[FR] eyebrow');
       expect(report.html).toContain('[FR] whatWasTestedAndWhy');
     });

@@ -25,7 +25,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   french: 'fr', german: 'de', portuguese: 'pt', japanese: 'ja', chinese: 'zh',
 };
 const FORBIDDEN_CHARS_REGEX = /[\r\n\t\0<>"'`{}|\\^~[\];]/;
-const LANGUAGE_TAG_REGEX = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/;
+const LANGUAGE_TAG_REGEX = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8})*$/;
 
 const COMMON_LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
@@ -99,7 +99,7 @@ export function buildLanguagePromptInstruction(lang: string): string {
   return [
     `OUTPUT LANGUAGE REQUIREMENT:`,
     `You must provide all human-readable natural language prose (specifically hypotheses, descriptions, and summary explanations) in ${displayName} (${normalized}).`,
-    `JSON property keys, action operation names ("send", "deliver", "duplicate", "advance", "drain", "fill", "confirm_cancel"), recipient channel names ("market", "credit", "client", "reports", "stock", "reservations", "shipments"), payload schema fields, contract invariant IDs, and executable step identifiers MUST remain exact and untranslated in English as defined by the system contract.`
+    `JSON property keys, action operation names ("send", "deliver", "duplicate", "advance", "drain", "fill", "confirm_cancel", "disconnect", "reconnect"), recipient channel names ("market", "credit", "client", "reports", "stock", "reservations", "shipments"), payload schema fields, contract invariant IDs, and executable step identifiers MUST remain exact and untranslated in English as defined by the system contract.`
   ].join('\n');
 }
 
@@ -167,6 +167,40 @@ export interface ReportFixedLabels {
   findingSourceLabel: string;
   experimentIndexLabel: string;
   resolvedPositionLabel: string;
+  reportTitle: string;
+  unavailable: string;
+  legacyUnavailable: string;
+  legacySystemName: string;
+  untitledFinding: string;
+  noHypothesis: string;
+  noExpectedInvariant: string;
+  expectedRuleUnavailableTemplate: string;
+  noViolationMessage: string;
+  uncategorized: string;
+  unresolvedExperimentNote: string;
+  legacyExperimentNote: string;
+  missingPlanNote: string;
+  missingTraceNote: string;
+  incompleteExecutionNote: string;
+  sourceMismatchNote: string;
+  missingExecutionNote: string;
+  replayFlagsDisagreeNote: string;
+  cleanFlagsDisagreeNote: string;
+  sendActionTitle: string;
+  drainActionTitle: string;
+  duplicateActionTitle: string;
+  advanceActionTitle: string;
+  deliverActionTitle: string;
+  fillActionTitle: string;
+  cancelActionTitle: string;
+  disconnectActionTitle: string;
+  reconnectActionTitle: string;
+  recordedEventTitle: string;
+  timeLabel: string;
+  noFindings: string;
+  recordedValueLabel: string;
+  notPresentLabel: string;
+  deliveryOutcomeLabel: string;
 }
 
 export const ENGLISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze({
@@ -233,6 +267,40 @@ export const ENGLISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze(
   findingSourceLabel: 'Finding source',
   experimentIndexLabel: 'Experiment index',
   resolvedPositionLabel: 'Resolved position',
+  reportTitle: "ChaosPilot findings report",
+  unavailable: "unavailable",
+  legacyUnavailable: "legacy / unavailable",
+  legacySystemName: "Legacy investigation / system unavailable",
+  untitledFinding: "Untitled finding",
+  noHypothesis: "No hypothesis was recorded.",
+  noExpectedInvariant: "No expected invariant was recorded.",
+  expectedRuleUnavailableTemplate: "Rule {invariant} was recorded, but its description is unavailable.",
+  noViolationMessage: "No violation message was recorded.",
+  uncategorized: "uncategorised (legacy or generic)",
+  unresolvedExperimentNote: "The recorded experiment index could not be uniquely resolved (missing, ambiguous, duplicate or legacy-out-of-range). Action/trace evidence for this finding is unavailable; no sequence is invented.",
+  legacyExperimentNote: "Legacy record: experiment resolved by the shared one-based legacy fallback because no experiment carries an explicit index.",
+  missingPlanNote: "No recorded experiment plan is available for this finding.",
+  missingTraceNote: "No recorded trace is available for this finding.",
+  incompleteExecutionNote: "Recorded execution is incomplete; the available trace does not prove the entire plan executed.",
+  sourceMismatchNote: "The finding source hash differs from the run source hash; identical-source reproduction cannot be inferred from this report.",
+  missingExecutionNote: "No execution result was recorded; a plan alone does not prove execution.",
+  replayFlagsDisagreeNote: "The experiment replay flag and finding reproduction flag disagree; both are shown separately.",
+  cleanFlagsDisagreeNote: "Experiment and finding clean-control flags disagree; do not infer a passed control.",
+  sendActionTitle: "Send a message",
+  drainActionTitle: "Deliver queued messages",
+  duplicateActionTitle: "Repeat a recorded message",
+  advanceActionTitle: "Advance the clock",
+  deliverActionTitle: "Deliver a recorded message",
+  fillActionTitle: "Schedule an order fill",
+  cancelActionTitle: "Schedule cancellation confirmation",
+  disconnectActionTitle: "Disconnect the session",
+  reconnectActionTitle: "Reconnect the session",
+  recordedEventTitle: "Recorded event",
+  timeLabel: "Time",
+  noFindings: "No findings were recorded.",
+  recordedValueLabel: 'Recorded value',
+  notPresentLabel: 'not present',
+  deliveryOutcomeLabel: 'Delivery outcome',
 });
 
 export const SPANISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze({
@@ -299,6 +367,40 @@ export const SPANISH_REPORT_LABELS: Readonly<ReportFixedLabels> = Object.freeze(
   findingSourceLabel: 'Fuente del hallazgo',
   experimentIndexLabel: 'Índice del experimento',
   resolvedPositionLabel: 'Posición resuelta',
+  reportTitle: "Informe de hallazgos de ChaosPilot",
+  unavailable: "no disponible",
+  legacyUnavailable: "antigua / no disponible",
+  legacySystemName: "Investigación antigua / sistema no disponible",
+  untitledFinding: "Hallazgo sin título",
+  noHypothesis: "No se registró ninguna hipótesis.",
+  noExpectedInvariant: "No se registró ninguna invariante esperada.",
+  expectedRuleUnavailableTemplate: "Se registró la regla {invariant}, pero su descripción no está disponible.",
+  noViolationMessage: "No se registró ningún mensaje de infracción.",
+  uncategorized: "sin categoría (registro antiguo o genérico)",
+  unresolvedExperimentNote: "No se pudo identificar de forma única el experimento registrado (ausente, ambiguo, duplicado o fuera de rango en un registro antiguo). No hay evidencia de acciones ni de traza disponible para este hallazgo; no se inventa ninguna secuencia.",
+  legacyExperimentNote: "Registro antiguo: el experimento se identificó por su posición, contando desde uno, porque ninguno tiene un índice explícito.",
+  missingPlanNote: "No hay un plan de experimento registrado disponible para este hallazgo.",
+  missingTraceNote: "No hay una traza registrada disponible para este hallazgo.",
+  incompleteExecutionNote: "La ejecución registrada está incompleta; la traza disponible no demuestra que se ejecutara todo el plan.",
+  sourceMismatchNote: "El hash de código fuente del hallazgo difiere del de la ejecución; este informe no permite deducir una reproducción con código idéntico.",
+  missingExecutionNote: "No se registró ningún resultado de ejecución; un plan por sí solo no demuestra que se ejecutara.",
+  replayFlagsDisagreeNote: "Los indicadores de reproducción del experimento y del hallazgo no coinciden; ambos se muestran por separado.",
+  cleanFlagsDisagreeNote: "Los indicadores del control limpio del experimento y del hallazgo no coinciden; no debe deducirse que el control pasó.",
+  sendActionTitle: "Enviar un mensaje",
+  drainActionTitle: "Entregar los mensajes en cola",
+  duplicateActionTitle: "Repetir un mensaje registrado",
+  advanceActionTitle: "Avanzar el reloj",
+  deliverActionTitle: "Entregar un mensaje registrado",
+  fillActionTitle: "Programar una ejecución de orden",
+  cancelActionTitle: "Programar una confirmación de cancelación",
+  disconnectActionTitle: "Desconectar la sesión",
+  reconnectActionTitle: "Reconectar la sesión",
+  recordedEventTitle: "Evento registrado",
+  timeLabel: "Tiempo",
+  noFindings: "No se registraron hallazgos.",
+  recordedValueLabel: 'Valor registrado',
+  notPresentLabel: 'no presente',
+  deliveryOutcomeLabel: 'Resultado de la entrega',
 });
 
 /**

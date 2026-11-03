@@ -12,6 +12,7 @@ import type {
 } from './domain.ts';
 import { getSimulatorApi, type SimulatorApi } from './storage.ts';
 import { compareSemanticReplay } from './evidence.ts';
+import { normalizeOutputLanguage } from './output-language.ts';
 
 export const MAX_EXPERIMENTS_LIMIT = 20;
 
@@ -63,6 +64,7 @@ export interface EvaluationReport {
     maxExperiments: number;
     trials: number;
     seeds: number[];
+    outputLanguage?: string;
   };
   provenance: {
     providerMode: 'live' | 'mock';
@@ -475,6 +477,7 @@ export function runBaselineTrial(
  * Implements bounded trials and seeds, truthful discovery metrics, and explicit provenance.
  */
 export async function runEvaluation(options: EvaluationOptions = {}): Promise<EvaluationReport> {
+  const outputLanguage = normalizeOutputLanguage(options.outputLanguage ?? options.language);
   const variant = options.variant || 'candidate-a';
   const providerKind = options.provider || 'mock';
   // Clamp finite limit consistently to MAX_EXPERIMENTS_LIMIT (20)
@@ -562,7 +565,7 @@ export async function runEvaluation(options: EvaluationOptions = {}): Promise<Ev
         const record = await runner({
           variant,
           maxExperiments,
-          outputLanguage: options.outputLanguage ?? options.language,
+          outputLanguage,
           provider: undefined as any, // provided by wrapper
         });
 
@@ -687,6 +690,7 @@ export async function runEvaluation(options: EvaluationOptions = {}): Promise<Ev
       maxExperiments,
       trials: seeds.length,
       seeds,
+      outputLanguage,
     },
     provenance: {
       providerMode: mode,

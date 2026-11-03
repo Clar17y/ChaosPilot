@@ -18,6 +18,7 @@ export type ExplanationMode = 'meta' | 'offline';
 export interface FindingEvidence {
   findingId: string; title: string; hypothesis: string; whyTested: string;
   expected: string; observed: string; violationMessage: string; category: string;
+  expectedFallbackInvariant?: string;
   experimentIndex: number; experimentPosition: number; resolution: 'explicit' | 'legacy' | 'unresolved';
   findingSourceHash: string; replayArtifact: unknown; violation: unknown; outcome: unknown;
   steps: unknown[]; trace: unknown[]; traceTruncated: boolean; stepsTruncated: boolean;
@@ -70,7 +71,8 @@ export function buildRunEvidence(record: InvestigationRecord): RunEvidence {
       title: str(f?.title, 'Untitled finding'),
       hypothesis: str(f?.hypothesis, str(experiment?.hypothesis, 'No hypothesis was recorded.')),
       whyTested: str(experiment?.hypothesis, str(f?.hypothesis, 'No hypothesis was recorded.')),
-      expected: rule.ruleText ?? (invariant ? `Rule ${invariant} was recorded, but its description is unavailable.` : 'No expected invariant was recorded.'),
+      expected: rule.ruleText ?? (invariant ? ENGLISH_REPORT_LABELS.expectedRuleUnavailableTemplate.replace('{invariant}', () => invariant) : ENGLISH_REPORT_LABELS.noExpectedInvariant),
+      expectedFallbackInvariant: rule.ruleText == null ? invariant : undefined,
       observed: str(f?.violation?.message, 'No violation message was recorded.'),
       violationMessage: str(f?.violation?.message, 'No violation message was recorded.'),
       category: str(f?.category, str(f?.violation?.category, 'uncategorised (legacy or generic)')),
@@ -156,9 +158,10 @@ export function validateNarration(content: string, evidence: RunEvidence): Findi
 
 export function offlineNarration(evidence: RunEvidence, language = 'en'): FindingNarration[] {
   const isEs = baseOutputLanguage(language) === 'es';
+  const labels = getStaticReportLabels(language) ?? ENGLISH_REPORT_LABELS;
   return evidence.findings.map(f => ({
     findingId: f.findingId,
-    headline: conciseFindingTitle({ title: f.title, category: f.category }),
+    headline: isEs ? localizeGeneratedText(f.title, labels) : conciseFindingTitle({ title: f.title, category: f.category }),
     whyTested: f.whyTested === 'No hypothesis was recorded.'
       ? (isEs ? 'No se registró ninguna hipótesis para este hallazgo, por lo que no se puede indicar el motivo por el cual se probó.' : 'No hypothesis was recorded for this finding, so the reason it was tested cannot be stated.')
       : (isEs ? `Intención de prueba registrada: ${f.whyTested}` : `Recorded test intent: ${f.whyTested}`),
@@ -178,13 +181,31 @@ function pretty(v: unknown): string { try { return typeof v === 'string' ? v : J
 
 const simpleActions: Record<string, string> = { drain: 'Deliver queued messages', duplicate: 'Repeat a recorded message', advance: 'Advance the clock', deliver: 'Deliver a recorded message', fill: 'Schedule an order fill', confirm_cancel: 'Schedule cancellation confirmation' };
 
-function sequenceItem(value: unknown, index: number, kind: 'action' | 'trace', labels: ReportFixedLabels): string {
+const generatedTextKeys = [
+  'untitledFinding', 'noHypothesis', 'noExpectedInvariant', 'noViolationMessage', 'uncategorized',
+  'unresolvedExperimentNote', 'legacyExperimentNote', 'missingPlanNote', 'missingTraceNote',
+  'incompleteExecutionNote', 'sourceMismatchNote', 'missingExecutionNote',
+  'replayFlagsDisagreeNote', 'cleanFlagsDisagreeNote', 'notRecordedLabel',
+] as const;
+function localizeGeneratedText(text: string, labels: ReportFixedLabels): string {
+  const key = generatedTextKeys.find(key => ENGLISH_REPORT_LABELS[key] === text);
+  return key ? labels[key] : text;
+}
+
+function sequenceItem(value: unknown, index: number, kind: 'action' | 'trace', labels: ReportFixedLabels, language: string): string {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const action = kind === 'action' ? data.op : data.action;
-  const actionName = typeof action === 'string' ? action : 'recorded event';
-  const entry = { step: 0, time: 0, action: actionName, outcome: kind === 'action' ? 'scheduled' : typeof data.outcome === 'string' ? data.outcome : '', payload: data.payload, state: data.state && typeof data.state === 'object' ? data.state as Record<string, unknown> : {} };
-  const title = kind === 'action' && simpleActions[actionName] ? simpleActions[actionName] : stepTitle(entry, creditFromState(entry.state));
-  const label = kind === 'action' ? [data.id, data.to].filter(v => v != null).map(String).join(' → ') : [data.time == null ? '' : `Time ${data.time}`].filter(Boolean).map(String).join('');
+  const actionName = typeof action === 'string' ? action : '';
+  const entry = { step: 0, time: 0, action: actionName || 'recorded event', outcome: kind === 'action' ? 'scheduled' : typeof data.outcome === 'string' ? data.outcome : '', payload: data.payload, state: data.state && typeof data.state === 'object' ? data.state as Record<string, unknown> : {} };
+  const actionTitles: Record<string, string> = {
+    send: labels.sendActionTitle, drain: labels.drainActionTitle, duplicate: labels.duplicateActionTitle,
+    advance: labels.advanceActionTitle, deliver: labels.deliverActionTitle, fill: labels.fillActionTitle,
+    confirm_cancel: labels.cancelActionTitle, disconnect: labels.disconnectActionTitle, reconnect: labels.reconnectActionTitle,
+  };
+  const title = baseOutputLanguage(language) === 'en'
+    ? (kind === 'action' && simpleActions[actionName] ? simpleActions[actionName] : stepTitle(entry, creditFromState(entry.state)))
+    : actionTitles[actionName] ?? `${labels.recordedEventTitle}${actionName ? ` (${actionName})` : ''}`;
+  const label = kind === 'action' ? [data.id, data.to].filter(v => v != null).map(String).join(' → ') : data.time == null ? '' : `${labels.timeLabel} ${data.time}`;
   const dataSummary = kind === 'action' ? labels.recordedActionData : labels.recordedTraceData;
   return `<li class="step"><span class="step-n">${index + 1}</span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(label)}</p><details><summary>${escapeHtml(dataSummary)}</summary><code>${escapeHtml(pretty(value))}</code></details></div></li>`;
 }
@@ -203,33 +224,39 @@ export function renderReportHtml(
   const sourceLabel = opts.mode === 'offline'
     ? labels.offlineSourceLabel
     : labels.metaSourceLabelTemplate.replace('{model}', () => opts.model);
-  const pageTitle = baseOutputLanguage(language) === 'es'
-    ? `Informe de hallazgos de ChaosPilot — ${evidence.runId}`
-    : `ChaosPilot findings report — ${evidence.runId}`;
+  const pageTitle = `${labels.reportTitle} — ${evidence.runId}`;
+  const systemName = evidence.systemId === null ? labels.legacySystemName : evidence.systemName;
 
   const cards = evidence.findings.map((f, i) => {
     const n = narrations[i];
     const steps = f.steps.length
-      ? f.steps.map((step, index) => sequenceItem(step, index, 'action', labels)).join('')
+      ? f.steps.map((step, index) => sequenceItem(step, index, 'action', labels, language)).join('')
       : `<li class="missing">${escapeHtml(labels.noRecordedActions)}</li>`;
     const trace = f.trace.length
-      ? `<ol class="flow trace">${f.trace.map((event, index) => sequenceItem(event, index, 'trace', labels)).join('')}</ol>`
+      ? `<ol class="flow trace">${f.trace.map((event, index) => sequenceItem(event, index, 'trace', labels, language)).join('')}</ol>`
       : `<p class="missing">${escapeHtml(labels.noRecordedTrace)}</p>`;
-    const comparison = recordedDifferences(f.violation);
+    const fallbackInvariant = f.expectedFallbackInvariant;
+    const expected = fallbackInvariant !== undefined
+      ? (fallbackInvariant ? labels.expectedRuleUnavailableTemplate.replace('{invariant}', () => fallbackInvariant) : labels.noExpectedInvariant)
+      : localizeGeneratedText(f.expected, labels);
+    const comparison = recordedDifferences(f.violation, baseOutputLanguage(language) === 'en' ? undefined : {
+      pathLabel: path => path.join(' / ') || labels.recordedValueLabel,
+      missingValue: labels.notPresentLabel, deliveryOutcome: labels.deliveryOutcomeLabel,
+    });
     const differences = comparison.rows.length
       ? `<section class="differences"><h4>${escapeHtml(labels.recordedDifferences)}</h4><table><thead><tr><th scope="col">${escapeHtml(labels.whatChangedHeader)}</th><th scope="col">${escapeHtml(labels.expectedHeader)}</th><th scope="col">${escapeHtml(labels.observedHeader)}</th></tr></thead><tbody>${comparison.rows.map(row => `<tr><th scope="row">${escapeHtml(row.label)}</th><td>${escapeHtml(row.expected)}</td><td>${escapeHtml(row.observed)}</td></tr>`).join('')}</tbody></table>${comparison.truncated ? `<p>${escapeHtml(labels.detailShortenedNote)}</p>` : ''}</section>`
       : '';
     return `<article class="finding" id="finding-${i + 1}">
-<h3><span class="num">${escapeHtml(labels.findingPrefix)} ${i + 1}</span> ${escapeHtml(n?.headline ?? f.title)}</h3>
+<h3><span class="num">${escapeHtml(labels.findingPrefix)} ${i + 1}</span> ${escapeHtml(n?.headline ?? localizeGeneratedText(f.title, labels))}</h3>
 <p class="interpretation"><span class="tag">${escapeHtml(labels.modelNarrationTag)}</span> ${escapeHtml(n?.interpretation ?? '')}</p>
-<section><h4>${escapeHtml(labels.whatWasTestedAndWhy)}</h4><p>${escapeHtml(n?.whyTested ?? f.whyTested)}</p><details><summary>${escapeHtml(labels.recordedHypothesis)}</summary><p>${escapeHtml(f.hypothesis)}</p></details></section>
-<section class="vs"><div class="expected"><h4>${escapeHtml(labels.expectedRecorded)}</h4><p>${escapeHtml(f.expected)}</p></div><div class="observed"><h4>${escapeHtml(labels.observedViolationRecorded)}</h4><p>${escapeHtml(f.observed)}</p><p>${escapeHtml(labels.categoryLabel)}: ${escapeHtml(f.category)}</p></div></section>
+<section><h4>${escapeHtml(labels.whatWasTestedAndWhy)}</h4><p>${escapeHtml(n?.whyTested ?? f.whyTested)}</p><details><summary>${escapeHtml(labels.recordedHypothesis)}</summary><p>${escapeHtml(localizeGeneratedText(f.hypothesis, labels))}</p></details></section>
+<section class="vs"><div class="expected"><h4>${escapeHtml(labels.expectedRecorded)}</h4><p>${escapeHtml(expected)}</p></div><div class="observed"><h4>${escapeHtml(labels.observedViolationRecorded)}</h4><p>${escapeHtml(localizeGeneratedText(f.observed, labels))}</p><p>${escapeHtml(labels.categoryLabel)}: ${escapeHtml(localizeGeneratedText(f.category, labels))}</p></div></section>
 ${differences}
 <section><h4>${escapeHtml(labels.whatHappenedNarration)}</h4><p>${escapeHtml(n?.whatHappened ?? '')}</p></section>
 <section><h4>${escapeHtml(labels.recordedActionSequence)}</h4><ol class="flow">${steps}</ol>${f.stepsTruncated ? `<p class="warn">${escapeHtml(labels.stepsTruncatedWarning)}</p>` : ''}<details><summary>${escapeHtml(labels.recordedTraceSummaryTemplate.replace('{count}', String(f.trace.length)))}</summary>${trace}</details><details><summary>${escapeHtml(labels.recordedOutcomeAndArtifact)}</summary><pre>${escapeHtml(pretty({ outcome: f.outcome, violation: f.violation, findingReplayArtifact: f.replayArtifact }))}</pre></details></section>
 <p class="status">${escapeHtml(labels.findingReproductionLabel)}: <strong>${booleanLabel(f.reproduced, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.experimentReplayLabel)}: <strong>${booleanLabel(f.replayVerified, labels.verifiedRecorded, labels.notVerifiedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.findingCleanControlLabel)}: <strong>${booleanLabel(f.cleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded)}</strong> · ${escapeHtml(labels.experimentCleanControlLabel)}: <strong>${booleanLabel(f.experimentCleanControlPassed, labels.passedRecorded, labels.notPassedRecorded, labels.unknownNotRecorded)}</strong></p>
-${f.notes.map(note => `<p class="warn">${escapeHtml(labels.evidenceNoteLabel)}: ${escapeHtml(note)}</p>`).join('')}
-<details class="ids"><summary>${escapeHtml(labels.identifiersSummary)}</summary><p>${escapeHtml(labels.findingIdLabel)}: <code>${escapeHtml(f.findingId)}</code> · ${escapeHtml(labels.findingSourceLabel)}: <code>${escapeHtml(f.findingSourceHash)}</code> · ${escapeHtml(labels.experimentIndexLabel)}: ${escapeHtml(f.experimentIndex)} · ${escapeHtml(labels.resolvedPositionLabel)}: ${escapeHtml(f.experimentPosition)} (${escapeHtml(f.resolution)})</p></details>
+${f.notes.map(note => `<p class="warn">${escapeHtml(labels.evidenceNoteLabel)}: ${escapeHtml(localizeGeneratedText(note, labels))}</p>`).join('')}
+<details class="ids"><summary>${escapeHtml(labels.identifiersSummary)}</summary><p>${escapeHtml(labels.findingIdLabel)}: <code>${escapeHtml(f.findingId)}</code> · ${escapeHtml(labels.findingSourceLabel)}: <code>${escapeHtml(localizeGeneratedText(f.findingSourceHash, labels))}</code> · ${escapeHtml(labels.experimentIndexLabel)}: ${escapeHtml(f.experimentIndex)} · ${escapeHtml(labels.resolvedPositionLabel)}: ${escapeHtml(f.experimentPosition)} (${escapeHtml(f.resolution)})</p></details>
 </article>`;
   }).join('\n');
   return `<!doctype html>
@@ -238,14 +265,14 @@ ${f.notes.map(note => `<p class="warn">${escapeHtml(labels.evidenceNoteLabel)}: 
 <title>${escapeHtml(pageTitle)}</title>
 <style>:root{color-scheme:light}body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f6f7fb;color:#172033;line-height:1.5}main{max-width:980px;margin:auto;padding:24px}.eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:.8em;color:#5366a3;font-weight:700}.subtitle{font-size:1.2em;color:#42516a}h1{font-size:clamp(2em,5vw,3em);line-height:1.1;margin:.3em 0}.finding h3{font-size:1.4em}.num{display:block;font-size:.65em;color:#5366a3;text-transform:uppercase;letter-spacing:.08em}nav{padding:12px 0 24px}a{color:#334a9e}header,.finding{background:#fff;border:1px solid #d9deeb;border-radius:14px;padding:20px;margin:0 0 18px;box-shadow:0 2px 10px #17203312}.flow{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;align-items:center}.step{background:#eef3ff;border:1px solid #b9c8f5;border-radius:10px;padding:8px;max-width:100%;flex:1 1 210px;display:flex;gap:8px;position:relative}.step:not(:last-child)::after{content:"→";position:absolute;right:-14px;top:12px;color:#5366a3}.step p{margin:.25em 0}.flow{gap:24px}.trace .step{background:#f4efff;border-color:#c9b9eb}.arrow{list-style:none;color:#5366a3}.step-n{display:inline-block;background:#334a9e;color:#fff;border-radius:50%;width:1.5em;height:1.5em;text-align:center;margin-right:6px}code,pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.86em}.vs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.expected{background:#eefbf1;border-left:5px solid #23824a;padding:10px}.observed{background:#fff0f0;border-left:5px solid #b33737;padding:10px}.warn{background:#fff7dd;border-left:5px solid #a67c00;padding:8px}.missing{color:#6b7280}.tag{background:#ece7ff;border-radius:999px;padding:2px 8px;font-size:.8em}details{margin-top:8px}@media(max-width:700px){.vs{grid-template-columns:1fr}main{padding:12px}}@media print{body{background:#fff}details>*{display:block!important}.step{break-inside:avoid}.finding,header{box-shadow:none;break-inside:avoid}}.differences{overflow-x:auto;margin:1.2em 0}.differences table{width:100%;border-collapse:collapse;text-align:left}.differences th,.differences td{padding:.65em;border-bottom:1px solid #d9deeb;vertical-align:top}.differences thead{background:#f3f5fb}.differences tbody th{font-weight:600}.flow strong{overflow-wrap:anywhere}</style></head>
 <body><main>
-<header><p class="eyebrow">${escapeHtml(labels.eyebrow)}</p><h1>${escapeHtml(labels.title)}</h1><p class="subtitle">${escapeHtml(evidence.systemName)} · ${escapeHtml(evidence.variant)} · ${evidence.findings.length} ${escapeHtml(labels.candidateFindingsSuffix)}</p>
+<header><p class="eyebrow">${escapeHtml(labels.eyebrow)}</p><h1>${escapeHtml(labels.title)}</h1><p class="subtitle">${escapeHtml(systemName)} · ${escapeHtml(evidence.variant)} · ${evidence.findings.length} ${escapeHtml(labels.candidateFindingsSuffix)}</p>
 <p>${escapeHtml(sourceLabel)}</p>
-<details><summary>${escapeHtml(labels.runIdentitySummary)}</summary><p>${escapeHtml(labels.runLabel)}: <code>${escapeHtml(evidence.runId)}</code> · ${escapeHtml(labels.runStatusLabel)}: ${escapeHtml(evidence.status)} · ${escapeHtml(labels.targetLabel)}: ${escapeHtml(evidence.variant)} · ${escapeHtml(labels.providerModeLabel)}: ${escapeHtml(evidence.provider)}/${escapeHtml(evidence.mode)} · ${escapeHtml(labels.modelRecordedLabel)}: ${escapeHtml(evidence.model)} · ${escapeHtml(labels.systemLabel)}: ${escapeHtml(evidence.systemId ?? 'legacy / unavailable')} (${escapeHtml(labels.revisionLabel)} ${escapeHtml(evidence.systemRevision ?? 'unavailable')}) · ${escapeHtml(labels.startedLabel)}: ${escapeHtml(evidence.startedAt)} · ${escapeHtml(labels.finishedLabel)}: ${escapeHtml(evidence.finishedAt ?? labels.notRecordedLabel)}</p></details>
+<details><summary>${escapeHtml(labels.runIdentitySummary)}</summary><p>${escapeHtml(labels.runLabel)}: <code>${escapeHtml(evidence.runId)}</code> · ${escapeHtml(labels.runStatusLabel)}: ${escapeHtml(evidence.status)} · ${escapeHtml(labels.targetLabel)}: ${escapeHtml(evidence.variant)} · ${escapeHtml(labels.providerModeLabel)}: ${escapeHtml(evidence.provider)}/${escapeHtml(evidence.mode)} · ${escapeHtml(labels.modelRecordedLabel)}: ${escapeHtml(evidence.model)} · ${escapeHtml(labels.systemLabel)}: ${escapeHtml(evidence.systemId ?? labels.legacyUnavailable)} (${escapeHtml(labels.revisionLabel)} ${escapeHtml(evidence.systemRevision ?? labels.unavailable)}) · ${escapeHtml(labels.startedLabel)}: ${escapeHtml(evidence.startedAt)} · ${escapeHtml(labels.finishedLabel)}: ${escapeHtml(evidence.finishedAt ?? labels.notRecordedLabel)}</p></details>
 <details><summary>${escapeHtml(labels.reportProvenanceSummary)}</summary><p>${escapeHtml(labels.generatedLabel)}: ${escapeHtml(opts.generatedAt)} · ${escapeHtml(labels.evidenceHashLabel)}: <code>${escapeHtml(evidence.evidenceHash)}</code> · ${escapeHtml(labels.sourceHashLabel)}: <code>${escapeHtml(evidence.sourceHash)}</code> · ${escapeHtml(labels.findingsIncludedLabel.replace('{count}', String(evidence.findings.length)))}</p></details>
 ${evidence.status !== 'completed' || evidence.stopReason ? `<p class="warn">${evidence.status !== 'completed' ? escapeHtml(labels.runIncompleteWarningTemplate.replace('{status}', evidence.status).replace('{reason}', '')) : ''}${escapeHtml(evidence.stopReason ?? '')}</p>` : ''}
 <p>${escapeHtml(labels.snapshotDisclaimer)}</p></header>
-<nav aria-label="${escapeHtml(labels.navAriaLabel)}">${evidence.findings.map((f, index) => `<a href="#finding-${index + 1}">${escapeHtml(labels.findingPrefix)} ${index + 1}: ${escapeHtml(conciseFindingTitle({ title: f.title, category: f.category }))}</a>`).join(' · ')}</nav>
-${cards || '<p>No findings were recorded.</p>'}
+<nav aria-label="${escapeHtml(labels.navAriaLabel)}">${evidence.findings.map((f, index) => `<a href="#finding-${index + 1}">${escapeHtml(labels.findingPrefix)} ${index + 1}: ${escapeHtml(narrations[index]?.headline ?? localizeGeneratedText(f.title, labels))}</a>`).join(' · ')}</nav>
+${cards || `<p>${escapeHtml(labels.noFindings)}</p>`}
 </main></body></html>`;
 }
 

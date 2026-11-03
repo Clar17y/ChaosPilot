@@ -8,6 +8,8 @@ import { runInvestigation } from '../src/investigation/index.ts';
 import { MockProvider } from '../src/providers/mock.ts';
 import { SEEDED_RECOVERY_BRIEF, createSystemSnapshot } from '../src/systems/index.ts';
 import * as recovery from '../src/recovery/index.ts';
+import { runEvaluation } from '../src/evaluation.ts';
+import type { InvestigationOptions } from '../src/domain.ts';
 
 function controls() {
   const select = { value: 'en', disabled: false };
@@ -110,8 +112,18 @@ describe('report label translation contract and regional output', () => {
       expect(prompt.userMessage).toContain('INVALID PROPOSAL FEEDBACK:');
       expect(prompt.userMessage).toContain('recovery_deadline');
       expect(prompt.userMessage).toContain('disconnect');
+      expect(prompt.userMessage).toContain('"disconnect", "reconnect"');
       expect(prompt.userMessage).toContain('MUST remain exact and untranslated');
     }
     expect(record.proposalAttempts?.every(attempt => attempt.requestSent === false)).toBe(true);
   });
+});
+
+it('pins the normalized evaluation language even when an investigation trial fails', async () => {
+  const runner = vi.fn(async (_options: InvestigationOptions) => { throw new Error('Scripted trial failure'); });
+  const report = await runEvaluation({ provider: 'mock', variant: 'clean', trials: 1, seeds: [1], maxExperiments: 1,
+    language: 'es-mx', investigationRunner: runner });
+  expect(report.config.outputLanguage).toBe('es-MX');
+  expect(runner.mock.calls[0]?.[0]?.outputLanguage).toBe('es-MX');
+  expect(report.provider.trials[0]?.status).toBe('failed');
 });
