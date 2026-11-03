@@ -61,7 +61,7 @@ export function evaluateJourney(evidence: JourneyEvidence, sourceHash: string, s
     const posts = evidence.exchanges.filter(e => e.method === 'POST');
     const checkpoints = evidence.exchanges.filter(e => e.method === 'GET' && e.path === '/state');
     required(posts.length === commands.length && checkpoints.length === definition.checkpoints.length, 'Incomplete request/observation horizon');
-    required(evidence.exchanges.every(e => e.status === (e.method === 'POST' ? 202 : 200) && Number.isFinite(e.elapsedMs) && e.elapsedMs >= 0), 'Transport error');
+    required(evidence.exchanges.every(e => e.transportFailure === undefined && e.status === (e.method === 'POST' ? 202 : 200) && Number.isFinite(e.elapsedMs) && e.elapsedMs >= 0), 'Transport error');
     const observation = evidence.observation;
     required(observation && observation.instanceId === evidence.instanceId && observation.processed === commands.length
       && observation.queued === 0 && observation.events.length === commands.length, 'Missing completion observation');

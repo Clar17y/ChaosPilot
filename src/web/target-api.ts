@@ -129,7 +129,8 @@ export function targetApiResultHtml(record: ApiJourneyRecord, comparison: Compar
         .map(
           (e, idx) => `
           <div style="font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
-            <strong>#${idx + 1} ${escapeHtml(e.method)} ${escapeHtml(e.path)}</strong> &rarr; HTTP ${e.status} (${Math.round(e.elapsedMs)}ms)
+            <strong>#${idx + 1} ${escapeHtml(e.method)} ${escapeHtml(e.path)}</strong> &rarr; ${e.status === 0 ? 'No HTTP response' : `HTTP ${e.status}`} (${Math.round(e.elapsedMs)}ms)
+            ${e.transportFailure ? `<p>Transport failure: ${escapeHtml(e.transportFailure.kind)} &middot; ${escapeHtml(e.transportFailure.message)}<br>Content type: ${escapeHtml(e.transportFailure.contentType ?? 'not received')} &middot; ${e.transportFailure.capturedBytes}/${e.transportFailure.receivedBytes} bytes captured/received &middot; ${e.transportFailure.complete ? 'body complete' : 'body incomplete'}${e.transportFailure.truncated ? ' &middot; preview truncated' : ''}</p><small>Response text preview:</small>${raw(e.transportFailure.preview)}` : ''}
             <details style="margin-top:2px;"><summary>Request / Response payloads</summary>
               <div class="target-api-payload-grid">
                 <div><small>Request:</small>${raw(e.request)}</div>

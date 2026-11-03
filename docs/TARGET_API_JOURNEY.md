@@ -138,3 +138,5 @@ Cancellation preserves completed journey evidence and explicitly marks every rem
 cancelled without opening another listener. Cancellation during final cleanup after all catalog work
 completed preserves the completed outcome. Incomplete/cancelled records retain malformed raw wire
 responses for inspection; unsafe responses are never promoted to typed business observations.
+
+Failed HTTP attempts retain the observed status, content type, elapsed time and a response-text preview capped at 64 KiB of captured UTF-8 bytes (the response limit remains 4 MiB). Captured/received byte counts, preview truncation and body completion are explicit; an incomplete preview contains only bytes received before termination. Status 0 means no HTTP response headers arrived and is displayed as "No HTTP response". These diagnostics remain inconclusive or cancelled, can be reopened read-only, and cannot establish a semantic match. They are bounded diagnostic text, not full raw-byte network replay. Preflight rejection and pre-abort do not create exchanges.

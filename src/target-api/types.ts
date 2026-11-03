@@ -16,9 +16,14 @@ export interface Observation {
   instanceId: string; processed: number; queued: number; events: BusinessEvent[];
   state: TargetSnapshot; orders: Record<string, OrderView>;
 }
+export interface TransportFailure {
+  kind: 'non-json' | 'invalid-json' | 'oversize' | 'deadline' | 'aborted' | 'network';
+  message: string; contentType: string | null; preview: string;
+  receivedBytes: number; capturedBytes: number; truncated: boolean; complete: boolean;
+}
 export interface Exchange {
   method: 'GET' | 'POST'; path: string; request: unknown; status: number;
-  response: unknown; elapsedMs: number;
+  response: unknown; elapsedMs: number; transportFailure?: TransportFailure;
 }
 export type Status = 'pass' | 'fail' | 'inconclusive' | 'cancelled';
 export interface Assertion { id: string; expected: unknown; observed: unknown; status: 'pass' | 'fail' | 'inconclusive' }

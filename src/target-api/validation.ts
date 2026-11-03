@@ -78,7 +78,19 @@ export function recordValidationError(value: unknown, expectedId?: string): stri
         assertions.add(a.id);
       }
       for (const e of j.exchanges) {
-        if (!object(e) || !['GET', 'POST'].includes(e.method) || !text(e.path) || !count(e.status) || e.status < 100 || e.status > 599 || !finite(e.elapsedMs) || e.elapsedMs < 0 || !('request' in e) || !('response' in e)) return 'Malformed exchange';
+        if (!object(e) || !['GET', 'POST'].includes(e.method) || !text(e.path) || !count(e.status) || (e.status !== 0 && e.status < 100) || e.status > 599 || !finite(e.elapsedMs) || e.elapsedMs < 0 || !('request' in e) || !('response' in e)) return 'Malformed exchange';
+        if (e.transportFailure !== undefined) {
+          const f = e.transportFailure;
+          if (!object(f) || !keys(f, ['kind', 'message', 'contentType', 'preview', 'receivedBytes', 'capturedBytes', 'truncated', 'complete'])
+            || !['non-json', 'invalid-json', 'oversize', 'deadline', 'aborted', 'network'].includes(f.kind)
+            || typeof f.message !== 'string' || !(f.contentType === null || typeof f.contentType === 'string') || typeof f.preview !== 'string'
+            || !count(f.receivedBytes) || !count(f.capturedBytes) || f.capturedBytes !== Math.min(65536, f.receivedBytes)
+            || new TextEncoder().encode(f.preview).length > Math.min(65536, f.capturedBytes * 3) || f.capturedBytes === 0 && f.preview !== ''
+            || typeof f.complete !== 'boolean' || typeof f.truncated !== 'boolean' || f.capturedBytes < f.receivedBytes && !f.truncated || e.response !== null
+            || e.status === 0 && (f.receivedBytes !== 0 || f.contentType !== null || f.complete || !['deadline', 'aborted', 'network'].includes(f.kind))
+            || ['non-json', 'invalid-json'].includes(f.kind) && (!f.complete || e.status === 0)
+            || !['inconclusive', 'cancelled'].includes(j.status)) return 'Malformed transport failure evidence';
+        } else if (e.status === 0) return 'Missing transport failure evidence';
         if (['inconclusive', 'cancelled'].includes(j.status)) continue;
         if (e.status === 200 && e.method === 'GET' && ['/state', '/events'].includes(e.path) && !isObservation(e.response)) return 'Malformed wire observation';
         if (e.status === 202 && e.method === 'POST' && (!command(e.request) || !object(e.response) || !text(e.response.instanceId) || !text(e.response.receiptId) || !text(e.response.requestId) || !count(e.response.sequence) || e.response.status !== 'queued')) return 'Malformed receipt';

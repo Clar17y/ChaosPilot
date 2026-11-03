@@ -7,7 +7,7 @@ import { CATALOG } from './catalog.ts';
 import { digest, evaluatorIdentity, transportIdentity } from './identity.ts';
 import { aggregate, evaluateJourney } from './evaluator.ts';
 import { startTarget, commandPath, type TargetOptions } from './target.ts';
-import { requestJson } from './client.ts';
+import { requestJson, TargetRequestError } from './client.ts';
 import type { ApiJourneyRecord, JourneyEvidence, Observation } from './types.ts';
 
 export interface RunOptions { variant: TargetVariant; systemSnapshot: SystemBriefSnapshot; signal?: AbortSignal; timeoutMs?: number;
@@ -46,7 +46,10 @@ export async function runApiJourneys(options: RunOptions): Promise<ApiJourneyRec
       target = await startTarget({ ...options.targetOptions, variant });
       evidence.instanceId = target.instanceId; evidence.endpoint = target.endpoint;
       const request = async (method: 'GET' | 'POST', path: string, body?: unknown) => {
-        const exchange = await requestJson(target!.endpoint, method, path, body, controller.signal);
+        const exchange = await requestJson(target!.endpoint, method, path, body, controller.signal).catch(error => {
+          if (error instanceof TargetRequestError) evidence.exchanges.push(error.exchange);
+          throw error;
+        });
         evidence.exchanges.push(exchange);
         if (exchange.status !== (method === 'POST' ? 202 : 200)) throw new Error(`Target HTTP ${exchange.status}`);
         const response = exchange.response as { instanceId?: string };
