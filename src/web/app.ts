@@ -2518,7 +2518,8 @@ btnRefreshHistory.addEventListener('click', () => {
   loadHistory();
 });
 document.getElementById('btn-report-refresh')?.addEventListener('click', () => { void refreshReportStatus(); });
-document.getElementById('btn-challenge-muse')?.addEventListener('click', () => { void challengeSession.generate(); });
+// Reopening the same run can reset the session while preserving the displayed language choice.
+document.getElementById('btn-challenge-muse')?.addEventListener('click', () => { updateChallengeLanguage(); void challengeSession.generate(); });
 document.getElementById('btn-challenge-cancel')?.addEventListener('click', () => { challengeSession.cancel(); });
 document.getElementById('btn-challenge-refresh')?.addEventListener('click', () => { void challengeSession.refresh(); });
 document.getElementById('btn-report-meta')?.addEventListener('click', () => { void createReport('meta'); });
