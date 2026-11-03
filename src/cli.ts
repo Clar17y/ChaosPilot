@@ -34,6 +34,7 @@ import {
   captureBenchmarkFreeze,
   type BenchmarkReport,
 } from './benchmark.ts';
+import { normalizeOutputLanguage } from './output-language.ts';
 
 const SUPPORTED_PROVIDERS: ProviderKind[] = ['mock', 'meta'];
 
@@ -49,6 +50,7 @@ interface ParsedArgs {
   trials?: number;
   seeds?: number[];
   id?: string;
+  language?: string;
   continueAfterFindings?: boolean;
   systemId?: string;
   compare?: string;
@@ -155,6 +157,10 @@ function parseCliArgs(args: string[]): ParsedArgs {
       const val = arg.startsWith('--freeze=') ? arg.slice('--freeze='.length) : args[++i];
       if (!val) throw new Error(`Missing value for --freeze.`);
       result.freeze = val;
+    } else if (arg === '--language' || arg.startsWith('--language=') || arg === '-l' || arg.startsWith('-l=')) {
+      const val = arg.startsWith('--language=') ? arg.slice('--language='.length) : (arg.startsWith('-l=') ? arg.slice('-l='.length) : args[++i]);
+      if (!val) throw new Error('Missing value for --language.');
+      result.language = normalizeOutputLanguage(val);
     } else if (arg === '--continue-after-findings') {
       result.continueAfterFindings = true;
     } else if (arg === '--max-experiments' || arg.startsWith('--max-experiments=')) {
@@ -231,6 +237,7 @@ Options:
   --freeze          Path to freeze manifest for benchmark or benchmark-freeze
   --max-experiments Maximum experiments to execute (default: 5 for evaluate, 6 for benchmark)
   --continue-after-findings  Continue after verified findings until bounds/provider stop (default: stop at first finding; extra live proposals may cost more)
+  --language, -l    Output language for model responses: 'en' (default), 'es', or custom language tag/name
   --trials          Number of trials (default: 3 for evaluate, 2 for benchmark)
   --seeds           Comma-separated seeds (e.g. 1001,1002,1003)
   --id              Run artifact ID for replay command or benchmark ID
@@ -342,6 +349,7 @@ async function handleInvestigate(args: ParsedArgs): Promise<void> {
       variant: target,
       maxExperiments,
       continueAfterFindings: args.continueAfterFindings === true,
+      outputLanguage: args.language,
       provider,
       systemBrief: structuredClone(snapshot),
       signal: abortController.signal,
@@ -437,6 +445,7 @@ async function handleEvaluate(args: ParsedArgs): Promise<void> {
     maxExperiments,
     trials,
     seeds: args.seeds,
+    language: args.language,
   });
 
   // Save evaluation report
@@ -465,6 +474,7 @@ async function handleEvaluate(args: ParsedArgs): Promise<void> {
 }
 
 async function handleReplay(args: ParsedArgs): Promise<void> {
+  if (args.language) throw new Error('Replay command does not support --language: replay deterministically reproduces saved executions without model calls.');
   const runsDir = args.runsDir ?? 'runs';
   let rawTarget = args.id;
   if (!rawTarget) {
@@ -516,6 +526,7 @@ async function handleReplay(args: ParsedArgs): Promise<void> {
 }
 
 async function handleBenchmark(args: ParsedArgs): Promise<void> {
+  if (args.language) throw new Error('Benchmark commands do not support --language: benchmark prompt identity and baseline comparability are frozen.');
   if (args.systemId && args.systemId !== 'trading-gateway') throw new Error('Benchmark is trading-only');
   if (args.target !== undefined) assertAdapterVariant('synthetic-trading', args.target);
   if (args.targets !== undefined) for (const t of args.targets) assertAdapterVariant('synthetic-trading', t);
@@ -617,6 +628,7 @@ async function handleBenchmark(args: ParsedArgs): Promise<void> {
 }
 
 async function handleBenchmarkFreeze(args: ParsedArgs): Promise<void> {
+  if (args.language) throw new Error('Benchmark commands do not support --language: benchmark prompt identity and baseline comparability are frozen.');
   const freezePath = args.freeze || 'runs/freeze-manifest.json';
   console.log(`\n============================================================`);
   console.log(` Capturing Benchmark Freeze Manifest`);

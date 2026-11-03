@@ -65,6 +65,7 @@ export interface ChallengeRecord {
     clean?: SourceBundle;
   };
   variants: ChallengeVariant[];
+  language?: string;
   proposalResponse?: { text: string; bytes: number; truncated: boolean };
   requests: ChallengeRequest[];
   interpretation: { status: 'pending' | 'available' | 'unavailable' | 'cancelled' | 'not-requested'; text?: string; error?: string };

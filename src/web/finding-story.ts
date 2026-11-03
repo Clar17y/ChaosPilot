@@ -33,8 +33,8 @@ function labelFor(path: string[]): string {
   return path.join(' / ') || 'Recorded value';
 }
 
-function display(value: unknown): string {
-  if (value === undefined) return 'not present';
+function display(value: unknown, missingValue = 'not present'): string {
+  if (value === undefined) return missingValue;
   if (value === null) return 'null';
   const text = String(value);
   return text.length > 160 ? `${text.slice(0, 157)}…` : text;
@@ -44,7 +44,9 @@ function display(value: unknown): string {
  * Compare only values present in the oracle's recorded expected/actual evidence.
  * The full evidence stays available in the report; this is a bounded summary.
  */
-export function recordedDifferences(violation: unknown): { rows: RecordedDifference[]; truncated: boolean } {
+export function recordedDifferences(violation: unknown, labels?: {
+  pathLabel: (path: string[]) => string; missingValue: string; deliveryOutcome: string;
+}): { rows: RecordedDifference[]; truncated: boolean } {
   if (!object(violation) || !object(violation.evidence)) return { rows: [], truncated: false };
   const evidence = violation.evidence;
   const rows: RecordedDifference[] = [];
@@ -54,10 +56,10 @@ export function recordedDifferences(violation: unknown): { rows: RecordedDiffere
     if (Object.is(expected, observed)) return;
     if (rows.length >= 12) { truncated = true; return; }
     if ((typeof expected === 'string' && expected.length > 160) || (typeof observed === 'string' && observed.length > 160)) truncated = true;
-    rows.push({ label, expected: display(expected), observed: display(observed) });
+    rows.push({ label, expected: display(expected, labels?.missingValue), observed: display(observed, labels?.missingValue) });
   };
   if (typeof evidence.expectedOutcome === 'string' && typeof evidence.outcome === 'string') {
-    add('Delivery outcome', evidence.expectedOutcome, evidence.outcome);
+    add(labels?.deliveryOutcome ?? 'Delivery outcome', evidence.expectedOutcome, evidence.outcome);
   }
   const walk = (expected: unknown, observed: unknown, path: string[], depth: number): void => {
     if (++visited > 500 || depth > 8) { truncated = true; return; }
@@ -67,7 +69,7 @@ export function recordedDifferences(violation: unknown): { rows: RecordedDiffere
         walk(expected[key], observed[key], [...path, key], depth + 1);
       }
     } else if (!object(expected) && !object(observed) && !Array.isArray(expected) && !Array.isArray(observed)) {
-      add(labelFor(path), expected, observed);
+      add(labels?.pathLabel(path) ?? labelFor(path), expected, observed);
     } else {
       // A structural difference is retained in the full recorded evidence.
       truncated = true;

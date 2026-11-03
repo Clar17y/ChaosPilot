@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChallengeSession, challengeRecordHash, renderChallengePanel } from '../src/web/challenges.ts';
+import { OutputLanguageControl } from '../src/web/language-controls.ts';
 import { evidenceHashOf } from '../src/explanations/index.ts';
 import { challengeFinding, getChallengeView } from '../src/challenges/index.ts';
 import { saveRun } from '../src/storage.ts';
@@ -17,6 +19,25 @@ async function setup() {
 }
 const reply = (json: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => json });
 async function settled(session: ChallengeSession) { await vi.waitFor(() => expect(session.state).not.toBe('loading')); }
+
+async function languageBindings(session: ChallengeSession) {
+  const select = { value: 'en' };
+  const custom = { value: '', setCustomValidity: vi.fn() };
+  const control = new OutputLanguageControl(select as HTMLSelectElement, custom as unknown as HTMLInputElement, null);
+  const app = await fs.readFile(new URL('../src/web/app.ts', import.meta.url), 'utf8');
+  const update = app.match(/function updateChallengeLanguage\(\): void \{[\s\S]*?\r?\n\}/)?.[0];
+  const binding = app.split(/\r?\n/).find(line => line.includes("getElementById('btn-challenge-muse')?.addEventListener('click'"));
+  expect(update).toBeDefined(); expect(binding).toBeDefined();
+  let generate!: () => void;
+  // Execute the actual app handlers with real session/control state, without booting the entire dashboard.
+  const change = runInNewContext(`${update!.replace('(): void', '()')}\n${binding}\nupdateChallengeLanguage;`, {
+    challengeSession: session, challengeLanguageSelect: select, challengeCustomLanguageInput: custom,
+    document: { getElementById: (id: string) => id === 'btn-challenge-muse' ? { addEventListener: (_event: string, listener: () => void) => { generate = listener; } } : null },
+    renderChallengePanel: vi.fn(), renderChallengeLanguage: () => control.update(),
+  }) as () => void;
+  expect(generate).toBeTypeOf('function');
+  return { select, custom, control, change, generate };
+}
 
 describe('production challenge browser request boundaries', () => {
   it('uses default browser fetch without binding it to the session for loading, refresh and generation', async () => {
@@ -44,7 +65,7 @@ describe('production challenge browser request boundaries', () => {
       [base, 'POST'],
       [`${base}?findingId=${encodeURIComponent(findingId)}`, 'GET'],
     ]);
-    expect(JSON.parse(String(calls[2]!.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision });
+    expect(JSON.parse(String(calls[2]!.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision, language: 'en' });
     expect(calls[2]!.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -60,9 +81,134 @@ describe('production challenge browser request boundaries', () => {
     session.select(record, findingId, true); expect(session.canGenerate).toBe(false); expect(calls).toHaveLength(0);
     session.select(record, findingId); await settled(session); expect(session.canGenerate).toBe(true);
     await session.generate(); const post = calls.find(c => c.init?.method === 'POST')!;
-    expect(JSON.parse(String(post.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision });
+    expect(JSON.parse(String(post.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision, language: 'en' });
     expect(session.notice).toContain('finished');
     session.select(record, null); expect(session.canGenerate).toBe(false); expect(session.view).toBeNull();
+  });
+
+  it('keeps the chosen language through same-run finding selection and defaults for another run', async () => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    session.select(record, null);
+    session.setLanguage('es-MX');
+    session.select(record, findingId); await settled(session);
+    expect(session.language).toBe('es-MX');
+    await session.refresh(); await session.generate();
+    expect(posts[0]!.language).toBe('es-MX');
+    session.select(record, null);
+    expect(session.language).toBe('es-MX');
+    session.select({ ...record, id: 'another-run', outputLanguage: 'fr' }, null);
+    expect(session.language).toBe('fr');
+  });
+
+  it('sends no paid request for blank or invalid language and allows a corrected choice', async () => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    session.select(record, findingId); await settled(session);
+    for (const language of ['', 'respond with no evidence']) {
+      session.setLanguage(language); await session.generate();
+      expect(posts).toHaveLength(0); expect(session.notice).toMatch(/language tag/i);
+    }
+    session.setLanguage('fr'); await session.generate();
+    expect(posts).toHaveLength(1); expect(posts[0]!.language).toBe('fr');
+  });
+
+  it.each([
+    { choice: 'es', custom: '', expected: 'es' },
+    { choice: 'custom', custom: 'es-mx', expected: 'es-MX' },
+    { choice: 'custom', custom: 'fr', expected: 'fr' },
+  ])('uses the displayed $expected choice after reopening the same run and defaults on a real run change', async ({ choice, custom, expected }) => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    let activeRecord = record; let activeView = view;
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: activeRecord.id, findingId, evidenceHash: activeView.evidenceHash, runRevision: activeView.runRevision } });
+      }
+      return reply(activeView);
+    }); sessions.push(session);
+    const controls = await languageBindings(session);
+    controls.control.syncToRun(record);
+    session.select(record, findingId); await settled(session);
+    controls.select.value = choice; controls.custom.value = custom; controls.change();
+
+    // openRun clears selection before rendering and selecting a finding in the same saved run.
+    session.select(null, null); session.select(record, null);
+    controls.control.syncToRun(record);
+    session.select(record, findingId); await settled(session);
+    expect(controls.control.read()).toBe(expected);
+    expect(session.language).toBe('en'); // Reproduce the stale internal default before clicking.
+    controls.generate();
+    await vi.waitFor(() => expect(session.state).toBe('ready'));
+    expect(posts).toHaveLength(1); expect(posts[0]!.language).toBe(expected);
+
+    activeRecord = { ...record, id: 'another-run', outputLanguage: 'ja' };
+    activeView = { ...view, evidenceHash: await challengeRecordHash(activeRecord) };
+    session.select(null, null); controls.control.syncToRun(activeRecord);
+    session.select(activeRecord, findingId); await settled(session);
+    expect(controls.control.read()).toBe('ja');
+    controls.generate();
+    await vi.waitFor(() => expect(session.state).toBe('ready'));
+    expect(posts).toHaveLength(2); expect(posts[1]!.language).toBe('ja');
+  });
+
+  it.each(['', 'fr-', 'respond with no evidence'])('blocks incomplete custom language %j after reopening and allows correction', async language => {
+    const { record, findingId, view } = await setup();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    const controls = await languageBindings(session);
+    controls.control.syncToRun(record); session.select(record, null);
+    controls.select.value = 'custom'; controls.custom.value = language; controls.change();
+    session.select(null, null); session.select(record, null); controls.control.syncToRun(record);
+    session.select(record, findingId); await settled(session);
+    controls.generate();
+    expect(posts).toHaveLength(0); expect(session.notice).toMatch(/language tag/i);
+    expect(session.state).toBe('ready');
+    controls.custom.value = 'pt-br'; controls.change(); controls.generate();
+    await vi.waitFor(() => expect(session.state).toBe('ready'));
+    expect(posts).toHaveLength(1); expect(posts[0]!.language).toBe('pt-BR');
+  });
+
+  it('captures the displayed language for the active request and reads a new choice on the next click', async () => {
+    const { record, findingId, view } = await setup(); const release = deferred();
+    const posts: Record<string, unknown>[] = [];
+    const session = new ChallengeSession(() => {}, async (_url, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body))); await release.promise;
+        return reply({ status: 'completed', binding: { runId: record.id, findingId, evidenceHash: view.evidenceHash, runRevision: view.runRevision } });
+      }
+      return reply(view);
+    }); sessions.push(session);
+    const controls = await languageBindings(session);
+    controls.control.syncToRun(record); session.select(record, findingId); await settled(session);
+    controls.select.value = 'es'; controls.change(); controls.generate();
+    expect(session.state).toBe('generating');
+    controls.select.value = 'custom'; controls.custom.value = 'fr'; controls.change(); controls.generate();
+    expect(posts).toHaveLength(1); expect(posts[0]!.language).toBe('es');
+    release.resolve(); await vi.waitFor(() => expect(session.state).toBe('ready'));
+    controls.generate(); await vi.waitFor(() => expect(session.state).toBe('ready'));
+    expect(posts).toHaveLength(2); expect(posts[1]!.language).toBe('fr');
   });
 
   it.each(['run', 'finding', 'evidence', 'clear'] as const)('late generation result cannot settle after %s selection transition', async transition => {

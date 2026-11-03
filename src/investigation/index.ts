@@ -29,6 +29,7 @@ import {
 } from './prompt.ts';
 import { evaluateRequirementRules } from '../requirements/evaluator.ts';
 import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from '../requirements/identity.ts';
+import { normalizeOutputLanguage } from '../output-language.ts';
 import { isRecoveryEvaluatorIdentity, recoveryEvaluatorAvailable } from '../recovery/oracle.ts';
 import { RECOVERY_DEADLINE_TICKS } from '../recovery/contract.ts';
 import { pinCoveragePlan, recordScenarioChecks, reviewedCoverageGoals } from './coverage-evidence.ts';
@@ -124,6 +125,7 @@ export function isRecoveryDeadlineCleanControlConfirmed(
 }
 
 export async function runInvestigation(options: ExtendedInvestigationOptions): Promise<InvestigationRecord> {
+  const outputLanguage = normalizeOutputLanguage(options.outputLanguage ?? options.language);
   const id = options.id || `inv-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const variant = options.variant;
   const provider: ExperimentProvider = options.provider;
@@ -234,6 +236,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     model: provider.model,
     mode: provider.kind === 'mock' ? 'mock' : 'live',
     variant,
+    outputLanguage,
     ...(options.continueAfterFindings === true ? { continueAfterFindings: true as const } : {}),
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -374,6 +377,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       maxExperiments,
       feedback: feedback.length > 0 ? [...feedback] : undefined,
       systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
+      outputLanguage,
       ...(coveragePlan ? { reviewedScenarios: reviewedCoverageGoals(coveragePlan, systemBriefSnapshot!) } : {}),
     };
 

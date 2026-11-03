@@ -131,6 +131,7 @@ Managed worktrees live in the sibling `<repo>-worktrees/` directory on a `codex/
 ```sh
 npm run demo
 npm run investigate -- --provider mock --target candidate-a
+npm run investigate -- --provider mock --target candidate-a --language es
 npm run investigate -- --provider mock --system-id trading-recovery --target recovery-candidate-a
 npm run investigate -- --provider mock --system-id trading-recovery --target clean
 npm run investigate -- --provider mock --system-id inventory-reservation --target inventory-candidate-a
@@ -146,6 +147,17 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+### Output language selection
+
+ChaosPilot supports natural-language model output in languages other than English, with first-class Spanish (`es`) support and arbitrary model-supported languages (e.g. `fr`, `de`, `ja`, canonical BCP-47 tags or recognized aliases such as French):
+
+Custom tags use two- or three-letter language codes with optional region, script, variant, Unicode or private-use extensions, canonicalized by `Intl`. Standalone private-use tags and forms rejected by `Intl` are not accepted. This validates syntax; language capability depends on the selected model.
+
+- **CLI options**: `investigate` and `evaluate` accept `--language <tag>` (or `-l <tag>`). Commands with frozen benchmark identity (`benchmark`, `benchmark-freeze`) or deterministically replayed runs (`replay`) reject `--language` to protect baseline identity.
+- **Machine identifier preservation**: JSON keys, actions (`send`, `deliver`, `drain`, `fill`, etc.), channels (`market`, `credit`, `client`, etc.), payload schemas, and contract invariant IDs strictly remain in exact untranslated English.
+- **Findings reports**: HTML finding reports can be generated in English or Spanish offline, or in arbitrary languages with Muse. Each run retains one saved report; generating a report in a different language atomically replaces it with clear UI status and sets the appropriate HTML `lang` and `title`.
+- **Challenges (Watch verification)**: Challenge sessions default to the run's saved language or allow selecting a language before running proposal and interpretation.
 
 `demo` uses the scripted mock and is an offline plumbing demonstration. Evaluation with `--provider mock` is also offline validation. Use `--provider meta` for live evaluation after checking credentials and credit. Saved investigations and evaluation artifacts live under the ignored `runs/` directory.
 

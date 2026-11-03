@@ -1,3 +1,4 @@
+import { OutputLanguageControl } from './language-controls.ts';
 import type { CoverageResultFields } from '../coverage/types.ts';
 import { initFunctionalWorkspaceView } from './functional.ts';
 import { initTargetApiWorkspaceView, type TargetApiController } from './target-api.ts';
@@ -144,6 +145,7 @@ const reportSession = new FindingExplanationSession();
 const challengeSession = new ChallengeSession(() => {
   const host = document.getElementById('challenge-panel');
   if (host) renderChallengePanel(host, challengeSession);
+  renderChallengeLanguage();
 });
 const reproPlayback = new PlaybackController(0, () => renderReproductionDetail());
 
@@ -329,6 +331,34 @@ const runNotes = document.getElementById('run-notes') as HTMLElement;
 const findingsContainer = document.getElementById('findings-container') as HTMLElement;
 const experimentsContainer = document.getElementById('experiments-container') as HTMLElement;
 const traceContainer = document.getElementById('trace-container') as HTMLElement;
+
+// Language Selection DOM Elements
+const investigationLanguageSelect = document.getElementById('investigation-language-select') as HTMLSelectElement | null;
+const investigationCustomLanguageWrap = document.getElementById('investigation-custom-language-wrap') as HTMLElement | null;
+const investigationCustomLanguageInput = document.getElementById('investigation-custom-language-input') as HTMLInputElement | null;
+
+const reportLanguageSelect = document.getElementById('report-language-select') as HTMLSelectElement | null;
+const reportCustomLanguageWrap = document.getElementById('report-custom-language-wrap') as HTMLElement | null;
+const reportCustomLanguageInput = document.getElementById('report-custom-language-input') as HTMLInputElement | null;
+
+const challengeLanguageSelect = document.getElementById('challenge-language-select') as HTMLSelectElement | null;
+const challengeCustomLanguageWrap = document.getElementById('challenge-custom-language-wrap') as HTMLElement | null;
+const challengeCustomLanguageInput = document.getElementById('challenge-custom-language-input') as HTMLInputElement | null;
+
+const investigationLanguage = new OutputLanguageControl(investigationLanguageSelect, investigationCustomLanguageInput, investigationCustomLanguageWrap);
+const reportLanguage = new OutputLanguageControl(reportLanguageSelect, reportCustomLanguageInput, reportCustomLanguageWrap);
+const challengeLanguage = new OutputLanguageControl(challengeLanguageSelect, challengeCustomLanguageInput, challengeCustomLanguageWrap);
+
+function renderChallengeLanguage(): void {
+  challengeLanguage.update();
+  challengeLanguage.setBusy(challengeSession.state === 'generating' || challengeSession.view?.inFlight === true);
+  if (challengeLanguage.error) {
+    const button = document.getElementById('btn-challenge-muse') as HTMLButtonElement | null;
+    if (button) button.disabled = true;
+    const status = document.getElementById('challenge-status');
+    if (status) status.textContent += ` ${challengeLanguage.error}`;
+  }
+}
 const traceTitle = document.getElementById('trace-title') as HTMLElement;
 const traceExpSelectorLabel = document.getElementById('trace-exp-selector-label') as HTMLElement;
 const creditStateTable = document.getElementById('credit-state-table') as HTMLElement;
@@ -701,38 +731,47 @@ function renderReportPanel(): void {
   const identity = rec ? `${rec.variant} · ${scope === 'legacy' ? 'Legacy / system unavailable' : rec.systemBrief?.brief.name ?? rec.systemBrief?.brief.id ?? 'system unavailable'}${scope === 'other' ? ' (another system)' : ''}` : '';
   const canAct = Boolean(rec && rec.status !== 'running' && rec.findings.length && !['loading', 'unavailable'].includes(reportSession.state.kind));
   for (const id of ['btn-report-meta', 'btn-report-offline']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = !canAct || reportSession.state.kind === 'generating'; }
+  reportLanguage.update();
+  reportLanguage.setBusy(reportSession.state.kind === 'generating');
+  if (reportLanguage.error) {
+    for (const id of ['btn-report-meta', 'btn-report-offline']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = true; }
+  }
+  const refresh = document.getElementById('btn-report-refresh') as HTMLButtonElement | null;
+  if (refresh) refresh.disabled = ['loading', 'generating'].includes(reportSession.state.kind);
   const saved = reportSession.state.kind === 'saved';
   for (const id of ['btn-report-view', 'btn-report-download']) { const b = document.getElementById(id) as HTMLButtonElement | null; if (b) b.disabled = !saved; }
-  if (statusEl) statusEl.textContent = !rec ? 'No run is currently opened.' : `${identity}: ${reportStateText(reportSession.state)}`;
+  if (statusEl) statusEl.textContent = !rec ? 'No run is currently opened.' : `${identity}: ${reportStateText(reportSession.state)}${reportLanguage.error ? ` ${reportLanguage.error}` : ''}`;
   document.getElementById('explanation-report-panel')?.setAttribute('aria-busy', String(['loading', 'generating'].includes(reportSession.state.kind)));
 }
-async function refreshReportStatus(): Promise<void> {
+async function refreshReportStatus(reportStatusPoll = false): Promise<void> {
   const rec = currentInvestigationRecord;
   if (!rec) { reportSession.resetForRun(null); renderReportPanel(); return; }
   reportSession.syncToRun(rec.id);
+  if (reportSession.state.kind === 'generating' && !reportStatusPoll) return;
   if (rec.status === 'running') { reportSession.state = reportStatusToUi({ terminal: false, findingsCount: rec.findings.length }); renderReportPanel(); return; }
   const token = reportSession.begin(rec.id, 'loading'); renderReportPanel();
   try {
     const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report/status`);
     const data = res.ok ? await res.json() : null;
     if (!reportSession.settle(token, rec.id, reportStatusToUi(data))) return;
-    if (reportSession.state.kind === 'generating') setTimeout(() => { if (reportSession.isCurrent(token, rec.id)) void refreshReportStatus(); }, 1000);
+    if (reportSession.state.kind === 'generating') setTimeout(() => { if (reportSession.isCurrent(token, rec.id)) void refreshReportStatus(true); }, 1000);
   } catch { if (!reportSession.settle(token, rec.id, { kind: 'error', message: 'Could not check for a saved report.' })) return; }
   renderReportPanel();
 }
 async function createReport(mode: 'meta' | 'offline'): Promise<void> {
   const rec = currentInvestigationRecord; if (!rec) return;
   if (reportSession.state.kind === 'generating' || rec.status === 'running' || !rec.findings.length) return;
-  const token = reportSession.begin(rec.id, 'generating'); renderReportPanel();
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
-    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
-    if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `Report creation failed (${res.status})`);
-    if (!reportSession.settle(token, rec.id, { kind: 'saved', generatedAt: String(data.generatedAt ?? ''), mode: String(data.mode ?? mode), model: String(data.model ?? '') })) return;
-    announce('Findings report saved. You can view or download it again without a model call.');
-  } catch (e) { if (!reportSession.settle(token, rec.id, { kind: 'error', message: e instanceof Error ? e.message : String(e) })) return; }
-  renderReportPanel();
+    const language = reportLanguage.read();
+    if (await reportSession.create(rec, mode, language, renderReportPanel)) {
+      announce('Findings report saved. You can view or download it again without a model call.');
+    }
+  } catch (error) {
+    reportSession.state = { kind: 'error', message: error instanceof Error ? error.message : String(error) };
+    renderReportPanel();
+  }
 }
+
 function openSavedReport(download: boolean, findingNumber?: number): void {
   const rec = currentInvestigationRecord; if (!rec || reportSession.state.kind !== 'saved') return;
   const fragment = !download && findingNumber !== undefined ? `#finding-${findingNumber}` : '';
@@ -756,7 +795,7 @@ function effectiveAdapter(): string | null { return effectiveAdapterId({ isDraft
 function workspaceSystemId(): string | null { return effectiveWorkspaceSystemId({ isDraftMode, selectedSystemId: selectedSystem?.id ?? null }); }
 function syncStopControls(): void { const s = stopControlState({ isStartPending: lifecycle.startPending, isInvestigationActive, serverStatus: serverRunStatus }); for (const b of [btnStop, btnStopGlobal, btnStopDashboard]) { if (!b) continue; b.disabled = !s.enabled; b.textContent = s.label; b.classList.toggle('hidden', !s.visible && b !== btnStop); } const bar = document.getElementById('global-active-run'); const txt = document.getElementById('global-active-text'); if (bar) bar.classList.toggle('hidden', !s.visible); if (bar && txt && s.visible) { const sys = activeRecordBriefId ? `system ${activeRecordBriefId}` : 'system unavailable (legacy)'; txt.textContent = lifecycle.startPending && !isInvestigationActive ? 'Investigation starting…' : `Investigation ${serverRunStatus} · ${activeRecordId ?? ''} · ${sys}`; } updateActiveOtherSystemNotice(); }
 function updateInspectionNotice(): void { const el = document.getElementById('inspection-notice'); if (!el) return; const rec = currentInvestigationRecord; if (!rec) { el.classList.add('hidden'); el.textContent = ''; return; } const scope = inspectionScope(rec.systemBrief?.brief.id ?? null, workspaceSystemId()); if (scope === 'selected') { el.classList.add('hidden'); el.textContent = ''; return; } el.classList.remove('hidden'); el.textContent = scope === 'legacy' ? `Viewing run ${rec.id} · Legacy / system unavailable: not assigned to ${isDraftMode ? 'the unsaved draft' : (selectedSystem?.name ?? 'the selected system')}.` : `Viewing run ${rec.id} from system ${rec.systemBrief?.brief.id}, not ${isDraftMode ? 'the unsaved draft' : `the selected system (${selectedSystem?.name ?? 'none'})`}. Its findings are shown under that run's identity.`; }
-function renderEmptyDashboard(message: string): void { challengeSession.select(null, null); regressionController?.selectFinding(null, null); coverageController?.inspectRun(null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
+function renderEmptyDashboard(message: string): void { reportLanguage.syncToRun(null); challengeLanguage.syncToRun(null); challengeSession.select(null, null); regressionController?.selectFinding(null, null); coverageController?.inspectRun(null); reproPlayback.stop(); cancelStagePacket(); lastStageRenderKey = ""; reproSession.clear(); clearFreshView(); reproShowFull = false; reproModel = null; const empty = document.getElementById('dashboard-empty'); const detail = document.getElementById('dashboard-detail'); const right = document.getElementById('dashboard-header-right'); if (empty) { empty.textContent = message; empty.classList.remove('hidden'); } detail?.classList.add('hidden'); right?.classList.add('hidden'); dashRunId.textContent = 'No investigation selected'; if (dashSystemBrief) dashSystemBrief.textContent = ''; dashTarget.textContent = ''; dashTime.textContent = ''; dashModel.textContent = ''; applyStatePresentation(); updateInspectionNotice(); }
 function openActiveRun(): void { recordSequencer.invalidate(); showView('investigations'); const target = lifecycle.openActiveTarget(); if (!target) { if (isLaunchRequestPending) renderEmptyDashboard('Investigation is starting.'); return; } const rec = latestLiveRecord && latestLiveRecord.id === target.id ? latestLiveRecord : (currentInvestigationRecord && currentInvestigationRecord.id === target.id ? currentInvestigationRecord : null); if (rec) { resetReproductionSelection(); selectedExperimentIndex = 0; isInspectingHistory = false; currentInvestigationRecord = rec; renderActiveRecord(rec); renderFindingsView(); return; } renderEmptyDashboard('Investigation is starting.'); }
 function updateProvenanceBadge(mode: 'mock' | 'live' | 'replay'): void {
   provenanceBadge.className = 'provenance-badge';
@@ -980,7 +1019,11 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
 
   dashTarget.textContent = `Variant: ${rec.variant} · ${continuationSettingLabel(rec.continueAfterFindings)}`;
   dashTime.textContent = `Started: ${new Date(rec.startedAt).toLocaleTimeString()}`;
-  dashModel.textContent = `Model: ${rec.model}`;
+  const langDisplay = rec.outputLanguage ? (rec.outputLanguage === 'es' ? 'Español' : rec.outputLanguage === 'en' ? 'English' : rec.outputLanguage) : 'English';
+  dashModel.textContent = `Model: ${rec.model} · Language: ${langDisplay}`;
+
+  reportLanguage.syncToRun(rec);
+  challengeLanguage.syncToRun(rec);
 
   updateProvenanceBadge(rec.mode);
   updateStatusPill(rec.status);
@@ -2087,10 +2130,12 @@ function updateRequestPreflight(): void {
   const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
     && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
     && scopedVariants().includes(targetSelect.value);
-  void requestPreflight.update(validSelection && selectedSystem ? {
+  investigationLanguage.update();
+  void requestPreflight.update(validSelection && selectedSystem && !investigationLanguage.error ? {
     systemId: selectedSystem.id, expectedRevision: selectedSystem.revision, adapterId: selectedSystem.adapterId,
     variant: targetSelect.value, provider: providerSelect.value,
-    maxExperiments: selectedMaxExperiments()
+    maxExperiments: selectedMaxExperiments(),
+    language: investigationLanguage.read(),
   } : null);
 }
 
@@ -2106,6 +2151,7 @@ function updateRunReadiness(): void {
   }
   syncStopControls();
   if (targetSelect) targetSelect.disabled = effectiveTargetState() !== 'ready' || scopedVariants().length === 0;
+  investigationLanguage.setBusy(isLaunchRequestPending);
   if (systemSelect) systemSelect.disabled = isLaunchRequestPending || isSystemSavePending;
   if (btnNewSystem) btnNewSystem.disabled = isLaunchRequestPending || isSystemSavePending;
   renderWorkspaceSummaries();
@@ -2129,6 +2175,7 @@ function launchBlockedReason(): string | null {
     targetState: effectiveTargetState(),
   });
   if (reason) return reason;
+  if (investigationLanguage.error) return investigationLanguage.error;
   // Recovery can never launch without the coverage feature and a valid plan.
   if (effectiveAdapter() === 'synthetic-trading-recovery' && !coverageController)
     return coverageLoadFailed ? 'COVERAGE UNAVAILABLE: RECOVERY LAUNCH REQUIRES VALID PREPARATION AND A REVIEWED PLAN' : 'COVERAGE IS STILL LOADING';
@@ -2385,6 +2432,7 @@ btnLaunch.addEventListener('click', async () => {
     showAlert(reason ?? 'Please select a saved system profile.');
     return;
   }
+  const language = investigationLanguage.read();
   recordSequencer.invalidate(); lifecycle.beginLaunch(); latestLiveRecord = null; isInspectingHistory = false; currentInvestigationRecord = null; resetReproductionSelection(); renderEmptyDashboard('Starting investigation…'); serverRunStatus = 'starting';
   selectedExperimentIndex = 0;
   // Clearing the previous inspection changes its token. Capture this launch
@@ -2415,6 +2463,7 @@ btnLaunch.addEventListener('click', async () => {
       continueAfterFindings: continueAfterFindingsInput?.checked === true,
       systemId: systemToRun.id,
       expectedRevision: systemToRun.revision,
+      language,
     };
     const coveragePlan = coverageLaunch?.plan;
     if (coveragePlan) {
@@ -2477,7 +2526,8 @@ btnRefreshHistory.addEventListener('click', () => {
   loadHistory();
 });
 document.getElementById('btn-report-refresh')?.addEventListener('click', () => { void refreshReportStatus(); });
-document.getElementById('btn-challenge-muse')?.addEventListener('click', () => { void challengeSession.generate(); });
+// Reopening the same run can reset the session while preserving the displayed language choice.
+document.getElementById('btn-challenge-muse')?.addEventListener('click', () => { updateChallengeLanguage(); void challengeSession.generate(); });
 document.getElementById('btn-challenge-cancel')?.addEventListener('click', () => { challengeSession.cancel(); });
 document.getElementById('btn-challenge-refresh')?.addEventListener('click', () => { void challengeSession.refresh(); });
 document.getElementById('btn-report-meta')?.addEventListener('click', () => { void createReport('meta'); });
@@ -2513,6 +2563,20 @@ providerSelect.addEventListener('change', () => {
 });
 
 maxExperimentsInput.addEventListener('input', updateRequestPreflight);
+
+investigationLanguageSelect?.addEventListener('change', updateRunReadiness);
+investigationCustomLanguageInput?.addEventListener('input', updateRunReadiness);
+reportLanguageSelect?.addEventListener('change', renderReportPanel);
+reportCustomLanguageInput?.addEventListener('input', renderReportPanel);
+function updateChallengeLanguage(): void {
+  // Keep invalid/incomplete input out of the paid request while still allowing typing.
+  challengeSession.setLanguage(challengeLanguageSelect?.value === 'custom' ? challengeCustomLanguageInput?.value ?? '' : challengeLanguageSelect?.value ?? 'en');
+  const host = document.getElementById('challenge-panel');
+  if (host) renderChallengePanel(host, challengeSession);
+  renderChallengeLanguage();
+}
+challengeLanguageSelect?.addEventListener('change', updateChallengeLanguage);
+challengeCustomLanguageInput?.addEventListener('input', updateChallengeLanguage);
 
 if (targetSelect) {
   targetSelect.addEventListener('change', () => {
