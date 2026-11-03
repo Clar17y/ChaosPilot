@@ -26,7 +26,9 @@
     "prefreeze-benchmark": "npm run build",
     "freeze-benchmark": "node --env-file-if-exists=.env dist/cli.js benchmark-freeze",
     "prereplay": "npm run build",
-    "replay": "node --env-file-if-exists=.env dist/cli.js replay"
+    "replay": "node --env-file-if-exists=.env dist/cli.js replay",
+    "preapi-journey": "npm run build",
+    "api-journey": "node --env-file-if-exists=.env dist/cli.js api-journey"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

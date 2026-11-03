@@ -1,5 +1,6 @@
 import type { CoverageResultFields } from '../coverage/types.ts';
 import { initFunctionalWorkspaceView } from './functional.ts';
+import { initTargetApiWorkspaceView, type TargetApiController } from './target-api.ts';
 import { resolveExperimentPositionForIndex } from '../experiment-identity.ts';
 import { initRegressionWorkspaceView, type RegressionController } from './regressions.ts';
 import type {
@@ -2076,6 +2077,13 @@ function updateRequestPreflight(): void {
     snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
     selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
   });
+  targetApiController.setContext({
+    systemId: selectedSystem?.id ?? null, revision: selectedSystem?.revision ?? null,
+    isDraftMode, hasUnsavedSystemEdits, isSystemSavePending,
+    hasSelectedSystem: Boolean(selectedSystem), selectedAdapterId: effectiveAdapter(),
+    snapshotState: effectiveSnapshotState(), targetState: effectiveTargetState(),
+    selectedVariant: targetSelection.selection, allowedVariants: scopedVariants(),
+  });
   const validSelection = selectedSystem && !isDraftMode && !hasUnsavedSystemEdits
     && effectiveSnapshotState() === 'ready' && effectiveTargetState() === 'ready'
     && scopedVariants().includes(targetSelect.value);
@@ -2753,6 +2761,12 @@ const regressionController: RegressionController = initRegressionWorkspaceView({
   onOpenFunctionalView: () => {
     showView('functional');
   },
+});
+
+const targetApiController: TargetApiController = initTargetApiWorkspaceView(variant => {
+  targetSelection.select(variant);
+  targetSelect.value = targetSelection.selection ?? '';
+  updateRunReadiness();
 });
 
 renderEmptyDashboard('No investigation selected. Open a saved run from history or prepare a new investigation.'); syncStopControls(); showView('overview', false);

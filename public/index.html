@@ -671,6 +671,76 @@
               <p class="muted">No saved regression executions for this system profile.</p>
             </div>
           </section>
+
+          <!-- Target API Journey Suite -->
+          <section class="card" id="target-api-journey-section" style="margin-top: 20px;" aria-labelledby="target-api-title">
+            <header class="rowtop" style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <p class="eyebrow" style="margin:0 0 4px 0;">Isolated loopback HTTP target API</p>
+                <h2 id="target-api-title" style="margin:0;">Target API journeys</h2>
+                <p class="muted" style="margin:4px 0 0 0;">Scripted asynchronous target HTTP endpoint journey with real transport receipts, independent business assertions, and semantic rerun comparison. No model calls.</p>
+              </div>
+            </header>
+
+            <div id="target-api-eligibility-banner" class="alert-banner hidden" role="alert" style="margin: 16px 0;">
+              <span id="target-api-eligibility-message"></span>
+            </div>
+
+            <div class="grid" style="margin-top: 16px;">
+              <section class="card">
+                <h3>Run configuration</h3>
+                <p class="muted">Execute the reviewed scenario catalog against an isolated local HTTP target listener.</p>
+                <div class="control-group">
+                  <label for="target-api-system-display">Selected system</label>
+                  <input type="text" id="target-api-system-display" class="form-input" readonly>
+                </div>
+                <div class="control-group">
+                  <label for="target-api-target-select">Target variant</label>
+                  <select id="target-api-target-select" class="form-input"></select>
+                </div>
+                <div class="actions" style="margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-primary" id="btn-run-target-api">Run API journeys</button>
+                  <button type="button" class="btn btn-secondary" id="btn-compare-target-api" disabled>Rerun &amp; Compare</button>
+                  <span id="target-api-run-status" class="muted" style="margin-left: 8px;"></span>
+                </div>
+              </section>
+
+              <section class="card">
+                <h3>Scenario catalog</h3>
+                <div id="target-api-catalog-list">
+                  <p class="muted">Loading catalog…</p>
+                </div>
+              </section>
+            </div>
+
+            <!-- Active / Inspected Target API Journey Run -->
+            <section class="card hidden" id="target-api-results-card" style="margin-top: 20px;">
+              <div class="rowtop" style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <h3 style="margin:0;">Target API journey execution results</h3>
+                  <p class="muted" id="target-api-run-meta" style="margin:4px 0 0 0;"></p>
+                </div>
+                <span id="target-api-run-badge" class="system-badge"></span>
+              </div>
+
+              <div class="three" style="margin: 16px 0;">
+                <div><div class="big" id="target-api-stat-journeys">0/0</div><small>journeys passed</small></div>
+                <div><div class="big" id="target-api-stat-assertions">0/0</div><small>assertions passed</small></div>
+                <div><div class="big" id="target-api-stat-status">-</div><small>overall outcome</small></div>
+              </div>
+
+              <div id="target-api-journeys-container"></div>
+            </section>
+
+            <!-- Historical Saved Target API Runs -->
+            <section class="card" id="target-api-history-card" style="margin-top: 20px;">
+              <h3>Saved target API runs</h3>
+              <p class="muted">Historical runs for this system profile. Persisted under runs/api-journeys.</p>
+              <div id="target-api-history-list">
+                <p class="muted">No saved target API runs for this system profile.</p>
+              </div>
+            </section>
+          </section>
         </section>
 
       </main>
