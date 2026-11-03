@@ -28,6 +28,7 @@ import {
 } from './prompt.ts';
 import { evaluateRequirementRules } from '../requirements/evaluator.ts';
 import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from '../requirements/identity.ts';
+import { normalizeOutputLanguage } from '../output-language.ts';
 
 export {
   PROMPT_VERSION,
@@ -66,6 +67,7 @@ function cloneRecord(record: InvestigationRecord): InvestigationRecord {
 }
 
 export async function runInvestigation(options: ExtendedInvestigationOptions): Promise<InvestigationRecord> {
+  const outputLanguage = normalizeOutputLanguage(options.outputLanguage ?? options.language);
   const id = options.id || `inv-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const variant = options.variant;
   const provider: ExperimentProvider = options.provider;
@@ -170,6 +172,7 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
     model: provider.model,
     mode: provider.kind === 'mock' ? 'mock' : 'live',
     variant,
+    outputLanguage,
     ...(options.continueAfterFindings === true ? { continueAfterFindings: true as const } : {}),
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -308,7 +311,8 @@ export async function runInvestigation(options: ExtendedInvestigationOptions): P
       experimentNumber: experimentCount + 1,
       maxExperiments,
       feedback: feedback.length > 0 ? [...feedback] : undefined,
-      systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined
+      systemBrief: systemBriefSnapshot ? structuredClone(systemBriefSnapshot) : undefined,
+      outputLanguage
     };
 
     let reply: ProviderReply;

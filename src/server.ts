@@ -39,6 +39,7 @@ import {
 import { buildRunEvidence, generateReport, type ExplanationMode, type ExplanationTransport } from './explanations/index.ts';
 import { metaExplanationTransport } from './explanations/meta-transport.ts';
 import { challengeFinding, getChallengeView } from './challenges/index.ts';
+import { normalizeOutputLanguage } from './output-language.ts';
 import {
   SystemIntegrityError,
   SystemConflictError,
@@ -607,6 +608,13 @@ export class ChaosPilotServer {
             this.sendJson(res, 400, { error: 'Select a saved system revision, supported target and provider for preflight.' });
             return;
           }
+          let preflightLanguage = 'en';
+          try {
+            preflightLanguage = normalizeOutputLanguage(body.language ?? body.outputLanguage);
+          } catch (err) {
+            this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+            return;
+          }
           try {
             // Unlike getSystemBrief, this never seeds missing records on disk.
             const brief = await readSystemBriefFile(resolveSystemPath(this.systemsDir, body.systemId), body.systemId);
@@ -627,7 +635,8 @@ export class ChaosPilotServer {
               contract: adapter.getContract(), source: adapter.getSourceBundle(variant),
               history: [], experimentNumber: 1,
               maxExperiments: Math.min(Math.max(1, Math.floor(Number(body.maxExperiments) || 5)), 20),
-              systemBrief: snapshot
+              systemBrief: snapshot,
+              outputLanguage: preflightLanguage,
             });
             const headroomBytes = prepared.maxPromptBytes - prepared.promptBytes;
             this.sendJson(res, 200, {
@@ -689,6 +698,14 @@ export class ChaosPilotServer {
               return;
             }
             const continueAfterFindings = body.continueAfterFindings === true;
+
+            let outputLanguage = 'en';
+            try {
+              outputLanguage = normalizeOutputLanguage(body.language ?? body.outputLanguage);
+            } catch (err) {
+              this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+              return;
+            }
 
             if (!isKnownTargetVariant(variant)) {
               this.sendJson(res, 400, { error: `Invalid target variant: "${String(variant)}"` });
@@ -803,6 +820,7 @@ export class ChaosPilotServer {
                   variant,
                   maxExperiments,
                   continueAfterFindings,
+                  outputLanguage,
                   provider,
                   signal: abortController.signal,
                   systemBrief: structuredClone(systemSnapshot),
@@ -1468,13 +1486,23 @@ export class ChaosPilotServer {
               || typeof data.expectedEvidenceHash !== 'string' || !data.expectedEvidenceHash
               || typeof data.expectedRunRevision !== 'string' || !data.expectedRunRevision
               || (data.interpret !== undefined && typeof data.interpret !== 'boolean')
-              || Object.keys(data).some(k => !['mode', 'findingId', 'interpret', 'expectedEvidenceHash', 'expectedRunRevision'].includes(k))) {
+              || Object.keys(data).some(k => !['mode', 'findingId', 'interpret', 'expectedEvidenceHash', 'expectedRunRevision', 'language'].includes(k))) {
               this.sendJson(res, 400, { error: 'Explicit mode: meta, findingId and the selected saved evidence identity are required. interpret must be boolean. This action uses the paid Meta API.' }); return;
+            }
+            let challengeLanguage: string | undefined;
+            if (data.language !== undefined) {
+              try {
+                challengeLanguage = normalizeOutputLanguage(data.language);
+              } catch (err) {
+                this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+                return;
+              }
             }
             if (this.activeInvestigation?.id === id) { this.sendJson(res, 409, { error: 'Wait for the terminal run to finish saving' }); return; }
             const result = await challengeFinding(id, data.findingId, {
               runsDir: this.runsDir, transport: this.challengeTransportOverride, signal: controller.signal,
               interpret: data.interpret !== false, expectedEvidenceHash: data.expectedEvidenceHash, expectedRunRevision: data.expectedRunRevision,
+              language: challengeLanguage,
             });
             this.sendJson(res, result.status === 'completed' ? 201 : result.status === 'cancelled' ? 409 : 422, result);
           } catch (error) {
@@ -1516,7 +1544,7 @@ export class ChaosPilotServer {
           const current = buildRunEvidence(refreshed);
           const stale = Boolean(saved && saved.meta.evidenceHash !== current.evidenceHash);
           if (method === 'GET' && reportStatusMatch) {
-            this.sendJson(res, 200, { exists: Boolean(saved), stale, inFlight: this.explanationInFlight.has(id), terminal: refreshed.status !== 'running', status: refreshed.status, findingsCount: refreshed.findings.length, ...(saved ? { generatedAt: saved.meta.generatedAt, mode: saved.meta.mode, model: saved.meta.model, evidenceHash: saved.meta.evidenceHash } : {}), runId: id, currentEvidenceHash: current.evidenceHash });
+            this.sendJson(res, 200, { exists: Boolean(saved), stale, inFlight: this.explanationInFlight.has(id), terminal: refreshed.status !== 'running', status: refreshed.status, findingsCount: refreshed.findings.length, ...(saved ? { generatedAt: saved.meta.generatedAt, mode: saved.meta.mode, model: saved.meta.model, evidenceHash: saved.meta.evidenceHash, language: saved.meta.language ?? 'en' } : { language: refreshed.outputLanguage ?? 'en' }), runId: id, currentEvidenceHash: current.evidenceHash });
             return;
           }
           if (method === 'GET' && reportMatch) {
@@ -1535,8 +1563,16 @@ export class ChaosPilotServer {
           if (!ct.toLowerCase().includes('application/json')) { this.sendJson(res, 415, { error: 'Content-Type must be application/json' }); return; }
           const { data, error, status } = await this.readJsonBody(req);
           if (error) { this.sendJson(res, status || 400, { error }); return; }
-          const mode = ((data ?? {}) as Record<string, unknown>).mode;
+          const reqBody = (data ?? {}) as Record<string, unknown>;
+          const mode = reqBody.mode;
           if (mode !== 'meta' && mode !== 'offline') { this.sendJson(res, 400, { error: 'mode must be "meta" (calls Muse via the Meta API and incurs usage) or "offline" (scripted, no model call).' }); return; }
+          let reportLanguage = 'en';
+          try {
+            reportLanguage = normalizeOutputLanguage(reqBody.language ?? reqBody.outputLanguage ?? record.outputLanguage);
+          } catch (err) {
+            this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+            return;
+          }
           // Body consumption yields: claim again after it, before any model call.
           if (this.explanationInFlight.has(id)) { this.sendJson(res, 409, { error: 'A findings report is already being generated for this run.' }); return; }
           this.explanationInFlight.add(id);
@@ -1553,19 +1589,19 @@ export class ChaosPilotServer {
                 transport = this.explanationTransportOverride ?? metaExplanationTransport();
               }
               const generatedAt = new Date().toISOString();
-              const generated = await generateReport(source, { mode: mode as ExplanationMode, transport, signal: controller.signal, generatedAt });
+              const generated = await generateReport(source, { mode: mode as ExplanationMode, transport, signal: controller.signal, generatedAt, language: reportLanguage });
               // Recheck exact run/evidence before saving; protects existing report on failure/staleness.
               const again = await getRun(id, this.runsDir);
               if (!again) { this.sendJson(res, 409, { error: 'Run was deleted while the report was generating. No report was saved.' }); return; }
               if (buildRunEvidence(again).evidenceHash !== current.evidenceHash) { this.sendJson(res, 409, { error: 'Run evidence changed while the report was generating. No report was saved; create it again from the current evidence.' }); return; }
-              const meta = { runId: id, evidenceHash: generated.evidence.evidenceHash, generatedAt, mode: mode as ExplanationMode, model: generated.model, findingIds: generated.evidence.findings.map(f => f.findingId) };
+              const meta = { runId: id, evidenceHash: generated.evidence.evidenceHash, generatedAt, mode: mode as ExplanationMode, model: generated.model, findingIds: generated.evidence.findings.map(f => f.findingId), language: reportLanguage };
               controller.signal.throwIfAborted();
               await saveFindingReport(id, generated.html, meta, this.runsDir, controller.signal);
-              this.sendJson(res, 201, { ...meta, findingsCount: meta.findingIds.length, usage: generated.usage ?? null });
+              this.sendJson(res, 201, { ...meta, findingsCount: meta.findingIds.length, usage: generated.usage ?? null, language: reportLanguage });
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            const statusCode = /already being generated|deleted|evidence changed/.test(msg) ? 409 : /Missing MODEL_API_KEY/.test(msg) ? 503 : /exceeds maximum|oversize/.test(msg) ? 413 : 422;
+            const statusCode = /already being generated|deleted|evidence changed/.test(msg) ? 409 : /Missing MODEL_API_KEY/.test(msg) ? 503 : /exceeds maximum|oversize/.test(msg) ? 413 : /Language|language|Invalid language/.test(msg) ? 400 : 422;
             this.sendJson(res, statusCode, { error: msg });
           } finally { res.off?.('close', disconnected); this.explanationInFlight.delete(id); }
           return;

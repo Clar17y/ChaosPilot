@@ -109,6 +109,8 @@ export interface EvaluationOptions {
   trials?: number;
   seeds?: number[];
   simulator?: SimulatorApi;
+  outputLanguage?: string;
+  language?: string;
   investigationRunner?: (options: InvestigationOptions) => Promise<InvestigationRecord>;
 }
 
@@ -560,6 +562,7 @@ export async function runEvaluation(options: EvaluationOptions = {}): Promise<Ev
         const record = await runner({
           variant,
           maxExperiments,
+          outputLanguage: options.outputLanguage ?? options.language,
           provider: undefined as any, // provided by wrapper
         });
 

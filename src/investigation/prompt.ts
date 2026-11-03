@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import type { ProviderContext } from '../domain.ts';
 import { canonicalJson } from '../evidence.ts';
 import { INVENTORY_PROMPT_VERSION, INVENTORY_SYSTEM_PROMPT, INVENTORY_PROMPT_TEMPLATE_HASH } from './inventory-prompt.ts';
+import { buildLanguagePromptInstruction } from '../output-language.ts';
 
 export const PROMPT_VERSION = '3.1';
 
@@ -171,7 +172,17 @@ export function buildInvestigationPrompt(context: ProviderContext, historyWindow
     '',
     'PRIOR OBSERVATIONS AND RESULTS:',
     historySection,
-    feedbackSection,
+    feedbackSection
+  );
+
+  if (context.outputLanguage) {
+    const langInstruction = buildLanguagePromptInstruction(context.outputLanguage);
+    if (langInstruction) {
+      userMessageParts.push('', langInstruction);
+    }
+  }
+
+  userMessageParts.push(
     '',
     'Please output the complete JSON experiment for this next proposal.'
   );

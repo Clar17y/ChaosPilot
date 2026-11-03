@@ -24,6 +24,7 @@ export class ChallengeSession {
   notice = '';
   runId: string | null = null;
   findingId: string | null = null;
+  language = 'en';
   waitsForSave = false;
   private record: InvestigationRecord | null = null;
   private selection = '';
@@ -41,11 +42,17 @@ export class ChallengeSession {
     this.seq++; this.controller?.abort(); this.controller = null; clearTimeout(this.poll);
     this.selection = selection; this.record = record ? structuredClone(record) : null;
     this.runId = record?.id ?? null; this.findingId = findingId; this.waitsForSave = waitsForSave; this.view = null;
+    this.language = record?.outputLanguage ?? 'en';
     this.expectedRevision = null;
     this.expectedHash = null;
     this.state = 'idle'; this.notice = !findingId ? 'Select a confirmed finding to challenge it.' : waitsForSave ? 'Wait for the terminal run to finish saving.' : '';
     this.changed();
     if (record && findingId && !waitsForSave) void this.refresh();
+  }
+  setLanguage(lang: string): void {
+    if (this.language === lang) return;
+    this.language = lang;
+    this.changed();
   }
   private url(): string { return `/api/runs/${encodeURIComponent(this.runId!)}/challenges`; }
   private schedule(token: number): void {
@@ -122,7 +129,7 @@ export class ChallengeSession {
     try {
       const response = await this.fetchFn(this.url(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ mode: 'meta', findingId: this.findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision }),
+        body: JSON.stringify({ mode: 'meta', findingId: this.findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision, language: this.language }),
       });
       if (!response.ok) throw new Error(await parseApiErrorResponse(response));
       const result = await response.json() as ChallengeRecord;
@@ -159,8 +166,10 @@ export function renderChallengePanel(host: HTMLElement, session: ChallengeSessio
   const create = find<HTMLButtonElement>('btn-challenge-muse'); if (create) create.disabled = !session.canGenerate;
   const cancel = find<HTMLButtonElement>('btn-challenge-cancel'); if (cancel) cancel.disabled = session.state !== 'generating';
   const refresh = find<HTMLButtonElement>('btn-challenge-refresh'); if (refresh) refresh.disabled = !session.findingId || session.waitsForSave || session.state === 'generating' || session.state === 'loading';
+  const savedLanguage = view?.current?.language ?? view?.latestAttempt?.language ?? view?.latestPartial?.language;
   if (status) status.textContent = [
     session.runId && session.findingId ? `Run ${session.runId} · finding ${session.findingId}.` : '',
+    savedLanguage ? `Saved language: ${savedLanguage === 'es' ? 'Español' : savedLanguage === 'en' ? 'English' : savedLanguage}.` : '',
     session.notice,
     session.state === 'generating' ? 'Muse challenge in progress…' : view?.inFlight ? 'A challenge for this finding is in progress. Saved evidence will refresh.' : session.state === 'loading' ? 'Checking saved challenge evidence…' : '',
     view?.stale ? 'Earlier challenge evidence is stale and is not displayed as current.' : '',

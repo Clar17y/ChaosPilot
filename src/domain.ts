@@ -173,6 +173,7 @@ export interface ProviderContext {
   maxExperiments: number;
   feedback?: string[];
   systemBrief?: SystemBriefSnapshot;
+  outputLanguage?: string;
 }
 
 export type ProposalAttemptStatus =
@@ -273,6 +274,8 @@ export interface InvestigationRecord {
   model: string;
   mode: 'live' | 'mock';
   variant: TargetVariant;
+  /** Normalized output language. Defaults to English ('en') on legacy records. */
+  outputLanguage?: string;
   /** Opt-in continuation after verified findings. Absent on legacy records (treated as false). */
   continueAfterFindings?: boolean;
   status: 'running' | 'completed' | 'cancelled' | 'failed';
@@ -306,6 +309,8 @@ export interface InvestigationOptions {
   continueAfterFindings?: boolean;
   maxExperiments?: number;
   maxProposalAttempts?: number;
+  outputLanguage?: string;
+  language?: string;
   provider: ExperimentProvider;
   signal?: AbortSignal;
   onUpdate?: (record: InvestigationRecord) => void | Promise<void>;

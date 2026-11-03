@@ -18,6 +18,7 @@ import { computeSnapshotHash, validateSystemBrief } from './systems/index.ts';
 import { getPromptIdentity } from './investigation/prompt.ts';
 import { evaluateRequirementRules } from './requirements/evaluator.ts';
 import { isRequirementEvaluatorIdentity, requirementEvaluatorAvailable } from './requirements/identity.ts';
+import { normalizeOutputLanguage } from './output-language.ts';
 export {
   SEEDED_TRADING_BRIEF,
   validateSystemId,
@@ -44,6 +45,7 @@ export interface RunSummary {
   findingsCount: number;
   experimentsCount: number;
   sourceHash: string;
+  outputLanguage?: string;
   /** Minimal pinned brief metadata, present only when the record carries a snapshot. */
   systemBrief?: {
     id: string;
@@ -310,6 +312,7 @@ export async function listRuns(runsDir = 'runs'): Promise<RunSummary[]> {
           findingsCount: parsed.findings.length,
           experimentsCount: parsed.experiments.length,
           sourceHash: parsed.sourceHash,
+          outputLanguage: parsed.outputLanguage ? normalizeOutputLanguage(parsed.outputLanguage) : 'en',
         };
         const snap = (parsed as InvestigationRecord).systemBrief;
         if (
@@ -369,6 +372,7 @@ export interface FindingReportMeta {
   mode: 'meta' | 'offline';
   model: string;
   findingIds: string[];
+  language?: string;
 }
 
 function reportsDir(runsDir: string): string { return path.join(path.resolve(runsDir), 'reports'); }
@@ -444,7 +448,11 @@ export async function saveFindingReport(id: string, html: string, meta: FindingR
     await fs.mkdir(reportsDir(runsDir), { recursive: true });
     const finalPath = resolveReportPath(runsDir, id);
     const tempPath = `${finalPath}.tmp-${crypto.randomBytes(12).toString('hex')}`;
-    const metadata = Buffer.from(JSON.stringify(meta), 'utf8').toString('base64');
+    const cleanMeta: FindingReportMeta = {
+      ...meta,
+      language: normalizeOutputLanguage(meta.language),
+    };
+    const metadata = Buffer.from(JSON.stringify(cleanMeta), 'utf8').toString('base64');
     try {
       await fs.writeFile(tempPath, `<!-- chaospilot-report:${metadata} -->\n${html}`, { encoding: 'utf8', flag: 'wx', signal });
       signal?.throwIfAborted();
@@ -458,8 +466,17 @@ export async function getFindingReport(id: string, runsDir = 'runs'): Promise<{ 
     const artifact = await fs.readFile(resolveReportPath(runsDir, id), 'utf8');
     const match = /^<!-- chaospilot-report:([A-Za-z0-9+/=]+) -->\n/.exec(artifact);
     if (!match) return null;
-    const meta = JSON.parse(Buffer.from(match[1]!, 'base64').toString('utf8')) as FindingReportMeta;
-    if (!meta || meta.runId !== id || typeof meta.evidenceHash !== 'string' || !Array.isArray(meta.findingIds)) return null;
+    const rawMeta = JSON.parse(Buffer.from(match[1]!, 'base64').toString('utf8')) as Record<string, unknown>;
+    if (!rawMeta || rawMeta.runId !== id || typeof rawMeta.evidenceHash !== 'string' || !Array.isArray(rawMeta.findingIds)) return null;
+    const meta: FindingReportMeta = {
+      runId: rawMeta.runId as string,
+      evidenceHash: rawMeta.evidenceHash as string,
+      generatedAt: String(rawMeta.generatedAt ?? ''),
+      mode: rawMeta.mode === 'offline' ? 'offline' : 'meta',
+      model: String(rawMeta.model ?? ''),
+      findingIds: rawMeta.findingIds as string[],
+      language: normalizeOutputLanguage(rawMeta.language),
+    };
     return { html: artifact.slice(match[0].length), meta };
   } catch { return null; }
 }

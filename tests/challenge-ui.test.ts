@@ -44,7 +44,7 @@ describe('production challenge browser request boundaries', () => {
       [base, 'POST'],
       [`${base}?findingId=${encodeURIComponent(findingId)}`, 'GET'],
     ]);
-    expect(JSON.parse(String(calls[2]!.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision });
+    expect(JSON.parse(String(calls[2]!.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision, language: 'en' });
     expect(calls[2]!.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -60,7 +60,7 @@ describe('production challenge browser request boundaries', () => {
     session.select(record, findingId, true); expect(session.canGenerate).toBe(false); expect(calls).toHaveLength(0);
     session.select(record, findingId); await settled(session); expect(session.canGenerate).toBe(true);
     await session.generate(); const post = calls.find(c => c.init?.method === 'POST')!;
-    expect(JSON.parse(String(post.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision });
+    expect(JSON.parse(String(post.init?.body))).toEqual({ mode: 'meta', findingId, interpret: true, expectedEvidenceHash: view.evidenceHash, expectedRunRevision: view.runRevision, language: 'en' });
     expect(session.notice).toContain('finished');
     session.select(record, null); expect(session.canGenerate).toBe(false); expect(session.view).toBeNull();
   });

@@ -328,6 +328,72 @@ const runNotes = document.getElementById('run-notes') as HTMLElement;
 const findingsContainer = document.getElementById('findings-container') as HTMLElement;
 const experimentsContainer = document.getElementById('experiments-container') as HTMLElement;
 const traceContainer = document.getElementById('trace-container') as HTMLElement;
+
+// Language Selection DOM Elements
+const investigationLanguageSelect = document.getElementById('investigation-language-select') as HTMLSelectElement | null;
+const investigationCustomLanguageWrap = document.getElementById('investigation-custom-language-wrap') as HTMLElement | null;
+const investigationCustomLanguageInput = document.getElementById('investigation-custom-language-input') as HTMLInputElement | null;
+
+const reportLanguageSelect = document.getElementById('report-language-select') as HTMLSelectElement | null;
+const reportCustomLanguageWrap = document.getElementById('report-custom-language-wrap') as HTMLElement | null;
+const reportCustomLanguageInput = document.getElementById('report-custom-language-input') as HTMLInputElement | null;
+
+const challengeLanguageSelect = document.getElementById('challenge-language-select') as HTMLSelectElement | null;
+const challengeCustomLanguageWrap = document.getElementById('challenge-custom-language-wrap') as HTMLElement | null;
+const challengeCustomLanguageInput = document.getElementById('challenge-custom-language-input') as HTMLInputElement | null;
+
+function selectedInvestigationLanguage(): string {
+  if (!investigationLanguageSelect) return 'en';
+  if (investigationLanguageSelect.value === 'custom') {
+    return investigationCustomLanguageInput?.value.trim() || 'en';
+  }
+  return investigationLanguageSelect.value || 'en';
+}
+
+function selectedReportLanguage(): string {
+  if (!reportLanguageSelect) return 'en';
+  if (reportLanguageSelect.value === 'custom') {
+    return reportCustomLanguageInput?.value.trim() || 'en';
+  }
+  return reportLanguageSelect.value || 'en';
+}
+
+function syncReportLanguageToRun(runLanguage?: string): void {
+  if (!reportLanguageSelect) return;
+  const lang = runLanguage ?? 'en';
+  if (lang === 'en' || lang === 'es') {
+    reportLanguageSelect.value = lang;
+    if (reportCustomLanguageWrap) reportCustomLanguageWrap.classList.add('hidden');
+    if (reportCustomLanguageInput) reportCustomLanguageInput.value = '';
+  } else {
+    reportLanguageSelect.value = 'custom';
+    if (reportCustomLanguageWrap) reportCustomLanguageWrap.classList.remove('hidden');
+    if (reportCustomLanguageInput) reportCustomLanguageInput.value = lang;
+  }
+}
+
+function selectedChallengeLanguage(): string {
+  if (!challengeLanguageSelect) return 'en';
+  if (challengeLanguageSelect.value === 'custom') {
+    return challengeCustomLanguageInput?.value.trim() || 'en';
+  }
+  return challengeLanguageSelect.value || 'en';
+}
+
+function syncChallengeLanguageToRun(runLanguage?: string): void {
+  if (!challengeLanguageSelect) return;
+  const lang = runLanguage ?? 'en';
+  if (lang === 'en' || lang === 'es') {
+    challengeLanguageSelect.value = lang;
+    if (challengeCustomLanguageWrap) challengeCustomLanguageWrap.classList.add('hidden');
+    if (challengeCustomLanguageInput) challengeCustomLanguageInput.value = '';
+  } else {
+    challengeLanguageSelect.value = 'custom';
+    if (challengeCustomLanguageWrap) challengeCustomLanguageWrap.classList.remove('hidden');
+    if (challengeCustomLanguageInput) challengeCustomLanguageInput.value = lang;
+  }
+  challengeSession.setLanguage(lang);
+}
 const traceTitle = document.getElementById('trace-title') as HTMLElement;
 const traceExpSelectorLabel = document.getElementById('trace-exp-selector-label') as HTMLElement;
 const creditStateTable = document.getElementById('credit-state-table') as HTMLElement;
@@ -724,7 +790,11 @@ async function createReport(mode: 'meta' | 'offline'): Promise<void> {
   if (reportSession.state.kind === 'generating' || rec.status === 'running' || !rec.findings.length) return;
   const token = reportSession.begin(rec.id, 'generating'); renderReportPanel();
   try {
-    const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+    const res = await fetch(`/api/runs/${encodeURIComponent(rec.id)}/explanation-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, language: selectedReportLanguage() }),
+    });
     const data = await res.json().catch(() => ({})) as Record<string, unknown>;
     if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `Report creation failed (${res.status})`);
     if (!reportSession.settle(token, rec.id, { kind: 'saved', generatedAt: String(data.generatedAt ?? ''), mode: String(data.mode ?? mode), model: String(data.model ?? '') })) return;
@@ -979,7 +1049,11 @@ function renderActiveRecord(rec: InvestigationRecord): void { if (reproSession.s
 
   dashTarget.textContent = `Variant: ${rec.variant} · ${continuationSettingLabel(rec.continueAfterFindings)}`;
   dashTime.textContent = `Started: ${new Date(rec.startedAt).toLocaleTimeString()}`;
-  dashModel.textContent = `Model: ${rec.model}`;
+  const langDisplay = rec.outputLanguage ? (rec.outputLanguage === 'es' ? 'Español' : rec.outputLanguage === 'en' ? 'English' : rec.outputLanguage) : 'English';
+  dashModel.textContent = `Model: ${rec.model} · Language: ${langDisplay}`;
+
+  syncReportLanguageToRun(rec.outputLanguage);
+  syncChallengeLanguageToRun(rec.outputLanguage);
 
   updateProvenanceBadge(rec.mode);
   updateStatusPill(rec.status);
@@ -2082,7 +2156,8 @@ function updateRequestPreflight(): void {
   void requestPreflight.update(validSelection && selectedSystem ? {
     systemId: selectedSystem.id, expectedRevision: selectedSystem.revision, adapterId: selectedSystem.adapterId,
     variant: targetSelect.value, provider: providerSelect.value,
-    maxExperiments: selectedMaxExperiments()
+    maxExperiments: selectedMaxExperiments(),
+    language: selectedInvestigationLanguage(),
   } : null);
 }
 
@@ -2407,6 +2482,7 @@ btnLaunch.addEventListener('click', async () => {
       continueAfterFindings: continueAfterFindingsInput?.checked === true,
       systemId: systemToRun.id,
       expectedRevision: systemToRun.revision,
+      language: selectedInvestigationLanguage(),
     };
     const coveragePlan = coverageLaunch?.plan;
     if (coveragePlan) {
@@ -2494,6 +2570,34 @@ providerSelect.addEventListener('change', () => {
 });
 
 maxExperimentsInput.addEventListener('input', updateRequestPreflight);
+
+if (investigationLanguageSelect) {
+  investigationLanguageSelect.addEventListener('change', () => {
+    investigationCustomLanguageWrap?.classList.toggle('hidden', investigationLanguageSelect.value !== 'custom');
+    updateRequestPreflight();
+  });
+}
+if (investigationCustomLanguageInput) {
+  investigationCustomLanguageInput.addEventListener('input', updateRequestPreflight);
+}
+
+if (reportLanguageSelect) {
+  reportLanguageSelect.addEventListener('change', () => {
+    reportCustomLanguageWrap?.classList.toggle('hidden', reportLanguageSelect.value !== 'custom');
+  });
+}
+
+if (challengeLanguageSelect) {
+  challengeLanguageSelect.addEventListener('change', () => {
+    challengeCustomLanguageWrap?.classList.toggle('hidden', challengeLanguageSelect.value !== 'custom');
+    challengeSession.setLanguage(selectedChallengeLanguage());
+  });
+}
+if (challengeCustomLanguageInput) {
+  challengeCustomLanguageInput.addEventListener('input', () => {
+    challengeSession.setLanguage(selectedChallengeLanguage());
+  });
+}
 
 if (targetSelect) {
   targetSelect.addEventListener('change', () => {

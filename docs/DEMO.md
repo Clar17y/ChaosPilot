@@ -51,3 +51,24 @@ For a live presentation, keep an authentic completed investigation available to 
 Use `npx vitest run tests/challenges.test.ts tests/challenge-api.test.ts tests/challenge-ui.test.ts tests/challenge-verification.test.ts`
 for an offline demonstration of the complete service/UI request flow with fake model
 responses, real deterministic adapters, and verified playback. No live Meta request is needed for these tests.
+
+# Output language demonstration (Spanish & custom languages)
+
+ChaosPilot allows directing Meta model prose output into Spanish or other languages while preserving exact machine identifiers.
+
+1. **Investigation in Spanish**:
+   - In **Prepare investigation**, select **Español** from the Output Language selector (or pass `--language es` on the CLI).
+   - Notice preflight calculates exact prompt sizing with the localized instruction.
+   - Run the mock or live investigation. The saved run record preserves `outputLanguage: "es"`.
+   - Inspection shows exact untranslated action operations (`send`, `fill`, `drain`), channel names, and invariant IDs.
+2. **Finding report generation in Spanish**:
+   - In **Findings & reproductions**, open the report generation panel.
+   - Notice the report language defaults to the run's saved language (`Español`), with an option to select another language.
+   - The UI clearly states that generating a report in another language replaces the existing saved report for this run.
+   - Click **Create offline scripted report** (or **Create report with Muse**).
+   - Inspect the saved HTML report: headings, status badges, and narrative summaries are localized in Spanish (`lang="es"`), while raw recorded payload details and contract invariant IDs remain untouched.
+3. **Challenge (Watch verification) in Spanish**:
+   - In the Challenge panel, confirm the language preference displays `Español (es)`.
+   - Variations and interpretations are generated in Spanish without translating action steps or executable payloads.
+
+Use `npx vitest run tests/output-language.test.ts` for an offline verification of language normalization, boundaries, prompt sizing, HTML report generation/replacement, and challenge lifecycle.

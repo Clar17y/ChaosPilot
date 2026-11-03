@@ -6,6 +6,7 @@ export interface PreflightSelection {
   variant: string;
   provider: string;
   maxExperiments: number;
+  language?: string;
 }
 export interface RequestAssessment {
   mode: 'live';
