@@ -13,6 +13,8 @@ const FETCH_TIMEOUT_MS = 1500;
 const MAX_EXCHANGES = 240;
 
 const isQty = (v: number) => Number.isSafeInteger(v) && v > 0 && v <= 1000;
+let requestCounter = 0;
+const nextRequestId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(++requestCounter).toString(36)}`;
 
 export class TargetUiController {
   private freshness: FreshnessEngine;
@@ -116,6 +118,11 @@ export class TargetUiController {
     return typeof document === 'undefined' ? null : (document.getElementById(id) as T | null);
   }
 
+  private setFeedback(id: string, text: string): void {
+    const element = this.safeEl(id);
+    if (element) element.textContent = text;
+  }
+
   private bindDom(): void {
     this.el<HTMLButtonElement>('btn-submit-setup').addEventListener('click', () => {
       void this.submitSetup(Number(this.el<HTMLInputElement>('input-setup-limit').value));
@@ -217,33 +224,31 @@ export class TargetUiController {
 
   async submitSetup(limit: number): Promise<void> {
     return this.guard('setup', 'btn-submit-setup', async () => {
-      const feedback = this.el('feedback-setup');
-      if (!isQty(limit)) { feedback.textContent = 'Setup error: limit must be an integer 1-1000'; return; }
-      feedback.textContent = 'Submitting setup…';
-      const requestId = `setup-${Date.now().toString(36)}`;
+      if (!isQty(limit)) { this.setFeedback('feedback-setup', 'Setup error: limit must be an integer 1-1000'); return; }
+      this.setFeedback('feedback-setup', 'Submitting setup…');
+      const requestId = nextRequestId('setup');
       try {
         const { status, data } = await this.request('POST', '/setup', { requestId, kind: 'setup', limit });
         if (status === 202 && validReceipt(data, this.instanceId, requestId)) {
           this.instanceId = data.instanceId;
           this.freshness.setInstanceId(data.instanceId);
-          feedback.textContent = `Setup queued (receipt ${data.receiptId.slice(0, 8)}…)`;
+          this.setFeedback('feedback-setup', `Setup queued (receipt ${data.receiptId.slice(0, 8)}…)`);
           this.updateDom();
           this.captureObservation('after-setup');
           await this.poll();
         } else {
-          feedback.textContent = `Setup failed: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`;
+          this.setFeedback('feedback-setup', `Setup failed: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`);
         }
-      } catch (err) { feedback.textContent = `Setup error: ${String(err)}`; }
+      } catch (err) { this.setFeedback('feedback-setup', `Setup error: ${String(err)}`); }
     });
   }
 
   async submitOrder(orderId: string, quantity: number): Promise<void> {
     return this.guard('order', 'btn-submit-order', async () => {
-      const feedback = this.el('feedback-order');
-      if (!ID_PATTERN.test(orderId)) { feedback.textContent = 'Order error: order ID must be a lowercase id'; return; }
-      if (!isQty(quantity)) { feedback.textContent = 'Order error: quantity must be an integer 1-1000'; return; }
-      feedback.textContent = 'Submitting order…';
-      const requestId = `ord-req-${Date.now().toString(36)}`;
+      if (!ID_PATTERN.test(orderId)) { this.setFeedback('feedback-order', 'Order error: order ID must be a lowercase id'); return; }
+      if (!isQty(quantity)) { this.setFeedback('feedback-order', 'Order error: quantity must be an integer 1-1000'); return; }
+      this.setFeedback('feedback-order', 'Submitting order…');
+      const requestId = nextRequestId('ord-req');
       try {
         const { status, data } = await this.request('POST', '/orders', { requestId, kind: 'order', orderId, quantity });
         if (status === 202 && validReceipt(data, this.instanceId, requestId)) {
@@ -256,56 +261,60 @@ export class TargetUiController {
             orderId, transportStatus: 'queued', transportReceiptId: data.receiptId, transportSequence: data.sequence,
             businessStatus: 'IDLE', quantity, filledQuantity: 0, remainingQuantity: quantity,
           };
-          feedback.textContent = `Order queued (202 Accepted, seq #${data.sequence})`;
+          this.setFeedback('feedback-order', `Order queued (202 Accepted, seq #${data.sequence})`);
           this.updateDom();
           this.captureObservation('after-order-transport');
           await this.poll();
         } else {
-          feedback.textContent = `Order rejected: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`;
+          this.setFeedback('feedback-order', `Order rejected: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`);
         }
-      } catch (err) { feedback.textContent = `Order error: ${String(err)}`; }
+      } catch (err) { this.setFeedback('feedback-order', `Order error: ${String(err)}`); }
     });
   }
 
   async submitExecution(orderId: string, executionId: string, quantity: number): Promise<void> {
     return this.guard('exec', 'btn-submit-exec', async () => {
-      const feedback = this.el('feedback-exec');
-      if (!ID_PATTERN.test(orderId) || !ID_PATTERN.test(executionId)) { feedback.textContent = 'Execution error: ids must be lowercase ids'; return; }
-      if (!isQty(quantity)) { feedback.textContent = 'Execution error: quantity must be an integer 1-1000'; return; }
-      feedback.textContent = 'Submitting execution fill…';
-      const requestId = `exec-req-${Date.now().toString(36)}`;
+      if (!ID_PATTERN.test(orderId) || !ID_PATTERN.test(executionId)) { this.setFeedback('feedback-exec', 'Execution error: ids must be lowercase ids'); return; }
+      if (!isQty(quantity)) { this.setFeedback('feedback-exec', 'Execution error: quantity must be an integer 1-1000'); return; }
+      this.setFeedback('feedback-exec', 'Submitting execution fill…');
+      const requestId = nextRequestId('exec-req');
       try {
         const { status, data } = await this.request('POST', '/executions', { requestId, kind: 'execution', orderId, executionId, quantity });
         if (status === 202 && validReceipt(data, this.instanceId, requestId)) {
-          feedback.textContent = `Fill queued (202 Accepted, seq #${data.sequence})`;
+          this.setFeedback('feedback-exec', `Fill queued (202 Accepted, seq #${data.sequence})`);
           this.updateDom();
           this.captureObservation('after-execution-transport');
           await this.poll();
         } else {
-          feedback.textContent = `Fill rejected: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`;
+          this.setFeedback('feedback-exec', `Fill rejected: ${status === 202 ? 'invalid or foreign receipt' : ((data as any)?.error ?? `HTTP ${status}`)}`);
         }
-      } catch (err) { feedback.textContent = `Execution error: ${String(err)}`; }
+      } catch (err) { this.setFeedback('feedback-exec', `Execution error: ${String(err)}`); }
     });
   }
 
   toggleHold(): void {
-    const btn = this.el<HTMLButtonElement>('btn-toggle-hold');
+    const btn = this.safeEl<HTMLButtonElement>('btn-toggle-hold');
+    const holdStatus = this.safeEl('label-hold-status');
     if (this.freshness.getHeld()) {
       this.resumeAtMs = performance.now();
       this.freshness.resume();
-      btn.textContent = 'Hold Updates (Simulate Stale)';
-      btn.setAttribute('aria-pressed', 'false');
-      btn.classList.remove('btn-secondary');
-      btn.classList.add('btn-warning');
-      this.el('label-hold-status').textContent = 'Updates: Active';
+      if (btn) {
+        btn.textContent = 'Hold Updates (Simulate Stale)';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-warning');
+      }
+      if (holdStatus) holdStatus.textContent = 'Updates: Active';
       void this.poll().then(() => this.captureObservation('after-resume'));
     } else {
       this.freshness.hold();
-      btn.textContent = 'Resume Updates';
-      btn.setAttribute('aria-pressed', 'true');
-      btn.classList.remove('btn-warning');
-      btn.classList.add('btn-secondary');
-      this.el('label-hold-status').textContent = 'Updates: HELD (Intentional Stale)';
+      if (btn) {
+        btn.textContent = 'Resume Updates';
+        btn.setAttribute('aria-pressed', 'true');
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-secondary');
+      }
+      if (holdStatus) holdStatus.textContent = 'Updates: HELD (Intentional Stale)';
       this.updateDom();
       this.captureObservation('while-held');
     }
@@ -331,25 +340,48 @@ export class TargetUiController {
         return;
       }
       this.events = structuredClone(obs.events);
-      const upstreamOrder = this.trackedOrderId ? obs.orders[this.trackedOrderId] : undefined;
-      if (upstreamOrder) {
-        this.activeOrder = {
-          orderId: upstreamOrder.orderId,
-          transportStatus: 'acknowledged',
-          transportReceiptId: this.trackedReceiptId,
-          transportSequence: this.activeOrder?.transportSequence ?? null,
-          businessStatus: upstreamOrder.businessStatus,
-          quantity: upstreamOrder.initialQuantity,
-          filledQuantity: upstreamOrder.filledQuantity,
-          remainingQuantity: upstreamOrder.remainingQuantity,
-        };
-      }
+      this.applyOrderObservation(obs);
       this.freshness.recordApplied(obs.processed);
       this.updateDom(obs, true);
     } catch {
       // Network failure keeps the previous display intact; age tick will label it stale.
     } finally {
       this.pollInFlight = false;
+    }
+  }
+
+  /** A settled receipt, not an order ID alone, owns the displayed business state. */
+  private applyOrderObservation(obs: Observation): void {
+    const event = obs.events.findLast(event => {
+      const command = event.command;
+      if (command.kind !== 'order' || command.orderId !== this.trackedOrderId) return false;
+      if (!this.trackedRequestId) return event.status === 'accepted';
+      return event.requestId === this.trackedRequestId
+        && event.receiptId === this.trackedReceiptId
+        && event.sequence === this.activeOrder?.transportSequence
+        && command.quantity === this.activeOrder?.quantity;
+    });
+    if (!event) return;
+
+    const order = event.status === 'accepted' ? obs.orders[this.trackedOrderId] : undefined;
+    if (event.status === 'accepted' && !order) return;
+    const quantity = order?.initialQuantity ?? this.activeOrder?.quantity;
+    if (quantity === undefined) return;
+
+    this.trackedRequestId = event.requestId;
+    this.trackedReceiptId = event.receiptId;
+    this.activeOrder = {
+      orderId: this.trackedOrderId,
+      transportStatus: 'acknowledged',
+      transportReceiptId: event.receiptId,
+      transportSequence: event.sequence,
+      businessStatus: order?.businessStatus ?? (event.status === 'rejected' ? 'REJECTED' : 'ERROR'),
+      quantity,
+      filledQuantity: order?.filledQuantity ?? 0,
+      remainingQuantity: order?.remainingQuantity ?? quantity,
+    };
+    if (event.status !== 'accepted') {
+      this.setFeedback('feedback-order', `Order ${event.status}: ${event.reason ?? event.status}`);
     }
   }
 

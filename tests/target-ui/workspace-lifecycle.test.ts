@@ -208,4 +208,89 @@ describe('TargetUiWorkspaceControllerCore request boundaries', () => {
     expect(deletes).toEqual(['/api/target-ui/session/sess-1']);
     expect(core.state.session).toBeNull();
   });
+
+  it('refreshes discovery for the new context when context changes during a manual close', async () => {
+    const a = ctx({ selectedVariant: 'clean' });
+    const b = ctx({ selectedVariant: 'candidate-a' });
+    const liveA = sessionFor(a, 'live-a'), liveB = sessionFor(b, 'live-b');
+    const deletion = deferred<any>();
+    let statusRequests = 0;
+    const core = new TargetUiWorkspaceControllerCore(async (_url, init) => {
+      if (init?.method === 'DELETE') return deletion.promise;
+      statusRequests++;
+      return res(200, { sessions: [liveA, liveB] });
+    }, () => {});
+    core.setContext(a);
+    await tick();
+    expect(core.state.session?.sessionId).toBe('live-a');
+    expect(statusRequests).toBe(1);
+
+    const closing = core.close();
+    core.setContext(b);
+    deletion.resolve(res(200, { closed: true }));
+    await closing;
+    await tick();
+
+    expect(statusRequests).toBe(2);
+    expect(core.state.session?.sessionId).toBe('live-b');
+    expect(core.state.context?.selectedVariant).toBe('candidate-a');
+
+    // Repeated identical tick does not refetch
+    core.setContext(b);
+    await tick();
+    expect(statusRequests).toBe(2);
+  });
+
+  it('multiple context switches while closing only discovers current eligible context', async () => {
+    const a = ctx({ selectedVariant: 'clean' });
+    const b = ctx({ selectedVariant: 'candidate-a' });
+    const c = ctx({ systemId: 'custom-trading', revision: 2 });
+    const liveA = sessionFor(a, 'live-a'), liveC = sessionFor(c, 'live-c');
+    const deletion = deferred<any>();
+    const queriedContexts: string[] = [];
+    const core = new TargetUiWorkspaceControllerCore(async (_url, init) => {
+      if (init?.method === 'DELETE') return deletion.promise;
+      queriedContexts.push(core.state.context?.systemId ?? '');
+      return res(200, { sessions: [liveA, liveC] });
+    }, () => {});
+    core.setContext(a);
+    await tick();
+    expect(core.state.session?.sessionId).toBe('live-a');
+
+    const closing = core.close();
+    core.setContext(b);
+    core.setContext(c);
+    deletion.resolve(res(200, { closed: true }));
+    await closing;
+    await tick();
+
+    // Context B was bypassed; only initial A and settled C were queried
+    expect(queriedContexts).toEqual(['trading-gateway', 'custom-trading']);
+    expect(core.state.session?.sessionId).toBe('live-c');
+  });
+
+  it('retains ownership on a failed close across a context switch, then discovers after an expired-close retry', async () => {
+    const a = ctx(), b = ctx({ selectedVariant: 'candidate-a' });
+    const liveA = sessionFor(a, 'live-a'), liveB = sessionFor(b, 'live-b');
+    const deletion = deferred<any>();
+    let deletes = 0, statusRequests = 0;
+    const core = new TargetUiWorkspaceControllerCore(async (_url, init) => {
+      if (init?.method === 'DELETE') return ++deletes === 1 ? deletion.promise : res(404, { closed: false });
+      statusRequests++;
+      return res(200, { sessions: [liveA, liveB] });
+    }, () => {});
+    core.setContext(a);
+    await tick();
+    const closing = core.close();
+    core.setContext(b);
+    deletion.resolve(res(500, { error: 'close not confirmed' }));
+    await closing;
+    expect(core.state.session?.sessionId).toBe('live-a');
+    expect(statusRequests).toBe(1);
+    expect(core.state.status).toMatch(/Close failed/);
+    await core.close();
+    await tick();
+    expect(core.state.session?.sessionId).toBe('live-b');
+    expect(statusRequests).toBe(2);
+  });
 });

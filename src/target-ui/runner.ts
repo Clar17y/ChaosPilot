@@ -166,14 +166,18 @@ export async function runTargetUiBrowserJourney(options: RunBrowserJourneyOption
     target = await startTarget({ variant, processingDelayMs: 15, uiContext: { provenance, thresholds: { freshnessThresholdMs, convergenceDeadlineMs } } });
     endpoint = target.endpoint;
     instanceId = target.instanceId;
+    guard();
     const puppeteer = (await import('puppeteer-core')).default;
     try {
       browser = await puppeteer.launch({ executablePath, headless: true, args: ['--disable-dev-shm-usage', '--disable-gpu'], defaultViewport: { width: 1280, height: 900 }, timeout: opTimeout(15_000) });
     } catch (err) {
+      if (options.signal?.aborted) throw new JourneyError('cancelled', `Aborted: ${String(options.signal.reason ?? 'cancelled')}`);
       throw new JourneyError('browser', `Browser launch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+    guard();
     const page = await browser.newPage();
     journeyPage = page;
+    guard();
     const browserNow = async () => page.evaluate(() => performance.now());
     const snap = async (phase: string) => {
       const file = path.join(screenshotsDir, `${phase}.png`);
@@ -200,10 +204,12 @@ export async function runTargetUiBrowserJourney(options: RunBrowserJourneyOption
     };
 
     await page.goto(endpoint, { waitUntil: 'domcontentloaded', timeout: opTimeout(5000) });
+    guard();
     await page.waitForFunction(() => {
       const t = document.getElementById('display-instance-id')?.textContent?.trim();
       return t && t !== '-';
     }, { timeout: opTimeout(5000) });
+    guard();
 
     await page.click('#btn-submit-setup');
     await page.waitForFunction(() => document.getElementById('feedback-setup')?.textContent?.includes('queued'), { timeout: opTimeout(5000) });
@@ -274,7 +280,9 @@ export async function runTargetUiBrowserJourney(options: RunBrowserJourneyOption
     browserEvidence = await page.evaluate(() => (window as any).__TARGET_UI__?.getEvidence() ?? null).catch(() => null);
   } catch (err) {
     runError = err instanceof JourneyError
-      ? { kind: err.kind, message: err.message }
+      ? (options.signal?.aborted && err.kind !== 'cancelled'
+          ? { kind: 'cancelled', message: `Aborted: ${String(options.signal.reason ?? 'cancelled')}` }
+          : { kind: err.kind, message: err.message })
       : { kind: options.signal?.aborted ? 'cancelled' : 'browser', message: err instanceof Error ? err.message : String(err) };
     // Preserve whatever the browser recorded before the failure.
     if (journeyPage) {

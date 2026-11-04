@@ -46,8 +46,9 @@ The feature makes **zero AI model calls** and does not alter the existing determ
 ### 1. Truthful Transport Acknowledgement
 When an order or fill is submitted:
 - The target returns `HTTP 202 Accepted` with a receipt `{ instanceId, receiptId, sequence, status: 'queued' }`.
-- The UI immediately surfaces the transport acknowledgement as `QUEUED` / `HTTP 202`, while the business status remains `IDLE` or `OPEN`.
-- **A transport receipt never establishes business success.** Only when the asynchronous event stream reports settlement does the business status update to `FILLED`.
+- A new order immediately shows `QUEUED` / `HTTP 202`, while its business status remains `IDLE`. A fill receipt alone does not establish that the fill was applied.
+- **A transport receipt never establishes business success.** The terminal matches the active order request and receipt to its asynchronous business event before applying the order snapshot. Accepted orders can show `OPEN`, then `PARTIALLY_FILLED` or `FILLED` as fills settle; rejected or failed requests show `REJECTED` or `ERROR` with the recorded reason.
+- Reusing an existing order ID does not make the new request successful: its pending or rejected receipt cannot inherit the previous order's status and quantities. Held updates retain the displayed state until updates resume, including when a rejection settles in the background.
 
 ### 2. Explicit Freshness Policy and Stale Update Detection
 UI data freshness is governed by a pure `FreshnessEngine` (`src/target-ui/freshness.ts`):

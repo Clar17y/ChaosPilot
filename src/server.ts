@@ -344,6 +344,7 @@ export class ChaosPilotServer {
   }
 
   private sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+    if (res.writableEnded || res.destroyed) return;
     const payload = JSON.stringify(body);
     res.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -1834,22 +1835,33 @@ export class ChaosPilotServer {
             this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
             return;
           }
-          const { data, error, status } = await this.readJsonBody(req, 4096);
-          if (error) { this.sendJson(res, status || 400, { error }); return; }
-          if (!data || typeof data !== 'object' || Array.isArray(data)) {
-            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
-            return;
-          }
-          const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
-          if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
           const controller = new AbortController();
           const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Target UI launch cancelled by client disconnect', 'AbortError')); };
-          res.once?.('close', disconnected);
+          if (res.destroyed && !res.writableEnded) disconnected();
+          else res.once?.('close', disconnected);
           try {
+            const { data, error, status } = await this.readJsonBody(req, 4096);
+            if (error) { this.sendJson(res, status || 400, { error }); return; }
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+              this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+              return;
+            }
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
+              if (!controller.signal.aborted) disconnected();
+              this.sendJson(res, 409, { error: 'Target UI launch cancelled' });
+              return;
+            }
+            const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
+            if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
+              if (!controller.signal.aborted) disconnected();
+              this.sendJson(res, 409, { error: 'Target UI launch cancelled' });
+              return;
+            }
             const session = await this.targetUiSessionManager.createSession({
               variant: resolved.variant, provenance: resolved.provenance, signal: controller.signal,
             });
-            if (controller.signal.aborted) {
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
               await this.targetUiSessionManager.closeSession(session.sessionId).catch(() => {});
               this.sendJson(res, 409, { error: 'Target UI launch cancelled' });
               return;
@@ -1890,18 +1902,29 @@ export class ChaosPilotServer {
             this.sendJson(res, 415, { error: 'Content-Type must be application/json' });
             return;
           }
-          const { data, error, status } = await this.readJsonBody(req, 4096);
-          if (error) { this.sendJson(res, status || 400, { error }); return; }
-          if (!data || typeof data !== 'object' || Array.isArray(data)) {
-            this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
-            return;
-          }
-          const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
-          if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
           const controller = new AbortController();
           const disconnected = () => { if (!res.writableEnded) controller.abort(new DOMException('Target UI journey cancelled by client disconnect', 'AbortError')); };
-          res.once?.('close', disconnected);
+          if (res.destroyed && !res.writableEnded) disconnected();
+          else res.once?.('close', disconnected);
           try {
+            const { data, error, status } = await this.readJsonBody(req, 4096);
+            if (error) { this.sendJson(res, status || 400, { error }); return; }
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+              this.sendJson(res, 400, { error: 'Expected a JSON selection object' });
+              return;
+            }
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
+              if (!controller.signal.aborted) disconnected();
+              this.sendJson(res, 409, { error: 'Target UI journey cancelled' });
+              return;
+            }
+            const resolved = await this.resolveTargetUiContext(data as Record<string, unknown>);
+            if (!resolved.ok) { this.sendJson(res, resolved.status, { error: resolved.error }); return; }
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
+              if (!controller.signal.aborted) disconnected();
+              this.sendJson(res, 409, { error: 'Target UI journey cancelled' });
+              return;
+            }
             const { runTargetUiBrowserJourney } = await import('./target-ui/runner.ts');
             const outcome = await this.targetUiSessionManager.runJob(
               (signal) => runTargetUiBrowserJourney({
@@ -1910,10 +1933,14 @@ export class ChaosPilotServer {
               }),
               controller.signal,
             );
+            if (controller.signal.aborted || (res.destroyed && !res.writableEnded)) {
+              this.sendJson(res, 409, { error: 'Target UI journey cancelled' });
+              return;
+            }
             this.sendJson(res, 200, outcome);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            const code = /Maximum concurrent browser jobs|Session manager is closed/.test(msg) ? 409 : 500;
+            const code = controller.signal.aborted ? 409 : /Maximum concurrent browser jobs|Session manager is closed/.test(msg) ? 409 : 500;
             this.sendJson(res, code, { error: msg });
           } finally {
             res.off?.('close', disconnected);

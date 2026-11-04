@@ -101,11 +101,11 @@ const raw = (value: unknown) => `<pre style="overflow:auto;max-height:32rem">${e
 
 /** Raw evidence is deliberate: it includes every pinned fact and failure, without interpreting prose as verified. */
 export function functionalResultHtml(record: FunctionalRunRecord): string {
-  return `<p>Saved run ${escapeHtml(record.id)} Â· ${escapeHtml(record.systemBrief.name)} (${escapeHtml(record.systemBrief.id)}) Â· revision ${record.systemBrief.revision} Â· target ${escapeHtml(record.variant)}</p>
+  return `<p>Saved run ${escapeHtml(record.id)} · ${escapeHtml(record.systemBrief.name)} (${escapeHtml(record.systemBrief.id)}) · revision ${record.systemBrief.revision} · target ${escapeHtml(record.variant)}</p>
     <p>Context-only brief prose remains unverified.</p>
     <details><summary>Pinned brief, contract, target source and evaluator provenance</summary>${raw({ sourceHash: record.sourceHash, evaluator: record.evaluator,
       startedAt: record.startedAt, finishedAt: record.finishedAt, systemBrief: record.systemBrief, systemSnapshot: record.systemSnapshot, contract: record.contract })}</details>
-    ${record.scenarios.map(s => `<article class="card"><h3>${escapeHtml(s.name)} â€” ${escapeHtml(functionalRunOutcomeLabel(s.status))}</h3><p>${escapeHtml(s.summary)}</p>
+    ${record.scenarios.map(s => `<article class="card"><h3>${escapeHtml(s.name)} — ${escapeHtml(functionalRunOutcomeLabel(s.status))}</h3><p>${escapeHtml(s.summary)}</p>
       <div style="overflow:auto"><table><thead><tr><th>Status</th><th>Assertion</th><th>Expected</th><th>Actual</th><th>Detail</th></tr></thead><tbody>
       ${s.assertions.map(a => `<tr><td>${escapeHtml(a.status)}</td><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.expected)}</td><td>${escapeHtml(a.actual)}</td><td>${escapeHtml(a.detail)}</td></tr>`).join('')}
       </tbody></table></div><details><summary>Complete scenario evidence: expected checks, sequence, trace, rejection, oracle and configured rules</summary>${raw(s)}</details></article>`).join('')}`;
@@ -119,27 +119,27 @@ export function initFunctionalWorkspaceView(onTargetChange: (variant: string) =>
     const c = state.context;
     run.disabled = state.blockedReason !== null;
     run.title = state.blockedReason ?? '';
-    run.textContent = state.pending ? 'Running baselinesâ€¦' : 'Run baselines';
+    run.textContent = state.pending ? 'Running baselines…' : 'Run baselines';
     const display = el('functional-system-display') as HTMLInputElement;
-    display.value = c?.isDraftMode ? 'New profile (draft)' : `${c?.systemId ?? 'No profile'} Â· revision ${c?.revision ?? 'unconfirmed'}`;
+    display.value = c?.isDraftMode ? 'New profile (draft)' : `${c?.systemId ?? 'No profile'} · revision ${c?.revision ?? 'unconfirmed'}`;
     target.replaceChildren(...(c?.allowedVariants ?? []).map(v => { const option = document.createElement('option'); option.value = v; option.textContent = v; return option; }));
     target.value = c?.selectedVariant ?? '';
     target.disabled = c?.targetState !== 'ready' || c?.isDraftMode === true || c?.hasUnsavedSystemEdits === true || c?.isSystemSavePending === true;
     el('functional-eligibility-banner')?.classList.toggle('hidden', state.blockedReason === null);
     el('functional-eligibility-message')!.textContent = state.blockedReason ?? '';
-    el('functional-run-status')!.textContent = state.error ?? (state.pending ? 'Executing allowlisted scenariosâ€¦' : '');
+    el('functional-run-status')!.textContent = state.error ?? (state.pending ? 'Executing allowlisted scenarios…' : '');
     const history = el('functional-history-list')!;
     history.replaceChildren();
     if (state.historyError || !state.history.length) history.textContent = state.historyError ?? 'No saved functional runs for this profile.';
     for (const record of state.history) {
       const row = document.createElement('p');
-      row.textContent = `${record.startedAt} Â· ${record.systemBrief.id} rev ${record.systemBrief.revision} Â· ${record.variant} Â· ${functionalRunOutcomeLabel(record.status)} `;
+      row.textContent = `${record.startedAt} · ${record.systemBrief.id} rev ${record.systemBrief.revision} · ${record.variant} · ${functionalRunOutcomeLabel(record.status)} `;
       const open = document.createElement('button'); open.textContent = 'Open'; open.type = 'button';
       open.addEventListener('click', () => { void controller.open(record.id); }); row.append(open); history.append(row);
     }
     el('functional-results-card')!.classList.toggle('hidden', !state.record);
     el('functional-scenarios-container')!.innerHTML = state.record ? functionalResultHtml(state.record) : '';
-    el('functional-run-meta')!.textContent = state.record ? `Saved ${state.record.systemBrief.id} rev ${state.record.systemBrief.revision} Â· ${state.record.variant} Â· ${state.record.id}` : '';
+    el('functional-run-meta')!.textContent = state.record ? `Saved ${state.record.systemBrief.id} rev ${state.record.systemBrief.revision} · ${state.record.variant} · ${state.record.id}` : '';
     el('functional-run-badge')!.textContent = state.record ? functionalRunOutcomeLabel(state.record.status) : '';
     el('functional-stat-scenarios')!.textContent = state.record ? `${state.record.summary.passed}/${state.record.summary.totalScenarios}` : '';
     el('functional-stat-assertions')!.textContent = state.record ? `${state.record.summary.passedAssertions}/${state.record.summary.totalAssertions}` : '';
@@ -301,8 +301,8 @@ export class TargetUiWorkspaceControllerCore implements TargetUiWorkspaceControl
     const c = this.state.context;
     if (!c || targetUiBlockedReason(c) || this.state.launchPending || this.state.journeyPending || this.state.closing || this.state.session) return;
     const identity = structuredClone(c), generation = this.generation, key = targetUiContextKey(c);
+    const sessionGeneration = ++this.sessionGeneration;
     const controller = this.track();
-    this.sessionGeneration++;
     this.state.launchPending = true;
     this.state.status = 'Launching target session…';
     this.publish(); // pending ownership before the first await
@@ -310,8 +310,8 @@ export class TargetUiWorkspaceControllerCore implements TargetUiWorkspaceControl
       const data = await this.json(controller, '/api/target-ui/session', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.selection(identity)),
       });
-      if (generation !== this.generation) {
-        // Late launch for an abandoned context: close the orphan, display nothing.
+      if (generation !== this.generation || sessionGeneration !== this.sessionGeneration) {
+        // Late launch for an abandoned context or superseded generation: close the orphan, display nothing.
         if (typeof data?.session?.sessionId === 'string') void this.deleteSession(data.session.sessionId);
         return;
       }
@@ -323,10 +323,15 @@ export class TargetUiWorkspaceControllerCore implements TargetUiWorkspaceControl
       this.sessionKey = key;
       this.state.status = 'Target UI session active';
     } catch (error) {
-      if (generation === this.generation && !controller.signal.aborted) this.state.status = `Launch error: ${String(error instanceof Error ? error.message : error)}`;
+      if (generation === this.generation && sessionGeneration === this.sessionGeneration && !controller.signal.aborted) {
+        this.state.status = `Launch error: ${String(error instanceof Error ? error.message : error)}`;
+      }
     } finally {
       this.untrack(controller);
-      if (generation === this.generation) { this.state.launchPending = false; this.publish(); }
+      if (generation === this.generation && sessionGeneration === this.sessionGeneration) {
+        this.state.launchPending = false;
+        this.publish();
+      }
     }
   }
 
@@ -345,6 +350,7 @@ export class TargetUiWorkspaceControllerCore implements TargetUiWorkspaceControl
     if (this.state.closing) return;
     this.sessionGeneration++;
     this.state.closing = true;
+    const closeContextKey = this.sessionKey ?? (this.state.context ? targetUiContextKey(this.state.context) : null);
     this.state.status = orphan ? 'Closing previous target session…' : 'Closing session…';
     this.publish();
     try {
@@ -361,7 +367,11 @@ export class TargetUiWorkspaceControllerCore implements TargetUiWorkspaceControl
     } finally {
       this.state.closing = false;
       this.publish();
-      if (orphan && !this.state.session && this.state.context && !targetUiBlockedReason(this.state.context)) void this.checkSession();
+      const currentContext = this.state.context;
+      const contextChanged = currentContext && targetUiContextKey(currentContext) !== closeContextKey;
+      if ((orphan || contextChanged) && !this.state.session && currentContext && !targetUiBlockedReason(currentContext)) {
+        void this.checkSession();
+      }
     }
   }
 

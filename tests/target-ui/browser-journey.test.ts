@@ -7,6 +7,7 @@ import { findBrowserExecutable, runTargetUiBrowserJourney } from '../../src/targ
 import { ChaosPilotServer } from '../../src/server.ts';
 import { saveSystemBrief } from '../../src/storage.ts';
 import { SEEDED_TRADING_BRIEF } from '../../src/systems/index.ts';
+import { startTarget } from '../../src/target-api/target.ts';
 
 /**
  * Real-browser checks are opt-in: the default suite must not require an
@@ -40,6 +41,61 @@ describe.skipIf(!enabled)('Real target UI browser journey (opt-in)', () => {
   }, 30_000);
 
   it.each([
+    { name: 'credit rejection', limit: 10, quantity: 10, duplicate: false },
+    { name: 'duplicate of a partly filled order, held until resume', limit: 1000, quantity: 20, duplicate: true },
+  ])('renders the tracked request rejection and reason: $name', async ({ limit, quantity, duplicate }) => {
+    const target = await startTarget({ variant: 'clean', processingDelayMs: 15 });
+    const puppeteer = (await import('puppeteer-core')).default;
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+    try {
+      browser = await puppeteer.launch({ executablePath: findBrowserExecutable()!, headless: true });
+      const page = await browser.newPage();
+      await page.goto(target.endpoint);
+      await page.waitForFunction(() => Boolean((window as any).__TARGET_UI__?.getState().instanceId));
+      await page.$eval('#input-setup-limit', (input, value) => { (input as HTMLInputElement).value = String(value); }, limit);
+      await page.click('#btn-submit-setup');
+      await page.waitForFunction(() => (window as any).__TARGET_UI__?.getEvidence().events.some((e: any) => e.command.kind === 'setup' && e.status === 'accepted'));
+      if (duplicate) {
+        await page.$eval('#input-order-qty', input => { (input as HTMLInputElement).value = '5'; });
+        await page.click('#btn-submit-order');
+        await page.waitForFunction(() => document.getElementById('badge-business-status')?.textContent === 'OPEN');
+        await page.$eval('#input-exec-qty', input => { (input as HTMLInputElement).value = '2'; });
+        await page.click('#btn-submit-exec');
+        await page.waitForFunction(() => document.getElementById('badge-business-status')?.textContent === 'PARTIALLY_FILLED');
+        await page.click('#btn-toggle-hold');
+      }
+      await page.$eval('#input-order-qty', (input, value) => { (input as HTMLInputElement).value = String(value); }, quantity);
+      await page.click('#btn-submit-order');
+      await page.waitForFunction(async () => {
+        const state = (window as any).__TARGET_UI__.getState();
+        const obs = await (await fetch('/events')).json();
+        return obs.events.some((e: any) => e.requestId === state.trackedRequestId && e.status === 'rejected');
+      });
+      if (duplicate) {
+        expect(await page.$eval('#badge-business-status', el => el.textContent)).toBe('IDLE');
+        expect(await page.$eval('#disp-filled-qty', el => el.textContent)).toBe('0');
+        expect(await page.$eval('#badge-freshness', el => el.textContent)).toBe('STALE (HELD)');
+        await page.click('#btn-toggle-hold');
+      }
+      await page.waitForFunction(() => document.getElementById('badge-business-status')?.textContent === 'REJECTED');
+      const display = await page.evaluate(async () => {
+        const state = (window as any).__TARGET_UI__.getState();
+        const obs = await (await fetch('/events')).json();
+        const event = obs.events.find((e: any) => e.requestId === state.trackedRequestId);
+        const text = (id: string) => document.getElementById(id)?.textContent;
+        return { event, receipt: text('disp-receipt-id'), feedback: text('feedback-order'), quantity: text('disp-requested-qty'), filled: text('disp-filled-qty'), remaining: text('disp-remaining-qty') };
+      });
+      expect(display.event.status).toBe('rejected');
+      expect(display.event.reason).toBeTruthy();
+      expect(display.receipt).toBe(display.event.receiptId);
+      expect(display.feedback).toBe(`Order rejected: ${display.event.reason}`);
+      expect(display).toMatchObject({ quantity: String(quantity), filled: '0', remaining: String(quantity) });
+    } finally {
+      try { await browser?.close(); } finally { await target.close(); }
+    }
+  }, 30_000);
+
+  it.each([
     ['phase-1-setup.png', 1, false],
     ['phase-2-order-open.png', 2, false],
     ['phase-3-held-stale.png', 2, true],
@@ -61,6 +117,59 @@ describe.skipIf(!enabled)('Real target UI browser journey (opt-in)', () => {
         expect(outcome.evidence.uiObservations.some(o => o.phase === 'while-held')).toBe(true);
       }
     } finally { watcher.close(); }
+  }, 30_000);
+
+  it('cancellation immediately after browser launch prevents setup side effect', async () => {
+    const aborter = new AbortController();
+    const puppeteer = (await import('puppeteer-core')).default;
+    const originalLaunch = puppeteer.launch;
+    puppeteer.launch = async function (...args) {
+      const browser = await originalLaunch.apply(this, args);
+      aborter.abort(new Error('cancel before newPage/navigation/setup'));
+      return browser;
+    };
+    try {
+      const outcome = await runTargetUiBrowserJourney({ signal: aborter.signal });
+      const setupRequests = outcome.evidence.exchanges.filter(e => e.method === 'POST' && e.path === '/setup');
+      expect(outcome.evaluation.status).toBe('cancelled');
+      expect(outcome.evidence.runError?.kind).toBe('cancelled');
+      expect(setupRequests.length).toBe(0);
+    } finally {
+      puppeteer.launch = originalLaunch;
+    }
+  }, 30_000);
+
+  it('cancellation after navigation before setup click prevents setup POST', async () => {
+    const aborter = new AbortController();
+    const puppeteer = (await import('puppeteer-core')).default;
+    const originalLaunch = puppeteer.launch;
+    puppeteer.launch = async function (...args) {
+      const browser = await originalLaunch.apply(this, args);
+      const originalNewPage = browser.newPage.bind(browser);
+      browser.newPage = async function () {
+        const page = await originalNewPage();
+        const originalWaitFor = page.waitForFunction.bind(page);
+        page.waitForFunction = async function (...wArgs: any[]) {
+          const res = await (originalWaitFor as any)(...wArgs);
+          const id = await page.evaluate(() => document.getElementById('display-instance-id')?.textContent?.trim());
+          if (id && id !== '-') {
+            aborter.abort(new Error('cancel after navigation before setup click'));
+          }
+          return res;
+        };
+        return page;
+      };
+      return browser;
+    };
+    try {
+      const outcome = await runTargetUiBrowserJourney({ signal: aborter.signal });
+      const setupRequests = outcome.evidence.exchanges.filter(e => e.method === 'POST' && e.path === '/setup');
+      expect(outcome.evaluation.status).toBe('cancelled');
+      expect(outcome.evidence.runError?.kind).toBe('cancelled');
+      expect(setupRequests.length).toBe(0);
+    } finally {
+      puppeteer.launch = originalLaunch;
+    }
   }, 30_000);
 });
 

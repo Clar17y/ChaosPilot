@@ -124,4 +124,81 @@ describe('Target UI server routes (provenance-first validation)', () => {
     server = undefined;
     app = undefined;
   });
+
+  it('disconnect during selection resolution aborts and avoids starting session or journey factories', async () => {
+    await start();
+    const port = (server!.address() as import('node:net').AddressInfo).port;
+    for (const route of ['/api/target-ui/session', '/api/target-ui/journey']) {
+      let resolverEntered!: () => void;
+      const enteredPromise = new Promise<void>(r => { resolverEntered = r; });
+      let releaseResolver!: () => void;
+      const releasePromise = new Promise<void>(r => { releaseResolver = r; });
+      let factoryCalled = false;
+      let closed!: () => void;
+      const responseClosed = new Promise<void>(resolve => { closed = resolve; });
+      let completed!: () => void;
+      const handlerCompleted = new Promise<void>(resolve => { completed = resolve; });
+      const sendJson = (app as any).sendJson;
+      (app as any).sendJson = function (...args: any[]) {
+        sendJson.apply(this, args);
+        completed();
+      };
+      server!.once('request', (_req, res) => res.once('close', closed));
+
+      (app as any).resolveTargetUiContext = async () => {
+        resolverEntered();
+        await releasePromise;
+        return { ok: true, variant: 'clean', provenance: undefined };
+      };
+      (app as any).targetUiSessionManager.createSession = async () => {
+        factoryCalled = true;
+        return { sessionId: 'test', instanceId: 'inst', endpoint: 'http://127.0.0.1:1' } as any;
+      };
+      (app as any).targetUiSessionManager.runJob = async () => {
+        factoryCalled = true;
+        return {} as any;
+      };
+
+      const req = http.request({
+        host: '127.0.0.1', port, path: route, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': 2 },
+      });
+      req.on('error', () => {});
+      req.end('{}');
+      await enteredPromise;
+      req.destroy();
+      await responseClosed;
+      releaseResolver();
+      await handlerCompleted;
+      (app as any).sendJson = sendJson;
+
+      expect(factoryCalled).toBe(false);
+      expect(app!.targetUiSessionManager.diagnostics()).toMatchObject({ activeSessions: 0, activeJobs: 0 });
+    }
+  });
+
+  it('releases disconnect cancellation listeners on validation error, 415, and success', async () => {
+    const base = await start();
+    let resCloseListeners = -1;
+    server!.on('request', (_req, res) => {
+      res.on('finish', () => {
+        resCloseListeners = res.listenerCount('close');
+      });
+    });
+
+    // 415
+    await fetch(`${base}/api/target-ui/session`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hi' });
+    expect(resCloseListeners).toBe(0);
+
+    // 400
+    await post(base, '/api/target-ui/session', { bad: 'body' });
+    expect(resCloseListeners).toBe(0);
+
+    // 201
+    const create = await post(base, '/api/target-ui/session', selection);
+    expect(create.status).toBe(201);
+    expect(resCloseListeners).toBe(0);
+    const { session } = (await create.json()) as any;
+    await fetch(`${base}/api/target-ui/session/${session.sessionId}`, { method: 'DELETE' });
+  });
 });
