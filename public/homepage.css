@@ -506,10 +506,12 @@ h1 {
 
 .catalog ul {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: 8px 24px;
   padding-left: 18px;
   margin: 0 0 12px;
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .catalog li {
@@ -517,6 +519,8 @@ h1 {
   margin: 4px 0;
   font-size: 13.5px;
   line-height: 1.5;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .catalog li strong {
@@ -642,6 +646,15 @@ h1 {
   }
 
   .catalog {
-    margin: 0 20px 36px;
+    margin: 0 16px 36px;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    max-width: calc(100% - 32px);
+  }
+
+  .catalog ul {
+    grid-template-columns: 1fr;
+    padding-left: 18px;
+    margin: 0 0 12px;
   }
 }

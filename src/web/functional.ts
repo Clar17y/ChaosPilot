@@ -1,5 +1,6 @@
 import type { FunctionalCatalogItem, FunctionalRunRecord, FunctionalRunSummary } from '../functional/types.ts';
 import { functionalExecutionBlockedReason, functionalRunOutcomeLabel, partitionFunctionalRuns, type FunctionalGuardState } from './workspace.ts';
+import { renderAssertionTable } from './evidence-table.ts';
 
 export interface FunctionalContext extends Omit<FunctionalGuardState, 'isFunctionalRunPending'> {
   systemId: string | null;
@@ -106,9 +107,8 @@ export function functionalResultHtml(record: FunctionalRunRecord): string {
     <details><summary>Pinned brief, contract, target source and evaluator provenance</summary>${raw({ sourceHash: record.sourceHash, evaluator: record.evaluator,
       startedAt: record.startedAt, finishedAt: record.finishedAt, systemBrief: record.systemBrief, systemSnapshot: record.systemSnapshot, contract: record.contract })}</details>
     ${record.scenarios.map(s => `<article class="card"><h3>${escapeHtml(s.name)} — ${escapeHtml(functionalRunOutcomeLabel(s.status))}</h3><p>${escapeHtml(s.summary)}</p>
-      <div style="overflow:auto"><table><thead><tr><th>Status</th><th>Assertion</th><th>Expected</th><th>Actual</th><th>Detail</th></tr></thead><tbody>
-      ${s.assertions.map(a => `<tr><td>${escapeHtml(a.status)}</td><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.expected)}</td><td>${escapeHtml(a.actual)}</td><td>${escapeHtml(a.detail)}</td></tr>`).join('')}
-      </tbody></table></div><details><summary>Complete scenario evidence: expected checks, sequence, trace, rejection, oracle and configured rules</summary>${raw(s)}</details></article>`).join('')}`;
+      ${renderAssertionTable(s.assertions, { label: `${s.name} baseline assertions`, observedColumnName: 'Actual', includeDetail: true })}
+      <details><summary>Complete scenario evidence: expected checks, sequence, trace, rejection, oracle and configured rules</summary>${raw(s)}</details></article>`).join('')}`;
 }
 
 export function initFunctionalWorkspaceView(onTargetChange: (variant: string) => void): FunctionalController {
@@ -133,9 +133,15 @@ export function initFunctionalWorkspaceView(onTargetChange: (variant: string) =>
     if (state.historyError || !state.history.length) history.textContent = state.historyError ?? 'No saved functional runs for this profile.';
     for (const record of state.history) {
       const row = document.createElement('p');
+      row.className = 'history-item-row';
       row.textContent = `${record.startedAt} · ${record.systemBrief.id} rev ${record.systemBrief.revision} · ${record.variant} · ${functionalRunOutcomeLabel(record.status)} `;
-      const open = document.createElement('button'); open.textContent = 'Open'; open.type = 'button';
-      open.addEventListener('click', () => { void controller.open(record.id); }); row.append(open); history.append(row);
+      const open = document.createElement('button');
+      open.textContent = 'Open';
+      open.type = 'button';
+      open.className = 'btn btn-secondary btn-xs';
+      open.addEventListener('click', () => { void controller.open(record.id); });
+      row.append(open);
+      history.append(row);
     }
     el('functional-results-card')!.classList.toggle('hidden', !state.record);
     el('functional-scenarios-container')!.innerHTML = state.record ? functionalResultHtml(state.record) : '';
@@ -150,7 +156,37 @@ export function initFunctionalWorkspaceView(onTargetChange: (variant: string) =>
   void fetch('/api/functional/catalog').then(async response => {
     if (!response.ok) throw new Error('Catalog unavailable');
     const items = await response.json() as FunctionalCatalogItem[];
-    el('functional-catalog-list')!.textContent = items.map(i => `${i.name}: ${i.description}`).join('\n\n');
-  }).catch(() => { el('functional-catalog-list')!.textContent = 'Scenario catalog unavailable.'; });
+    const list = el('functional-catalog-list')!;
+    list.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'No baseline scenarios available.';
+      list.append(empty);
+    } else {
+      for (const item of items) {
+        const itemEl = document.createElement('article');
+        itemEl.className = 'catalog-item';
+        const title = document.createElement('h3');
+        title.className = 'catalog-item-title';
+        title.textContent = item.name;
+        const desc = document.createElement('p');
+        desc.className = 'catalog-item-desc';
+        desc.textContent = item.description;
+        itemEl.append(title);
+        itemEl.append(desc);
+        list.append(itemEl);
+      }
+    }
+  }).catch(() => {
+    const list = el('functional-catalog-list');
+    if (list) {
+      list.replaceChildren();
+      const err = document.createElement('p');
+      err.className = 'muted';
+      err.textContent = 'Scenario catalog unavailable.';
+      list.append(err);
+    }
+  });
   return controller;
 }

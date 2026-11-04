@@ -1,5 +1,8 @@
 import type { ApiJourneyRecord, ApiJourneySummary, Comparison } from '../target-api/types.ts';
 import type { SnapshotLoadState, TargetLoadState } from './workspace.ts';
+import { outcomeBadgeClass, renderEvidenceValue } from './evidence-table.ts';
+
+export { outcomeBadgeClass };
 
 export interface TargetApiContext {
   systemId: string | null;
@@ -38,22 +41,6 @@ export function targetApiBlockedReason(context: TargetApiContext | null, isPendi
   if (context.snapshotState !== 'ready') return 'System snapshot not ready';
   if (context.targetState !== 'ready' || !context.selectedVariant) return 'Select a valid target variant';
   return null;
-}
-
-export function outcomeBadgeClass(status: string): string {
-  switch (status.toLowerCase()) {
-    case 'pass':
-    case 'match':
-      return 'badge-pass';
-    case 'fail':
-    case 'different':
-      return 'badge-fail';
-    case 'blocked':
-    case 'cancelled':
-      return 'badge-blocked';
-    default:
-      return 'badge-inconclusive';
-  }
 }
 
 const escapeHtml = (s: string) =>
@@ -118,8 +105,8 @@ export function targetApiResultHtml(record: ApiJourneyRecord, comparison: Compar
           <tr>
             <td><span class="system-badge ${outcomeBadgeClass(a.status)}">${escapeHtml(a.status.toUpperCase())}</span></td>
             <td><code>${escapeHtml(a.id)}</code></td>
-            <td><code>${escapeHtml(JSON.stringify(a.expected))}</code></td>
-            <td><code>${escapeHtml(JSON.stringify(a.observed))}</code></td>
+            <td>${renderEvidenceValue(a.expected)}</td>
+            <td>${renderEvidenceValue(a.observed)}</td>
           </tr>
         `,
         )
@@ -152,8 +139,8 @@ export function targetApiResultHtml(record: ApiJourneyRecord, comparison: Compar
             ${passedCount}/${j.assertions.length} assertions passed &bull; ${j.exchanges.length} HTTP exchanges on loopback target
           </p>
           ${errorHtml}
-          <div style="overflow-x:auto;margin:8px 0;">
-            <table class="data-table" style="width:100%;font-size:12px;border-collapse:collapse;">
+          <div class="table-scroll-region" tabindex="0" role="region" aria-label="Journey ${escapeHtml(j.id)} assertions" style="margin:8px 0;">
+            <table class="data-table assertion-table" style="width:100%;font-size:12px;border-collapse:collapse;">
               <thead>
                 <tr>
                   <th style="text-align:left;width:90px;">Status</th>

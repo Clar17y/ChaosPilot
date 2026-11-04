@@ -11,6 +11,7 @@ import type {
   RegressionRunSummary,
 } from '../regressions/types.ts';
 import { challengeRecordHash } from './challenges.ts';
+import { renderAssertionTable } from './evidence-table.ts';
 import {
   functionalRunOutcomeLabel,
   partitionRegressionDefinitions,
@@ -784,24 +785,11 @@ export function regressionRunResultHtml(
     <p><strong>Intentional target execution (not historical replay):</strong> Executed against selected target <code>${escapeHtml(record.variant)}</code> (executing source <code>${escapeHtml(record.sourceHash)}</code>, expected executing source <code>${escapeHtml(record.expectedSourceHash)}</code>) · Original finding lineage was <code>${escapeHtml(record.origin.variant)}</code> (lineage source <code>${escapeHtml(record.origin.sourceHash)}</code> from run <code>${escapeHtml(record.origin.runId)}</code>).</p>
     ${revDiffNotice}
     <p>${escapeHtml(record.evaluation.summary)}</p>
-    <div style="overflow:auto">
-      <table>
-        <thead><tr><th>Status</th><th>Assertion</th><th>Expected</th><th>Actual</th><th>Detail</th></tr></thead>
-        <tbody>
-          ${record.evaluation.assertions
-            .map(
-              a => `<tr>
-            <td>${escapeHtml(a.status)}</td>
-            <td>${escapeHtml(a.name)}</td>
-            <td>${escapeHtml(a.expected)}</td>
-            <td>${escapeHtml(a.actual)}</td>
-            <td>${escapeHtml(a.detail)}</td>
-          </tr>`,
-            )
-            .join('')}
-        </tbody>
-      </table>
-    </div>
+    ${renderAssertionTable(record.evaluation.assertions, {
+      label: `Regression ${record.definitionId} execution assertions`,
+      observedColumnName: 'Actual',
+      includeDetail: true,
+    })}
     <details data-disclosure-key="run-provenance-${escapeHtml(record.id)}">
       <summary>Executing target provenance, original finding lineage and evaluator identity</summary>
       ${raw({
@@ -1028,6 +1016,7 @@ export function initRegressionWorkspaceView(options: {
               row.textContent = `${def.id} · ${def.title} (${def.invariant}) · orig ${def.origin.variant}${revNote} · ${originNote}${latestNote} `;
               const inspectBtn = document.createElement('button');
               inspectBtn.type = 'button';
+              inspectBtn.className = 'btn btn-secondary btn-xs';
               inspectBtn.textContent = 'Inspect definition';
               inspectBtn.addEventListener('click', () => {
                 void controller.openDefinition(def.id);
@@ -1088,6 +1077,7 @@ export function initRegressionWorkspaceView(options: {
               row.textContent = `${run.startedAt} · def ${run.definitionId} (orig rev ${run.origin.systemBrief.revision}, orig ${run.origin.variant}) → target ${run.variant} (source ${run.sourceHash.slice(0, 10)}) · ${functionalRunOutcomeLabel(run.status)} `;
               const openBtn = document.createElement('button');
               openBtn.type = 'button';
+              openBtn.className = 'btn btn-secondary btn-xs';
               openBtn.textContent = 'Open';
               openBtn.addEventListener('click', () => {
                 void controller.openRun(run.id);

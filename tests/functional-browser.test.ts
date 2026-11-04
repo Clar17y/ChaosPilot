@@ -4,7 +4,7 @@ import { initFunctionalWorkspaceView, type FunctionalContext } from '../src/web/
 
 // Minimal DOM surface used by this view, consistent with the repository's UI test pattern.
 class Element {
-  value = ''; textContent = ''; innerHTML = ''; disabled = false; title = ''; type = '';
+  value = ''; textContent = ''; innerHTML = ''; disabled = false; title = ''; type = ''; className = '';
   children: Element[] = [];
   classes = new Set<string>();
   classList = { toggle: (name: string, force: boolean) => { if (force) this.classes.add(name); else this.classes.delete(name); } };
@@ -57,5 +57,36 @@ describe('functional production browser bindings', () => {
       'targetState: effectiveTargetState()', 'snapshotState: effectiveSnapshotState()', 'allowedVariants: scopedVariants()', 'selectedVariant: targetSelection.selection']) expect(app).toContain(field);
     expect(workspace).not.toContain('document.');
     expect(workspace).not.toContain('fetch(');
+  });
+
+  it('renders distinct titled items for scenario catalog instead of a text wall', async () => {
+    const elements = new Map<string, Element>();
+    const el = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
+    vi.stubGlobal('document', { getElementById: el, createElement: () => new Element() });
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url === '/api/functional/catalog') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { id: 'scen-1', name: 'Order Placement', description: 'Tests valid order admission' },
+            { id: 'scen-2', name: 'Credit Limit Exhaustion', description: 'Rejects order exceeding credit limit' },
+          ],
+        };
+      }
+      return { ok: true, status: 200, json: async () => [] };
+    });
+
+    initFunctionalWorkspaceView(() => {});
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const catalogList = el('functional-catalog-list');
+    expect(catalogList.children.length).toBe(2);
+    const item1 = catalogList.children[0]!;
+    expect(item1.className).toBe('catalog-item');
+    expect(item1.children[0]!.className).toBe('catalog-item-title');
+    expect(item1.children[0]!.textContent).toBe('Order Placement');
+    expect(item1.children[1]!.className).toBe('catalog-item-desc');
+    expect(item1.children[1]!.textContent).toBe('Tests valid order admission');
   });
 });

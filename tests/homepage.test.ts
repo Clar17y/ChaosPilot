@@ -92,4 +92,11 @@ describe('homepage HTTP routes', () => {
       const res = await request(server, p); expect(res.status, p).toBe(404);
     }
   });
+
+  it('bounds example catalog layout on narrow viewports without horizontal overflow', async () => {
+    const css = (await request(server, '/homepage.css')).body.toString('utf8');
+    expect(css).toContain('.catalog ul');
+    expect(css).toContain('grid-template-columns: 1fr');
+    expect(css).toContain('overflow-wrap: break-word');
+  });
 });
