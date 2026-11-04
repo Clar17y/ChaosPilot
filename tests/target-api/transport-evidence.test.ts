@@ -85,6 +85,7 @@ it.each(['non-json', 'abort', 'deadline'] as const)('runner retains exactly one 
   for (const value of [null, { ...e.transportFailure, capturedBytes: -1 }, { ...e.transportFailure, preview: 'invented' }]) {
     const bad = structuredClone(noHeaders); bad.journeys[0]!.exchanges[0]!.transportFailure = value as any; seal(bad); expect(isValidApiJourneyRecord(bad)).toBe(false);
   }
+  await fs.mkdir('.llm-output/pr37-transport-fix', { recursive: true });
   if (mode === 'deadline') await fs.writeFile('.llm-output/pr37-transport-fix/actual-no-response-record.json', JSON.stringify(record, null, 2));
   if (mode === 'non-json') await fs.writeFile('.llm-output/pr37-transport-fix/actual-failing-record.json', JSON.stringify(record, null, 2));
 });

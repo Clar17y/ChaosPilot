@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthetic Trading Target Terminal</title>
+  <link rel="stylesheet" href="/target-ui.css">
+</head>
+<body class="target-terminal-body">
+  <header class="terminal-header">
+    <div class="terminal-brand">
+      <div class="terminal-logo-indicator" aria-hidden="true"></div>
+      <div>
+        <h1 class="terminal-title">SYNTHETIC TARGET TRADING TERMINAL</h1>
+        <p class="terminal-subtitle">Loopback Isolated Exchange Interface · Exact Numeric Authority</p>
+      </div>
+    </div>
+    <div class="terminal-status-cluster" aria-label="Target System Diagnostics">
+      <div class="status-chip">
+        <span class="chip-label">ENDPOINT</span>
+        <span class="chip-value" id="display-endpoint">connecting…</span>
+      </div>
+      <div class="status-chip">
+        <span class="chip-label">INSTANCE</span>
+        <span class="chip-value mono" id="display-instance-id">-</span>
+      </div>
+      <div class="status-chip">
+        <span class="chip-label">FRESHNESS</span>
+        <span class="badge badge-fresh" id="badge-freshness">FRESH</span>
+      </div>
+      <div class="status-chip">
+        <span class="chip-label">AGE</span>
+        <span class="chip-value" id="display-age">0ms</span>
+      </div>
+      <div class="status-chip">
+        <span class="chip-label">HORIZON</span>
+        <span class="chip-value" id="display-upstream">P: 0 / Q: 0</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="terminal-main">
+    <!-- Notice / Alert Banner -->
+    <div id="terminal-alert" class="terminal-alert hidden" role="alert" aria-live="polite">
+      <span class="alert-icon">⚠️</span>
+      <span id="terminal-alert-text"></span>
+    </div>
+
+    <div class="terminal-grid">
+      <!-- Left Column: Operations -->
+      <section class="terminal-column" aria-labelledby="heading-operations">
+        <h2 id="heading-operations" class="section-heading">OPERATIONS &amp; COMMANDS</h2>
+
+        <!-- 1. Setup Card -->
+        <article class="terminal-card" id="card-setup">
+          <div class="card-header">
+            <span class="card-step-badge">1</span>
+            <h3 class="card-title">Setup Environment (POST /setup)</h3>
+          </div>
+          <p class="card-desc">Initialize credit line and quotes. Transport receipt is 202 queued.</p>
+          <div class="form-row">
+            <label for="input-setup-limit" class="form-label">Credit Limit (1-1000)</label>
+            <input type="number" id="input-setup-limit" class="terminal-input" min="1" max="1000" value="100" required>
+          </div>
+          <div class="card-actions">
+            <button type="button" class="terminal-btn btn-primary" id="btn-submit-setup">Initialize Setup</button>
+            <span class="action-feedback" id="feedback-setup" aria-live="polite"></span>
+          </div>
+        </article>
+
+        <!-- 2. Order Card -->
+        <article class="terminal-card" id="card-order">
+          <div class="card-header">
+            <span class="card-step-badge">2</span>
+            <h3 class="card-title">Submit Order (POST /orders)</h3>
+          </div>
+          <p class="card-desc">Dispatches an order to the synthetic venue. Transport acknowledgement precedes business acceptance.</p>
+          <div class="form-grid">
+            <div class="form-row">
+              <label for="input-order-id" class="form-label">Order ID</label>
+              <input type="text" id="input-order-id" class="terminal-input mono" value="order-1" required>
+            </div>
+            <div class="form-row">
+              <label for="input-order-qty" class="form-label">Quantity (1-1000)</label>
+              <input type="number" id="input-order-qty" class="terminal-input" min="1" max="1000" value="10" required>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button type="button" class="terminal-btn btn-primary" id="btn-submit-order">Submit Order</button>
+            <span class="action-feedback" id="feedback-order" aria-live="polite"></span>
+          </div>
+        </article>
+
+        <!-- 3. Fill Simulation Card -->
+        <article class="terminal-card" id="card-execution">
+          <div class="card-header">
+            <span class="card-step-badge">3</span>
+            <h3 class="card-title">Simulate Fill (POST /executions)</h3>
+          </div>
+          <p class="card-desc">Simulate venue execution fill against an accepted order.</p>
+          <div class="form-grid">
+            <div class="form-row">
+              <label for="input-exec-order-id" class="form-label">Order ID</label>
+              <input type="text" id="input-exec-order-id" class="terminal-input mono" value="order-1" required>
+            </div>
+            <div class="form-row">
+              <label for="input-exec-id" class="form-label">Execution ID</label>
+              <input type="text" id="input-exec-id" class="terminal-input mono" value="exec-1" required>
+            </div>
+            <div class="form-row span-2">
+              <label for="input-exec-qty" class="form-label">Fill Quantity</label>
+              <input type="number" id="input-exec-qty" class="terminal-input" min="1" max="1000" value="10" required>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button type="button" class="terminal-btn btn-secondary" id="btn-submit-exec">Simulate Fill</button>
+            <span class="action-feedback" id="feedback-exec" aria-live="polite"></span>
+          </div>
+        </article>
+
+        <!-- 4. Freshness & Polling Controls -->
+        <article class="terminal-card" id="card-freshness-controls">
+          <div class="card-header">
+            <span class="card-step-badge">⚙</span>
+            <h3 class="card-title">Freshness Policy &amp; Polling Control</h3>
+          </div>
+          <p class="card-desc">Simulate delayed UI updates. Holding updates tests stale state labeling while underlying target runs.</p>
+          <div class="card-actions">
+            <button type="button" class="terminal-btn btn-warning" id="btn-toggle-hold" aria-pressed="false">Hold Updates (Simulate Stale)</button>
+            <button type="button" class="terminal-btn" id="btn-poll-now">Poll Target Now</button>
+          </div>
+          <div class="freshness-info-row">
+            <span>Freshness rule threshold: <strong id="val-freshness-threshold">2000ms</strong></span>
+            <span id="label-hold-status" class="hold-indicator">Updates: Active</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- Right Column: Business Inspection & Wire Correlation -->
+      <section class="terminal-column" aria-labelledby="heading-inspection">
+        <h2 id="heading-inspection" class="section-heading">STATE &amp; CORRELATION</h2>
+
+        <!-- Active Order Display -->
+        <article class="terminal-card order-display-card" id="card-order-display">
+          <div class="card-header space-between">
+            <div>
+              <span class="card-tag">ACTIVE ORDER</span>
+              <h3 class="card-title mono" id="disp-order-id">No Order Submitted</h3>
+            </div>
+            <div class="badge-cluster">
+              <span class="status-badge badge-idle" id="badge-business-status">IDLE</span>
+              <span class="freshness-subbadge" id="badge-order-freshness">FRESH</span>
+            </div>
+          </div>
+
+          <!-- Transport vs Business status split -->
+          <div class="protocol-split-grid">
+            <div class="protocol-box transport-box">
+              <div class="protocol-title">TRANSPORT LAYER (HTTP 202)</div>
+              <div class="protocol-row">
+                <span class="protocol-key">Transport Status:</span>
+                <span class="protocol-val bold" id="disp-transport-status">NONE</span>
+              </div>
+              <div class="protocol-row">
+                <span class="protocol-key">Receipt ID:</span>
+                <span class="protocol-val mono small" id="disp-receipt-id">-</span>
+              </div>
+              <div class="protocol-row">
+                <span class="protocol-key">Sequence #:</span>
+                <span class="protocol-val mono" id="disp-receipt-seq">-</span>
+              </div>
+            </div>
+
+            <div class="protocol-box business-box">
+              <div class="protocol-title">BUSINESS LAYER (SETTLED STATE)</div>
+              <div class="protocol-row">
+                <span class="protocol-key">Business Status:</span>
+                <span class="protocol-val bold" id="disp-business-status-text">IDLE</span>
+              </div>
+              <div class="protocol-row">
+                <span class="protocol-key">Requested Qty:</span>
+                <span class="protocol-val mono" id="disp-requested-qty">0</span>
+              </div>
+              <div class="protocol-row">
+                <span class="protocol-key">Filled Qty:</span>
+                <span class="protocol-val mono highlight" id="disp-filled-qty">0</span>
+              </div>
+              <div class="protocol-row">
+                <span class="protocol-key">Remaining Qty:</span>
+                <span class="protocol-val mono" id="disp-remaining-qty">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Credit Snapshot -->
+          <div class="credit-snapshot-grid">
+            <div class="credit-stat">
+              <span class="stat-label">CREDIT LIMIT</span>
+              <span class="stat-num" id="disp-credit-limit">-</span>
+            </div>
+            <div class="credit-stat">
+              <span class="stat-label">RESERVED CREDIT</span>
+              <span class="stat-num" id="disp-credit-reserved">-</span>
+            </div>
+            <div class="credit-stat">
+              <span class="stat-label">USED CREDIT</span>
+              <span class="stat-num" id="disp-credit-used">-</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Correlated Events & Wire Stream -->
+        <article class="terminal-card" id="card-event-stream">
+          <div class="card-header space-between">
+            <h3 class="card-title">Correlated Wire Exchanges &amp; Business Events</h3>
+            <button type="button" class="terminal-btn btn-small" id="btn-export-evidence">Export Evidence (JSON)</button>
+          </div>
+          <div class="table-container" tabindex="0" role="region" aria-label="Wire Exchanges and Events">
+            <table class="terminal-table" id="table-events">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Request ID</th>
+                  <th scope="col">Receipt ID</th>
+                  <th scope="col">HTTP</th>
+                  <th scope="col">Business</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-events">
+                <tr>
+                  <td colspan="7" class="table-empty">No exchanges or events observed yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </div>
+  </main>
+
+  <footer class="terminal-footer">
+    <p>Target UI Journey · Synthetic Trading Target · Loopback Ephemeral 127.0.0.1 Boundary</p>
+  </footer>
+
+  <script type="module" src="/target-ui.js"></script>
+</body>
+</html>
