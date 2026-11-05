@@ -6,6 +6,14 @@ Built from scratch for the Meta Global AI Developer Hackathon, 26 October–4 No
 
 **A scripted mock is included for offline development. Its results are not evidence of autonomous AI defect discovery.** Live investigations require a separately configured Meta Model API key. A Muse Code subscription does not provide application API credentials.
 
+## Three-minute overview
+
+A silent, on-screen-text tour of ChaosPilot's investigation workflow, from a system brief to replay and a clean comparison. The animated examples are illustrative.
+
+https://github.com/user-attachments/assets/9aa60739-77a3-42a6-9968-f64761764645
+
+[Video source, storyboard, and render instructions](video/README.md).
+
 ## Quick start
 
 Requires Node.js 24 or later and npm.
