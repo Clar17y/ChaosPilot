@@ -2,6 +2,8 @@
 
 A self-contained Remotion project that renders a polished, deterministic, 180-second (3-minute) motion graphics overview of **ChaosPilot**, an investigation workbench for negative scenarios in event-driven software.
 
+[Watch the published overview](https://github.com/user-attachments/assets/9aa60739-77a3-42a6-9968-f64761764645). The hosted copy preserves the full duration, 1080p resolution, and 30 fps with additional compression to fit GitHub's attachment limit.
+
 ## Technical Specifications
 
 - **Duration:** Exactly 180 seconds (3 minutes) / 5400 frames
